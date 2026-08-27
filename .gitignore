@@ -1,0 +1,16 @@
+# OpenCode plugin runtime
+.opencode/node_modules/
+.opencode/package.json
+.opencode/package-lock.json
+.opencode/bun.lock
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Superpowers workspaces
+.superpowers/
+.worktrees/
+
+# OS
+.DS_Store
+Thumbs.db

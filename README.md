@@ -7,9 +7,9 @@ configurations for AI-assisted software development.
 
 A collection of reusable components for teams using AI coding agents:
 
-- **Linux workstation installer** — a single script that provisions an Ubuntu 24.04 WSL2 machine
+- **Linux workstation installer** — a single script that provisions a Debian/Ubuntu machine
   with mise-managed language runtimes, three agent CLIs (OpenCode, Claude Code, Codex), OpenSpec,
-  and Superpowers.
+  and Superpowers. Ubuntu under WSL2 is the reference and tested environment.
 - **Shared `AGENTS.md` pattern** — a template and adapter set that lets one canonical instructions
   file serve Claude Code, Codex, and OpenCode simultaneously.
 - **OpenCode model-routing bundle** — a starter configuration that assigns models to OpenCode's
@@ -37,7 +37,7 @@ agentic-dev-toolkit/
   README.md                                        # This file
   environments/
     linux/
-      install.sh                                   # Ubuntu 24.04 WSL2 workstation provisioner
+      install.sh                                   # Debian/Ubuntu workstation provisioner
   instructions/
     AGENTS.md                                      # Template: canonical agent instructions
     adapters/

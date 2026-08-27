@@ -2,7 +2,6 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-readonly SCRIPT_VERSION="1.3.0"
 readonly SCRIPT_NAME="${0##*/}"
 readonly MISE_INSTALL_URL="https://mise.run"
 readonly OPENCODE_INSTALL_URL="https://opencode.ai/install"
@@ -16,7 +15,6 @@ SKIP_PLATFORM_CHECK=0
 REMOVE_APT_NODE=0
 REPAIR_CODEX=0
 PROJECT_PATH=""
-IS_WSL=0
 
 SKIP_RUNTIMES=0
 SKIP_OPENCODE=0
@@ -224,10 +222,6 @@ parse_args() {
   (( REPAIR_CODEX == 0 || SKIP_CODEX == 0 )) || die "--repair-codex cannot be combined with --skip-codex"
 }
 
-is_wsl() {
-  [[ -n "${WSL_DISTRO_NAME:-}" ]] || grep -qiE '(microsoft|wsl)' /proc/sys/kernel/osrelease /proc/version 2>/dev/null
-}
-
 validate_environment() {
   if [[ "${ADT_SETUP_ALLOW_ROOT_FOR_TESTS:-0}" != "1" ]]; then
     [[ "${EUID:-$(id -u)}" -ne 0 ]] || die "Run this script as your normal user, not as root."
@@ -250,11 +244,6 @@ validate_environment() {
     fi
   fi
 
-  IS_WSL=0
-  if is_wsl; then
-    IS_WSL=1
-  fi
-
   if (( VERIFY_ONLY == 0 && DRY_RUN == 0 )); then
     command -v apt-get >/dev/null 2>&1 || die "apt-get is required"
     command -v sudo >/dev/null 2>&1 || die "sudo is required"
@@ -270,7 +259,7 @@ install_system_packages() {
     zlib1g-dev
   )
 
-  log "Installing Ubuntu prerequisites"
+  log "Installing Debian/Ubuntu prerequisites"
   run_sudo apt-get update
   run_sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y "${packages[@]}"
 

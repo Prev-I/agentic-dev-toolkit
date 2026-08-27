@@ -59,7 +59,7 @@ export OPENCODE_ENABLE_EXA=true
 
 Add this to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.) for persistence. No API key is required — the tool connects directly to Exa AI's hosted MCP service without authentication.
 
-If you use the [agentic-dev-toolkit installer](../../../environments/linux/install.sh) (v1.3.0+), this variable is set automatically in the managed `~/.bashrc` block.
+If you use the [agentic-dev-toolkit installer](../../../environments/linux/install.sh), this variable is set automatically in the managed `~/.bashrc` block.
 
 ## 3. Install the custom agents and routing policy
 

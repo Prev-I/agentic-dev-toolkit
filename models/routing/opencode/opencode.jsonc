@@ -1,0 +1,82 @@
+{
+  // OpenCode multi-model routing configuration
+  "$schema": "https://opencode.ai/config.json",
+
+  // Global instruction files loaded into every session
+  "instructions": [
+    ".opencode/model-routing.md"
+  ],
+
+  // Baseline model applied when no agent override matches
+  "model": "github-copilot/claude-opus-4.6",
+
+  "permission": {
+    // Web search via Exa AI — requires OPENCODE_ENABLE_EXA=true in the environment
+    "websearch": "allow"
+  },
+
+  "agents": {
+    // ── Primary work agents (Opus family) ──────────────────────────
+
+    "plan": {
+      // Architectural planning and task decomposition
+      "mode": "primary",
+      "model": "github-copilot/claude-opus-4.6",
+      "variant": "max",
+      "permission": {
+        "edit": "deny",
+        "task": "allow",
+        "bash": "ask"
+      }
+    },
+
+    "build": {
+      // Hands-on code generation and modification
+      "mode": "primary",
+      "model": "github-copilot/claude-opus-4.6",
+      "variant": "high",
+      "permission": {
+        "edit": "allow",
+        "task": "allow",
+        "bash": {
+          "default": "allow",
+          "deny": ["git push"]
+        }
+      }
+    },
+
+    "general": {
+      // Catch-all for tasks that do not fit plan or build
+      "model": "github-copilot/claude-opus-4.6",
+      "variant": "xhigh"
+    },
+
+    // ── Navigation and analysis agents (Codex family) ──────────────
+
+    "explore": {
+      // Codebase discovery, search, and context gathering
+      "model": "github-copilot/gpt-5.3-codex",
+      "variant": "high"
+    },
+
+    "scout": {
+      // Targeted lookup and fact-finding across repositories
+      "model": "github-copilot/gpt-5.3-codex",
+      "variant": "high"
+    },
+
+    // ── Lightweight utility agents (Codex family) ──────────────────
+
+    "compaction": {
+      "model": "github-copilot/gpt-5.3-codex"
+    },
+
+    "title": {
+      "model": "github-copilot/gpt-5.3-codex"
+    },
+
+    "summary": {
+      "model": "github-copilot/gpt-5.3-codex"
+    }
+  }
+}

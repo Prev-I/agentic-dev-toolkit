@@ -9,12 +9,11 @@ permission:
   task: deny
   skill: allow
   bash:
-    default: deny
-    allow:
-      - git status
-      - git diff
-      - git log
-      - git show
+    "*": deny
+    "git status*": allow
+    "git diff*": allow
+    "git log*": allow
+    "git show*": allow
 ---
 
 # Reviewer

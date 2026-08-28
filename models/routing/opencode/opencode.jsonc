@@ -15,7 +15,7 @@
     "websearch": "allow"
   },
 
-  "agents": {
+  "agent": {
     // ── Primary work agents (Opus family) ──────────────────────────
 
     "plan": {
@@ -39,8 +39,8 @@
         "edit": "allow",
         "task": "allow",
         "bash": {
-          "default": "allow",
-          "deny": ["git push"]
+          "*": "allow",
+          "git push*": "deny"
         }
       }
     },

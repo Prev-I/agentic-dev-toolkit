@@ -250,17 +250,35 @@ validate_environment() {
   fi
 }
 
+select_lttng_package() {
+  if apt-cache show liblttng-ust1t64 >/dev/null 2>&1; then
+    printf '%s\n' "liblttng-ust1t64"
+  elif apt-cache show liblttng-ust1 >/dev/null 2>&1; then
+    printf '%s\n' "liblttng-ust1"
+  else
+    die "Neither liblttng-ust1t64 nor liblttng-ust1 is available from configured APT sources."
+  fi
+}
+
 install_system_packages() {
   local packages=(
     bash-completion build-essential ca-certificates curl gawk git gnupg jq
     openssh-client pkg-config ripgrep tar unzip xz-utils zip
     libbz2-dev libffi-dev libicu-dev libkrb5-3 liblzma-dev libncursesw5-dev
-    libreadline-dev libsqlite3-dev libssl-dev liblttng-ust1t64 tk-dev uuid-dev
+    libreadline-dev libsqlite3-dev libssl-dev tk-dev uuid-dev
     zlib1g-dev
   )
+  local lttng_package
 
   log "Installing Debian/Ubuntu prerequisites"
   run_sudo apt-get update
+  if (( DRY_RUN == 1 )); then
+    info "Dry-run leaves the distro-specific LTTng package unresolved: liblttng-ust1t64 or liblttng-ust1."
+    lttng_package="<liblttng-ust1t64-or-liblttng-ust1>"
+  else
+    lttng_package="$(select_lttng_package)"
+  fi
+  packages+=("$lttng_package")
   run_sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y "${packages[@]}"
 
   if dpkg-query -W -f='${Status}\n' nodejs 2>/dev/null | grep -q 'install ok installed'; then

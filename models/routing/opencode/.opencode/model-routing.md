@@ -13,9 +13,9 @@ Two model families divide the workload by cognitive profile:
 
 ### Why different families for different jobs
 
-Placing the reviewer on a separate model family from the implementers (build, general) creates genuine
-cognitive diversity. A reviewer that shares the same model as the author tends to reproduce the same
-blind spots. Cross-family review catches a wider class of issues.
+Placing the reviewer on a separate model family from the implementers (build, general) is a design
+heuristic intended to introduce a more independent analytical perspective. It may reduce the risk of
+shared blind spots, but it does not guarantee better review quality.
 
 ## Role Descriptions
 
@@ -42,7 +42,7 @@ a dependency, or confirming a fact across repositories.
 ### reviewer
 An independent quality gate. Reviews diffs and implementation artifacts for correctness, spec
 compliance, architectural fit, security, and maintainability. Operates read-only on a different
-model family than the implementers to maximize detection breadth. Defined in
+model family than the implementers to introduce an independent analytical perspective. Defined in
 `.opencode/agents/reviewer.md`.
 
 ### expert

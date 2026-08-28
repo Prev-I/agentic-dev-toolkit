@@ -1,4 +1,12 @@
-# agentic-dev-toolkit
+# Agentic Dev Toolkit
+
+<p align="center">
+  <img
+    src="docs/images/social-preview.png"
+    alt="Agentic Dev Toolkit — Linux, Multi-Harness and Model Routing"
+    width="100%"
+  />
+</p>
 
 Portable workstation setup, shared agent instructions, harness adapters, and model-routing
 configurations for AI-assisted software development.

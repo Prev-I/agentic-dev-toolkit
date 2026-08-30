@@ -17,7 +17,8 @@ A collection of reusable components for teams using AI coding agents:
 
 - **Linux workstation installer** — a single script that provisions a Debian/Ubuntu machine
   with mise-managed language runtimes, three agent CLIs (OpenCode, Claude Code, Codex), OpenSpec,
-  and Superpowers. Ubuntu under WSL2 is the reference and tested environment.
+  Superpowers, and the quality tools (shellcheck, gitleaks, PyYAML) whose absence otherwise fails
+  silently. Ubuntu under WSL2 is the reference and tested environment.
 - **Shared `AGENTS.md` pattern** — a template and adapter set that lets one canonical instructions
   file serve Claude Code, Codex, and OpenCode simultaneously.
 - **OpenCode model-routing bundle** — a starter configuration that assigns models to OpenCode's
@@ -97,11 +98,34 @@ Key flags:
 | `--skip-codex` | Skip Codex CLI installation |
 | `--skip-openspec` | Skip OpenSpec installation |
 | `--skip-superpowers` | Skip Superpowers configuration |
+| `--skip-quality-tools` | Skip shellcheck, gitleaks, and PyYAML |
 | `--repair-codex` | Remove conflicting Codex installs and reinstall standalone |
 
 Version overrides are available via `--node-version`, `--python-version`, etc., or through
 `ADT_NODE_VERSION`, `ADT_PYTHON_VERSION`, and similar environment variables. See
 `./environments/linux/install.sh --help` for the full list.
+
+### Quality tools
+
+Three things ship alongside the runtimes because their absence is silent rather
+than loud:
+
+| Tool | Installed via | Why it is here |
+|---|---|---|
+| `shellcheck` | mise | The Debian/Ubuntu package trails upstream by years. A linter that quietly lacks the check you are relying on is worse than no linter |
+| `gitleaks` | mise | Same reason, higher stakes: a secret scanner that predates a rule reports clean |
+| PyYAML | `pip` into the mise Python | Test suites commonly skip their schema or config checks when `import yaml` fails. The suite then exits 0 with its strongest check never evaluated |
+
+The PyYAML case is the one worth stating plainly: a runner that degrades to a
+skip does not report a problem, it reports success. That cannot be fixed from
+inside the repository that suffers from it, because the missing piece is on the
+workstation.
+
+Both mise tools default to `latest` and are pinnable with `--shellcheck-version`,
+`--gitleaks-version`, and `--pyyaml-version` (or `ADT_SHELLCHECK_VERSION`,
+`ADT_GITLEAKS_VERSION`, `ADT_PYYAML_VERSION`). `--skip-runtimes` implies
+`--skip-quality-tools`, since mise and the managed interpreter are what install
+them. A PyYAML failure warns rather than aborting the run.
 
 ## Shared `AGENTS.md` pattern
 

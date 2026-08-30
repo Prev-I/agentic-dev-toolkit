@@ -93,10 +93,9 @@ test_dry_run_does_not_probe_apt_package_metadata() {
 }
 
 test_mise_configuration_includes_quality_tools_by_default() {
+  # The dynamically sourced installer reads these globals.
   # shellcheck disable=SC2034
-  SKIP_QUALITY_TOOLS=0
-  SHELLCHECK_VERSION="0.11.0"
-  GITLEAKS_VERSION="8.30.1"
+  { SKIP_QUALITY_TOOLS=0; SHELLCHECK_VERSION="0.11.0"; GITLEAKS_VERSION="8.30.1"; }
 
   local config
   config="$(render_mise_configuration)"
@@ -120,10 +119,9 @@ test_mise_configuration_omits_quality_tools_when_skipped() {
 test_python_libraries_are_skipped_without_runtimes() {
   # The interpreter they install into is the one --skip-runtimes declines to
   # provide, so the step has nothing to install into.
+  # The dynamically sourced installer reads these globals.
   # shellcheck disable=SC2034
-  SKIP_RUNTIMES=1
-  SKIP_QUALITY_TOOLS=0
-  DRY_RUN=1
+  { SKIP_RUNTIMES=1; SKIP_QUALITY_TOOLS=0; DRY_RUN=1; }
 
   local output
   output="$(install_python_quality_libraries)"

@@ -127,6 +127,12 @@ Both mise tools default to `latest` and are pinnable with `--shellcheck-version`
 `--skip-quality-tools`, since mise and the managed interpreter are what install
 them. A PyYAML failure warns rather than aborting the run.
 
+The two mise tools resolve on `PATH` in an interactive shell, where `.bashrc`
+runs `mise activate`. A non-interactive shell — a script, a CI step, an agent
+invoking `bash script.sh` — does not source `.bashrc`, so reach them as
+`mise exec -- shellcheck …` there. This is how every mise-managed tool behaves
+here, not something specific to these two.
+
 ## Shared `AGENTS.md` pattern
 
 The core idea: write workspace guidance once in `AGENTS.md`, then give each agent harness access

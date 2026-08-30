@@ -407,11 +407,15 @@ node = "${NODE_VERSION}"
 uv = "${UV_VERSION}"
 EOF_MISE
 
-  # shellcheck and gitleaks go through mise rather than APT on purpose. Both are
-  # in Debian/Ubuntu, but the packaged versions trail upstream by years —
-  # shellcheck 0.9.0 against 0.11.0 upstream at the time of writing. A linter
-  # that silently lacks the check you are relying on is worse than no linter,
-  # and a secret scanner that predates a rule is worse still.
+  # The two linters below go through mise rather than APT on purpose. Both are
+  # in Debian/Ubuntu, but the packaged versions trail upstream by years — 0.9.0
+  # against 0.11.0 upstream at the time of writing. A linter that silently
+  # lacks the check you are relying on is worse than no linter, and a secret
+  # scanner that predates a rule is worse still.
+  #
+  # Do not begin a comment line here with the linter's own name followed by a
+  # space: it is read as a directive, fails to parse, and takes the rest of
+  # this function's analysis with it.
   if (( SKIP_QUALITY_TOOLS == 0 )); then
     cat <<EOF_MISE_QUALITY
 shellcheck = "${SHELLCHECK_VERSION}"

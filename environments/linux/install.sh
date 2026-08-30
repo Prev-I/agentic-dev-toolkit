@@ -22,6 +22,7 @@ SKIP_CLAUDE=0
 SKIP_CODEX=0
 SKIP_OPENSPEC=0
 SKIP_SUPERPOWERS=0
+SKIP_QUALITY_TOOLS=0
 
 JAVA_21_VERSION="${ADT_JAVA_21_VERSION:-temurin-21}"
 JAVA_17_VERSION="${ADT_JAVA_17_VERSION:-temurin-17}"
@@ -33,6 +34,9 @@ UV_VERSION="${ADT_UV_VERSION:-latest}"
 OPENSPEC_VERSION="${ADT_OPENSPEC_VERSION:-1.9.0}"
 SUPERPOWERS_REF="${ADT_SUPERPOWERS_REF:-v6.3.0}"
 OPENSPEC_TOOLS="${ADT_OPENSPEC_TOOLS:-opencode,claude,codex}"
+SHELLCHECK_VERSION="${ADT_SHELLCHECK_VERSION:-latest}"
+GITLEAKS_VERSION="${ADT_GITLEAKS_VERSION:-latest}"
+PYYAML_VERSION="${ADT_PYYAML_VERSION:-latest}"
 
 XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 XDG_CONFIG_HOME="${XDG_CONFIG_HOME%/}"
@@ -125,6 +129,9 @@ Selective installation:
   --skip-codex                 Skip Codex CLI installation/update.
   --skip-openspec              Skip OpenSpec installation/update.
   --skip-superpowers           Do not modify the OpenCode Superpowers config.
+  --skip-quality-tools         Skip shellcheck, gitleaks, and PyYAML.
+                               Implied by --skip-runtimes, which are what
+                               installs them.
 
 Version overrides:
   --node-version VERSION       Node.js version (default: $NODE_VERSION).
@@ -136,13 +143,17 @@ Version overrides:
   --dotnet-10-version VERSION  .NET 10 SDK version (default: $DOTNET_10_VERSION).
   --openspec-version VERSION   OpenSpec version (default: $OPENSPEC_VERSION).
   --superpowers-ref REF        Superpowers Git ref (default: $SUPERPOWERS_REF).
+  --shellcheck-version VERSION shellcheck version (default: $SHELLCHECK_VERSION).
+  --gitleaks-version VERSION   gitleaks version (default: $GITLEAKS_VERSION).
+  --pyyaml-version VERSION     PyYAML version (default: $PYYAML_VERSION).
   -h, --help                   Show this help.
 
 Environment variables provide the same defaults:
   ADT_NODE_VERSION, ADT_PYTHON_VERSION, ADT_UV_VERSION,
   ADT_JAVA_17_VERSION, ADT_JAVA_21_VERSION,
   ADT_DOTNET_8_VERSION, ADT_DOTNET_10_VERSION,
-  ADT_OPENSPEC_VERSION, ADT_SUPERPOWERS_REF, ADT_OPENSPEC_TOOLS
+  ADT_OPENSPEC_VERSION, ADT_SUPERPOWERS_REF, ADT_OPENSPEC_TOOLS,
+  ADT_SHELLCHECK_VERSION, ADT_GITLEAKS_VERSION, ADT_PYYAML_VERSION
 
 Examples:
   ./$SCRIPT_NAME --dry-run
@@ -175,6 +186,7 @@ parse_args() {
       --skip-codex) SKIP_CODEX=1 ;;
       --skip-openspec) SKIP_OPENSPEC=1 ;;
       --skip-superpowers) SKIP_SUPERPOWERS=1 ;;
+      --skip-quality-tools) SKIP_QUALITY_TOOLS=1 ;;
       --project)
         require_value "$1" "${2:-}"
         PROJECT_PATH="$2"
@@ -208,6 +220,15 @@ parse_args() {
       --superpowers-ref)
         require_value "$1" "${2:-}"; SUPERPOWERS_REF="$2"; shift ;;
       --superpowers-ref=*) SUPERPOWERS_REF="${1#*=}" ;;
+      --shellcheck-version)
+        require_value "$1" "${2:-}"; SHELLCHECK_VERSION="$2"; shift ;;
+      --shellcheck-version=*) SHELLCHECK_VERSION="${1#*=}" ;;
+      --gitleaks-version)
+        require_value "$1" "${2:-}"; GITLEAKS_VERSION="$2"; shift ;;
+      --gitleaks-version=*) GITLEAKS_VERSION="${1#*=}" ;;
+      --pyyaml-version)
+        require_value "$1" "${2:-}"; PYYAML_VERSION="$2"; shift ;;
+      --pyyaml-version=*) PYYAML_VERSION="${1#*=}" ;;
       -h|--help)
         usage
         exit 0
@@ -385,6 +406,18 @@ python = "${PYTHON_VERSION}"
 node = "${NODE_VERSION}"
 uv = "${UV_VERSION}"
 EOF_MISE
+
+  # shellcheck and gitleaks go through mise rather than APT on purpose. Both are
+  # in Debian/Ubuntu, but the packaged versions trail upstream by years —
+  # shellcheck 0.9.0 against 0.11.0 upstream at the time of writing. A linter
+  # that silently lacks the check you are relying on is worse than no linter,
+  # and a secret scanner that predates a rule is worse still.
+  if (( SKIP_QUALITY_TOOLS == 0 )); then
+    cat <<EOF_MISE_QUALITY
+shellcheck = "${SHELLCHECK_VERSION}"
+gitleaks = "${GITLEAKS_VERSION}"
+EOF_MISE_QUALITY
+  fi
 }
 
 write_managed_file() {
@@ -429,6 +462,44 @@ configure_runtimes() {
   fi
 
   eval "$("$MISE_BIN" activate bash)"
+}
+
+install_python_quality_libraries() {
+  if (( SKIP_RUNTIMES == 1 || SKIP_QUALITY_TOOLS == 1 )); then
+    return
+  fi
+
+  # PyYAML is installed into the mise-managed interpreter, not a virtualenv,
+  # because what needs it is `python3 -c "import yaml"` run by somebody else's
+  # test suite. A test runner that degrades to a skip when a parser is missing
+  # exits 0 with its strongest check silent: the suite reports success and the
+  # thing it was meant to prove was never evaluated. Making the import succeed
+  # by default is what closes that, and it cannot be closed from inside the
+  # repository that suffers from it.
+  local specifier="pyyaml"
+  if [[ "$PYYAML_VERSION" != "latest" ]]; then
+    specifier="pyyaml==$PYYAML_VERSION"
+  fi
+
+  log "Installing Python libraries for repository tooling"
+
+  if (( DRY_RUN == 1 )); then
+    quote_command "$MISE_BIN" exec -- python -m pip install --upgrade "$specifier"
+    return
+  fi
+
+  local -a pip_command=("$MISE_BIN" exec -- python -m pip install "$specifier")
+  if (( UPGRADE == 1 )) || [[ "$PYYAML_VERSION" == "latest" ]]; then
+    pip_command=("$MISE_BIN" exec -- python -m pip install --upgrade "$specifier")
+  fi
+
+  if ! "${pip_command[@]}"; then
+    # Not fatal. A workstation whose interpreter refuses this one library is
+    # still a usable workstation, and failing the whole provisioning run here
+    # would be out of proportion to what was lost.
+    warn "Could not install $specifier into the mise-managed Python."
+    warn "Test suites that skip when PyYAML is absent will keep skipping."
+  fi
 }
 
 install_opencode() {
@@ -802,6 +873,22 @@ verify_installation() {
   (( SKIP_CODEX == 1 )) || verify_command codex codex --version
   (( SKIP_OPENSPEC == 1 )) || verify_command openspec openspec --version
 
+  if (( SKIP_RUNTIMES == 0 && SKIP_QUALITY_TOOLS == 0 )); then
+    if (( DRY_RUN == 1 )); then
+      quote_command "$MISE_BIN" exec -- shellcheck --version
+      quote_command "$MISE_BIN" exec -- gitleaks version
+      quote_command "$MISE_BIN" exec -- python -c 'import yaml; print(yaml.__version__)'
+    else
+      "$MISE_BIN" exec -- shellcheck --version
+      "$MISE_BIN" exec -- gitleaks version
+      # Reported rather than fatal, matching the install step: the library is a
+      # convenience for other repositories' test suites, not something this
+      # workstation depends on to function.
+      "$MISE_BIN" exec -- python -c 'import yaml; print("PyYAML", yaml.__version__)' ||
+        warn "PyYAML is not importable from the mise-managed Python; suites that skip on it will skip."
+    fi
+  fi
+
   if (( SKIP_SUPERPOWERS == 0 && DRY_RUN == 0 )) && [[ -s "$OPENCODE_CONFIG" ]] && jq empty "$OPENCODE_CONFIG" >/dev/null 2>&1; then
     local plugin="$SUPERPOWERS_PLUGIN_BASE#$SUPERPOWERS_REF"
     jq -e --arg plugin "$plugin" '.plugin | type == "array" and index($plugin) != null' "$OPENCODE_CONFIG" >/dev/null || \
@@ -840,6 +927,9 @@ Useful maintenance commands:
 Useful checks:
   command -v mise node java python dotnet uv opencode claude codex openspec
   mise ls
+  shellcheck --version
+  gitleaks version
+  python -c 'import yaml; print(yaml.__version__)'
   dotnet --list-sdks
   opencode --version
   claude --version
@@ -862,6 +952,7 @@ main() {
   run mkdir -p "$HOME/code"
   install_mise
   configure_runtimes
+  install_python_quality_libraries
   install_opencode
   install_claude
   install_codex

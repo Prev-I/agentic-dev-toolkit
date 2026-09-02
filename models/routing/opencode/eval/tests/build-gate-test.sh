@@ -14,10 +14,17 @@ assert_eq block_fixture_control "$(build_gate 3 5)"
 ledger=$(mktemp)
 trap 'rm -f "$ledger"' EXIT
 if append_classification "$ledger" INVALID_ENVIRONMENT ""; then fail "invalid environment accepted without evidence"; fi
+if append_classification "$ledger" UNKNOWN evidence; then fail "unknown classification accepted"; fi
 append_classification "$ledger" INVALID_ENVIRONMENT outage
+validate_classification_ledger "$ledger"
+assert_eq replacement_allowed "$(next_run_action "$ledger")"
 append_classification "$ledger" VALID_CONTROLLER_FAILURE oracle_failed
 assert_eq 1 "$(valid_failure_count "$ledger")"
+assert_eq extension_allowed "$(next_run_action "$ledger")"
 append_classification "$ledger" FIXTURE_DEFECT broken_oracle
 assert_eq restart_from_zero "$(classification_action FIXTURE_DEFECT)"
 assert_eq 1 "$(valid_failure_count "$ledger")"
+assert_eq restart_required "$(next_run_action "$ledger")"
+printf 'tampered' >>"$ledger"
+if validate_classification_ledger "$ledger"; then fail "tampered ledger accepted"; fi
 printf 'PASS: Build gate state machine\n'

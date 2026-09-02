@@ -11,4 +11,8 @@ for field in routing_profile_id routing_profile_commit runtime_version eval_runn
 done
 assert_contains "$record" '"observed_cost":null'
 validate_installed_manifest "$root/manifests/installed-profile.json"
+invalid=$(mktemp)
+trap 'rm -f "$invalid"' EXIT
+printf 'profile_id source_commit installed_at opencode_version' >"$invalid"
+if validate_installed_manifest "$invalid"; then fail "malformed manifest accepted"; fi
 printf 'PASS: provenance and manifest\n'

@@ -104,6 +104,6 @@ record = {
 with open(sys.argv[1], "w", encoding="utf-8") as handle:
     json.dump(record, handle, indent=2)
     handle.write("\n")
-raise SystemExit(0 if normal_denied and primary_selected else 1)
+raise SystemExit(0 if normal_denied and primary_selected and primary_ok else 1)
 PY
 }

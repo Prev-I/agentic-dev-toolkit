@@ -37,4 +37,15 @@ if OPENCODE_BIN="$fake/opencode" probe_model_variant github-copilot/fail-model h
 fi
 assert_contains "$(<"$fake/failure.json")" '"exit_status": 7'
 assert_contains "$(<"$fake/failure.json")" '"error_text": "provider unavailable"'
+
+cat >"$fake/opencode" <<'FAKE'
+#!/usr/bin/env bash
+if [[ "$1" == --version ]]; then printf '1.18.26\n'; exit 0; fi
+printf '%s\n' 'debug prompt=Reply with exactly: CAPABILITY_OK' '{"type":"text","part":{"text":"NOT_CAPABILITY_OK"}}'
+FAKE
+chmod +x "$fake/opencode"
+if OPENCODE_BIN="$fake/opencode" probe_model_variant github-copilot/test-model high "$fake/false-positive.json"; then
+  fail "probe accepted marker outside an exact model text response"
+fi
+assert_contains "$(<"$fake/false-positive.json")" '"classification": "AMBIGUOUS_FAILURE"'
 printf 'PASS: OpenCode probe adapter\n'

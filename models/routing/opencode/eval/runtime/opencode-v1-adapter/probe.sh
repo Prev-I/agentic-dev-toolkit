@@ -13,7 +13,20 @@ probe_model_variant() {
   status=$?
   set -e
   end=$(date +%s%3N)
-  if (( status == 0 )) && grep -q 'CAPABILITY_OK' "$raw"; then classification=USABLE; else classification=AMBIGUOUS_FAILURE; fi
+  if (( status == 0 )) && python3 - "$raw" <<'PY'
+import json
+import sys
+
+for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
+    try:
+        event = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    if event.get("type") == "text" and event.get("part", {}).get("text", "").strip() == "CAPABILITY_OK":
+        raise SystemExit(0)
+raise SystemExit(1)
+PY
+  then classification=USABLE; else classification=AMBIGUOUS_FAILURE; fi
   provider=${model%%/*}
   model_name=${model#*/}
   version=$($bin --version 2>/dev/null || printf unknown)

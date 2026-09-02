@@ -2,6 +2,24 @@
 
 This document defines how agent roles map to model families and when to escalate.
 
+## Capability and migration status (Track A)
+
+The source bundle's capability closure at
+`models/routing/opencode/docs/evidence/2026-09-02-capability-closure.md`
+records that the explicit `github-copilot/claude-opus-4.6` and
+`github-copilot/claude-sonnet-4.6` IDs were not resolvable in the audited
+OpenCode V1 runtime. This is runtime capability evidence, not a routing change.
+
+`github-copilot/gpt-5.3-codex` resolves in discovery at the recorded capability
+check. Moving away from Codex is an explicit migration-risk decision, not a
+claim that Codex is retired or unavailable.
+
+Evidence has a strict hierarchy: documentation and policy provide candidate
+information; `opencode models` provides a discovery/resolution signal; a
+successful trivial call proves usable capability; and a role fixture proves
+routing fitness. The organization policy page is authoritative for policy
+state, not runtime capability state.
+
 ## Model Family Assignments
 
 Two model families divide the workload by cognitive profile:

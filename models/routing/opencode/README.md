@@ -33,6 +33,41 @@ The current OpenCode V1 multi-model routing restoration is governed by:
 The decision document is the source of truth for migration gates,
 evaluation rules, recovery constraints, and model-routing decisions.
 
+## Capability status (Track A)
+
+The [2026-09-02 capability closure](docs/evidence/2026-09-02-capability-closure.md)
+found that the committed Claude Opus 4.6 targets failed the runtime capability
+check in the audited environment: the explicit model ID was not resolvable.
+The same check found the old Claude Sonnet 4.6 ID was not resolvable.
+
+GPT-5.3-Codex resolves in the audited environment as of the recorded
+capability check. This is discovery evidence only; the closure does not claim
+that a Codex request executed successfully. The migration away from Codex is
+an explicit risk decision, not a capability finding.
+
+Use this evidence hierarchy before activating a profile:
+
+```text
+documentation / policy
+    -> candidate information
+
+opencode models
+    -> discovery / resolution signal
+
+successful trivial call
+    -> usable capability
+
+role fixture
+    -> routing fitness
+```
+
+The organization policy page is authoritative for policy state, not runtime
+capability state.
+
+The [governance blocker record](docs/evidence/2026-09-02-governance-blockers.md)
+lists the named Copilot, OpenAI, and OpenCode V2 RFC ownership decisions still
+required before Phase 0 can complete.
+
 ## 1. Verify model IDs and variants
 
 Connect GitHub Copilot and OpenAI in OpenCode, then inspect the models and variants available to your accounts:
@@ -49,7 +84,14 @@ Or list models from the CLI where appropriate:
 opencode models
 ```
 
-Confirm these model IDs exist:
+Do not assume a model ID in this historical profile is currently available.
+The capability closure above found that `github-copilot/claude-opus-4.6` was
+not resolvable in the audited environment. In that audit,
+`github-copilot/gpt-5.3-codex` was listed as a discovery signal only.
+
+For any profile you activate, verify the configured model IDs against the
+installed runtime and then confirm usable capability with a trivial successful
+call:
 
 ```text
 github-copilot/gpt-5.3-codex

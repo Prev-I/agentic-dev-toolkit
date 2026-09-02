@@ -84,7 +84,14 @@ Or list models from the CLI where appropriate:
 opencode models
 ```
 
-Confirm these model IDs exist:
+Do not assume a model ID in this historical profile is currently available.
+The capability closure above found that `github-copilot/claude-opus-4.6` was
+not resolvable in the audited environment. In that audit,
+`github-copilot/gpt-5.3-codex` was listed as a discovery signal only.
+
+For any profile you activate, verify the configured model IDs against the
+installed runtime and then confirm usable capability with a trivial successful
+call:
 
 ```text
 github-copilot/gpt-5.3-codex

@@ -1,0 +1,29 @@
+{
+  "timestamp": "2026-09-02T17:04:08.104585+02:00",
+  "runtime_version": "1.18.26",
+  "repository_commit": "2176b4647e28fe94b8dd30edef6decf9191848a9",
+  "environment": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+  "provider": "github-copilot",
+  "model": "claude-sonnet-5",
+  "variant": "high",
+  "exact_invocation": "opencode run --model github-copilot/claude-sonnet-5 --variant high --format json Reply with exactly: CAPABILITY_OK",
+  "exit_status": 0,
+  "classification": "USABLE",
+  "pricing_regime": "standard",
+  "wall_clock_ms": 9016,
+  "retry_count": 0,
+  "observed_cost": 0.045259,
+  "normalized_steady_state_cost": null,
+  "tokens": 18068,
+  "token_usage": {
+    "total": 18068,
+    "input": 2,
+    "output": 12,
+    "reasoning": 0,
+    "cache": {
+      "write": 18054,
+      "read": 0
+    }
+  },
+  "response_text": "CAPABILITY_OK"
+}

@@ -23,6 +23,16 @@ The routing policy is loaded through OpenCode's `instructions` setting; it does 
 
 The design intentionally keeps `build` and `general` on the same Opus family but gives them different jobs and reasoning levels. Review is deliberately assigned to a different model family (Codex) to ensure adversarial diversity.
 
+## Routing migration
+
+The current OpenCode V1 multi-model routing restoration is governed by:
+
+- [Approved routing plan](docs/decisions/2026-09-02-multi-model-routing-v3.4.3.md)
+- [First implementation actions](docs/runbooks/2026-09-02-migration-first-actions.md)
+
+The decision document is the source of truth for migration gates,
+evaluation rules, recovery constraints, and model-routing decisions.
+
 ## 1. Verify model IDs and variants
 
 Connect GitHub Copilot and OpenAI in OpenCode, then inspect the models and variants available to your accounts:

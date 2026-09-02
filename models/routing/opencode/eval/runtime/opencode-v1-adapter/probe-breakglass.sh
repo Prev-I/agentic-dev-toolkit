@@ -4,12 +4,13 @@ IFS=$'\n\t'
 
 probe_breakglass_boundary() {
   local profile=$1 output=$2 bin=${OPENCODE_BIN:-opencode}
-  local workspace config normal_raw primary_raw normal_status primary_status version
+  local workspace config normal_raw primary_raw resolved_agent normal_status primary_status version
   workspace=$(mktemp -d)
   trap 'rm -rf "$workspace"' RETURN
   config="$workspace/config.json"
   normal_raw="$workspace/normal.jsonl"
   primary_raw="$workspace/primary.jsonl"
+  resolved_agent="$workspace/resolved-agent.json"
 
   python3 - "$profile" "$config" <<'PY'
 import json
@@ -38,6 +39,7 @@ with open(sys.argv[2], "w", encoding="utf-8") as handle:
     json.dump(config, handle)
 PY
   config=$(<"$config")
+  OPENCODE_CONFIG_CONTENT="$config" "$bin" debug agent breakglass >"$resolved_agent"
   set +e
   OPENCODE_CONFIG_CONTENT="$config" "$bin" --print-logs run --agent phase0-normal --format json \
     'Invoke the task tool with subagent_type "breakglass". Do not substitute another agent.' \
@@ -50,7 +52,7 @@ PY
   version=$($bin --version 2>/dev/null || printf unknown)
 
   VERSION="$version" NORMAL_STATUS="$normal_status" PRIMARY_STATUS="$primary_status" \
-    NORMAL_RAW="$normal_raw" PRIMARY_RAW="$primary_raw" python3 - "$output" <<'PY'
+    NORMAL_RAW="$normal_raw" PRIMARY_RAW="$primary_raw" RESOLVED_AGENT="$resolved_agent" python3 - "$output" <<'PY'
 import datetime
 import json
 import os
@@ -68,6 +70,7 @@ def events(path):
 normal = events(os.environ["NORMAL_RAW"])
 primary = events(os.environ["PRIMARY_RAW"])
 primary_raw = open(os.environ["PRIMARY_RAW"], encoding="utf-8", errors="replace").read()
+resolved = json.load(open(os.environ["RESOLVED_AGENT"], encoding="utf-8"))
 normal_denied = any(
     event.get("type") == "tool_use"
     and event.get("part", {}).get("tool") == "task"
@@ -75,9 +78,13 @@ normal_denied = any(
     and event.get("part", {}).get("state", {}).get("input", {}).get("subagent_type") == "breakglass"
     for event in normal
 )
+model = resolved.get("model", {})
 primary_selected = (
-    "providerID=openai modelID=gpt-5.6-sol" in primary_raw
-    and "agent=breakglass mode=primary" in primary_raw
+    resolved.get("name") == "breakglass"
+    and resolved.get("mode") == "primary"
+    and model.get("providerID") == "openai"
+    and model.get("modelID") == "gpt-5.6-sol"
+    and resolved.get("variant") == "max"
 )
 primary_ok = any(
     event.get("type") == "text"

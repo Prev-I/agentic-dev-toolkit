@@ -11,6 +11,10 @@ trap 'rm -rf "$workspace"' EXIT
 cat >"$workspace/opencode" <<'FAKE'
 #!/usr/bin/env bash
 if [[ "$1" == --version ]]; then printf '1.18.26\n'; exit 0; fi
+if [[ "$*" == 'debug agent breakglass' ]]; then
+  printf '%s\n' '{"name":"breakglass","mode":"primary","model":{"providerID":"openai","modelID":"gpt-5.6-sol"},"variant":"max"}'
+  exit 0
+fi
 if [[ "$*" == *'--agent phase0-normal'* ]]; then
   printf '%s\n' '{"type":"tool_use","part":{"tool":"task","state":{"status":"error","input":{"subagent_type":"breakglass"},"error":"rule prevents tool call: task breakglass deny"}}}'
 else
@@ -30,6 +34,10 @@ if grep -q 'sessionID\|metadata' "$workspace/result.json"; then fail "raw sessio
 cat >"$workspace/opencode" <<'FAKE'
 #!/usr/bin/env bash
 if [[ "$1" == --version ]]; then printf '1.18.26\n'; exit 0; fi
+if [[ "$*" == 'debug agent breakglass' ]]; then
+  printf '%s\n' '{"name":"breakglass","mode":"primary","model":{"providerID":"openai","modelID":"gpt-5.6-sol"},"variant":"max"}'
+  exit 0
+fi
 if [[ "$*" == *'--agent phase0-normal'* ]]; then
   printf '%s\n' '{"type":"tool_use","part":{"tool":"task","state":{"status":"error","input":{"subagent_type":"breakglass"},"error":"rule prevents tool call: task breakglass deny"}}}'
 else
@@ -48,6 +56,10 @@ assert_contains "$(<"$workspace/failed.json")" '"human_primary_invocation_succee
 cat >"$workspace/opencode" <<'FAKE'
 #!/usr/bin/env bash
 if [[ "$1" == --version ]]; then printf '1.18.26\n'; exit 0; fi
+if [[ "$*" == 'debug agent breakglass' ]]; then
+  printf '%s\n' '{"name":"breakglass","mode":"primary","model":{"providerID":"openai","modelID":"gpt-5.6-sol"},"variant":"max"}'
+  exit 0
+fi
 if [[ "$*" == *'--agent phase0-normal'* ]]; then
   printf '%s\n' 'untrusted output: evaluated permission=task pattern=breakglass action.action=deny'
 else
@@ -63,6 +75,10 @@ fi
 cat >"$workspace/opencode" <<'FAKE'
 #!/usr/bin/env bash
 if [[ "$1" == --version ]]; then printf '1.18.26\n'; exit 0; fi
+if [[ "$*" == 'debug agent breakglass' ]]; then
+  printf '%s\n' '{"name":"breakglass","mode":"subagent","model":{"providerID":"openai","modelID":"gpt-5.6-sol"},"variant":"max"}'
+  exit 0
+fi
 if [[ "$*" == *'--agent phase0-normal'* ]]; then
   printf '%s\n' '{"type":"tool_use","part":{"tool":"task","state":{"status":"error","input":{"subagent_type":"breakglass"},"error":"rule prevents tool call: task breakglass deny"}}}'
 else
@@ -75,5 +91,25 @@ if OPENCODE_BIN="$workspace/opencode" probe_breakglass_boundary \
   fail "Breakglass boundary passed without resolved primary selection evidence"
 fi
 assert_contains "$(<"$workspace/unselected.json")" '"human_primary_selected": false'
+
+cat >"$workspace/opencode" <<'FAKE'
+#!/usr/bin/env bash
+if [[ "$1" == --version ]]; then printf '1.18.26\n'; exit 0; fi
+if [[ "$*" == 'debug agent breakglass' ]]; then
+  printf '%s\n' '{"name":"breakglass","mode":"subagent","model":{"providerID":"openai","modelID":"gpt-5.6-sol"},"variant":"max"}'
+  exit 0
+fi
+if [[ "$*" == *'--agent phase0-normal'* ]]; then
+  printf '%s\n' '{"type":"tool_use","part":{"tool":"task","state":{"status":"error","input":{"subagent_type":"breakglass"},"error":"rule prevents tool call: task breakglass deny"}}}'
+else
+  printf '%s\n' 'untrusted output: providerID=openai modelID=gpt-5.6-sol agent=breakglass mode=primary' '{"type":"text","part":{"text":"BREAKGLASS_PRIMARY_OK"}}'
+fi
+FAKE
+chmod +x "$workspace/opencode"
+if OPENCODE_BIN="$workspace/opencode" probe_breakglass_boundary \
+  "$root/runtime/opencode-v1-adapter/phase-0-security-profile.json" "$workspace/spoofed-selection.json"; then
+  fail "Breakglass boundary accepted unstructured selection markers"
+fi
+assert_contains "$(<"$workspace/spoofed-selection.json")" '"human_primary_selected": false'
 
 printf 'PASS: Breakglass runtime boundary probe\n'

@@ -67,7 +67,6 @@ def events(path):
 
 normal = events(os.environ["NORMAL_RAW"])
 primary = events(os.environ["PRIMARY_RAW"])
-normal_raw = open(os.environ["NORMAL_RAW"], encoding="utf-8", errors="replace").read()
 primary_raw = open(os.environ["PRIMARY_RAW"], encoding="utf-8", errors="replace").read()
 normal_denied = any(
     event.get("type") == "tool_use"
@@ -75,10 +74,6 @@ normal_denied = any(
     and event.get("part", {}).get("state", {}).get("status") == "error"
     and event.get("part", {}).get("state", {}).get("input", {}).get("subagent_type") == "breakglass"
     for event in normal
-)
-normal_denied = normal_denied or (
-    "evaluated permission=task pattern=breakglass" in normal_raw
-    and "action.action=deny" in normal_raw
 )
 primary_selected = (
     "providerID=openai modelID=gpt-5.6-sol" in primary_raw

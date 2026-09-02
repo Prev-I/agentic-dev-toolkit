@@ -51,14 +51,16 @@ not authorization. No autonomous escalation path is present.
 
 `eval/records/breakglass-boundary.json` records the live boundary probe:
 
-- normal-agent Task invocation of `breakglass` was denied by the matching V1
-  permission rule;
 - explicit `--agent breakglass` selected the primary Breakglass agent and the
   configured direct OpenAI model;
-- the provider call then failed with `usage limit has been reached`, so this
-  run does not claim a successful Breakglass response.
+- the normal model did not emit the requested Task attempt in the latest run,
+  so no structured runtime denial event was captured;
+- the explicit provider call failed with `usage limit has been reached`, so
+  this run does not claim a successful Breakglass response.
 
-The provider quota failure does not invalidate structural selection or Task
-denial. It does block any claim that Breakglass was operationally usable at that
-later timestamp. Earlier direct capability records remain timestamped evidence,
-not a guarantee of continuing quota availability.
+The generated configuration and deterministic adapter tests establish the
+ordered `breakglass: deny` rule, reject unstructured denial or selection text,
+and require all live conditions before returning success. The current live
+record is therefore correctly blocked rather than accepted as closure. Earlier
+direct capability records remain timestamped evidence, not a guarantee of
+continuing quota availability.

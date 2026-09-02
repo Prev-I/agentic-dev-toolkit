@@ -109,14 +109,15 @@ usage() {
   cat <<EOF_USAGE
 Usage: $SCRIPT_NAME [options]
 
-Provision a Debian/Ubuntu development workstation with mise-managed
+Provision a Debian/Ubuntu development workstation with direnv, mise-managed
 runtimes, OpenCode, Claude Code, Codex CLI, OpenSpec, and Superpowers.
 
 General options:
   --dry-run                    Print actions without changing the system.
   --upgrade                    Upgrade mutable components and runtime patches.
   --verify-only                Verify the current workstation without installing.
-  --project PATH               Initialize or refresh OpenSpec in a Git repository.
+  --project PATH               Initialize or refresh OpenSpec and create a safe
+                               direnv configuration in a Git repository.
   --skip-platform-check        Skip the distribution family check (unsupported distributions only).
   --remove-apt-node            Remove APT-managed nodejs/npm before mise Node.
   --repair-codex               Remove recognized Codex install conflicts and
@@ -283,7 +284,7 @@ select_lttng_package() {
 
 install_system_packages() {
   local packages=(
-    bash-completion build-essential ca-certificates curl gawk git gnupg jq
+    bash-completion build-essential ca-certificates curl direnv gawk git gnupg jq
     openssh-client pkg-config ripgrep tar unzip xz-utils zip
     libbz2-dev libffi-dev libicu-dev libkrb5-3 liblzma-dev libncursesw5-dev
     libreadline-dev libsqlite3-dev libssl-dev tk-dev uuid-dev
@@ -327,10 +328,10 @@ ensure_shell_configuration() {
   local end_marker='# <<< agentic-dev-toolkit <<<'
   local temp_file backup_file
 
-  log "Configuring Bash PATH and mise activation"
+  log "Configuring Bash PATH, mise, and direnv activation"
 
   if (( DRY_RUN == 1 )); then
-    info "Would update $bashrc with a managed PATH/mise block."
+    info "Would update $bashrc with a managed PATH/mise/direnv block."
     return
   fi
 
@@ -353,6 +354,7 @@ export OPENCODE_ENABLE_EXA=true
 if [[ -x "$HOME/.local/bin/mise" ]]; then
   eval "$("$HOME/.local/bin/mise" activate bash)"
 fi
+eval "$(direnv hook bash)"
 # <<< agentic-dev-toolkit <<<
 EOF_BASHRC
 
@@ -814,6 +816,18 @@ configure_project() {
     command -v openspec >/dev/null 2>&1 || die "OpenSpec is required for --project. Install it first or remove --skip-openspec."
   fi
 
+  if [[ -e "$project/.envrc" ]]; then
+    info "Preserving existing direnv configuration: $project/.envrc"
+  else
+    log "Creating direnv configuration in $project/.envrc"
+    if (( DRY_RUN == 1 )); then
+      printf '%s\n' 'dotenv_if_exists .env.local'
+    else
+      printf '%s\n' 'dotenv_if_exists .env.local' > "$project/.envrc"
+    fi
+    info "Review $project/.envrc, then run: cd $project && direnv allow"
+  fi
+
   log "Initializing or refreshing OpenSpec in $project"
   if (( DRY_RUN == 1 )); then
     printf '+ cd %q\n' "$project"
@@ -876,6 +890,7 @@ verify_installation() {
   (( SKIP_CLAUDE == 1 )) || verify_command claude claude --version
   (( SKIP_CODEX == 1 )) || verify_command codex codex --version
   (( SKIP_OPENSPEC == 1 )) || verify_command openspec openspec --version
+  verify_command direnv direnv --version
 
   if (( SKIP_RUNTIMES == 0 && SKIP_QUALITY_TOOLS == 0 )); then
     if (( DRY_RUN == 1 )); then
@@ -920,8 +935,10 @@ Manual steps after installation:
      harness's plugin/skill installation mechanism.
   6. For the streamlined OpenSpec 1.9.0 workflow, run once:
        openspec config profile core
-  7. To initialize or update OpenSpec for a specific Git project, run:
-       ./$SCRIPT_NAME --project <path>
+   7. To initialize or update OpenSpec for a specific Git project, run:
+        ./$SCRIPT_NAME --project <path>
+      This creates a safe .envrc when one is absent. Review it, then run:
+        cd <path> && direnv allow
 
 Useful maintenance commands:
   ./$SCRIPT_NAME --verify-only
@@ -929,7 +946,7 @@ Useful maintenance commands:
   ./$SCRIPT_NAME --repair-codex
 
 Useful checks:
-  command -v mise node java python dotnet uv opencode claude codex openspec
+  command -v mise node java python dotnet uv direnv opencode claude codex openspec
   mise ls
   shellcheck --version
   gitleaks version
@@ -939,6 +956,7 @@ Useful checks:
   claude --version
   codex --version
   openspec --version
+  direnv --version
 EOF_SUMMARY
 }
 

@@ -4,7 +4,8 @@ This document defines how agent roles map to model families and when to escalate
 
 ## Capability and migration status (Track A)
 
-The [capability closure](../docs/evidence/2026-09-02-capability-closure.md)
+The source bundle's capability closure at
+`models/routing/opencode/docs/evidence/2026-09-02-capability-closure.md`
 records that the explicit `github-copilot/claude-opus-4.6` and
 `github-copilot/claude-sonnet-4.6` IDs were not resolvable in the audited
 OpenCode V1 runtime. This is runtime capability evidence, not a routing change.

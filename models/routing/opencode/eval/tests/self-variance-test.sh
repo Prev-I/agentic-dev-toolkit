@@ -5,10 +5,50 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 source "$root/tests/test-lib.sh"
 source "$root/scoring/self-variance.sh"
 
-state=$(mktemp)
-trap 'rm -f "$state"' EXIT
-if freeze_thresholds "$state"; then fail "thresholds froze before self-variance"; fi
-record_self_variance "$state" true true true true
-freeze_thresholds "$state"
-assert_contains "$(<"$state")" 'thresholds_frozen=true'
-printf 'PASS: self-variance ordering\n'
+workspace=$(mktemp -d)
+trap 'rm -rf "$workspace"' EXIT
+state="$workspace/state.json"
+
+for run in 1 2 3; do
+  cat >"$workspace/run-$run.json" <<JSON
+{
+  "fixture_digest": "sha256:stable",
+  "score": {"passed": 4, "total": 4},
+  "instrumentation_schema": "phase0-v1",
+  "credit_report": {"observed_cost": $run, "tokens": $((run * 10))}
+}
+JSON
+done
+
+if measure_self_variance "$state" "$workspace/run-1.json" "$workspace/run-2.json"; then
+  fail "self-variance accepted fewer than three runs"
+fi
+measure_self_variance "$state" "$workspace/run-1.json" "$workspace/run-2.json" "$workspace/run-3.json"
+assert_contains "$(<"$state")" '"sample_count": 3'
+assert_contains "$(<"$state")" '"fixture_determinism": true'
+assert_contains "$(<"$state")" '"scoring_repeatability": true'
+assert_contains "$(<"$state")" '"instrumentation_consistency": true'
+assert_contains "$(<"$state")" '"credit_report_consistency": true'
+assert_contains "$(<"$state")" '"self_variance_complete": true'
+
+if freeze_thresholds "$workspace/missing.json" self-variance; then
+  fail "thresholds froze before self-variance"
+fi
+if freeze_thresholds "$state" candidate-results; then
+  fail "candidate results created continuous thresholds"
+fi
+freeze_thresholds "$state" self-variance
+assert_contains "$(<"$state")" '"thresholds_frozen": true'
+
+python3 - "$workspace/run-3.json" <<'PY'
+import json
+import sys
+path = sys.argv[1]
+data = json.load(open(path, encoding="utf-8"))
+data["score"]["passed"] = 3
+json.dump(data, open(path, "w", encoding="utf-8"))
+PY
+measure_self_variance "$workspace/variance.json" "$workspace/run-1.json" "$workspace/run-2.json" "$workspace/run-3.json"
+assert_contains "$(<"$workspace/variance.json")" '"scoring_repeatability": false'
+
+printf 'PASS: measured self-variance ordering\n'

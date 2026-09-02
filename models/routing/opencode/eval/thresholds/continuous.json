@@ -1,4 +1,12 @@
 {
   "status": "blocked_until_self_variance",
-  "candidate_results_may_define_thresholds": false
+  "minimum_repeated_runs": 3,
+  "required_measurements": [
+    "fixture_determinism",
+    "scoring_repeatability",
+    "instrumentation_consistency",
+    "credit_report_consistency"
+  ],
+  "candidate_results_may_define_thresholds": false,
+  "thresholds": null
 }

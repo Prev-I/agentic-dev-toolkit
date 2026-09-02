@@ -91,7 +91,7 @@ Key flags:
 | `--dry-run` | Print planned actions without changing the system |
 | `--upgrade` | Upgrade mutable components and runtime patches |
 | `--verify-only` | Verify an existing installation without installing |
-| `--project PATH` | Initialize or refresh OpenSpec in a Git repository |
+| `--project PATH` | Initialize or refresh OpenSpec and create a safe direnv `.envrc` when absent |
 | `--skip-runtimes` | Skip mise and language runtime installation |
 | `--skip-opencode` | Skip OpenCode installation |
 | `--skip-claude` | Skip Claude Code installation |
@@ -104,6 +104,20 @@ Key flags:
 Version overrides are available via `--node-version`, `--python-version`, etc., or through
 `ADT_NODE_VERSION`, `ADT_PYTHON_VERSION`, and similar environment variables. See
 `./environments/linux/install.sh --help` for the full list.
+
+### Project environments
+
+The installer adds direnv's Bash hook and installs its Debian/Ubuntu package. When invoked with
+`--project PATH`, it creates this `.envrc` only if the repository has none:
+
+```bash
+dotenv_if_exists .env.local
+```
+
+Review the generated file and explicitly authorize it with `direnv allow` from the project root.
+Place machine-specific variables and secrets in a gitignored `.env.local`; commit `.envrc` only
+when its contents are safe for collaborators. direnv loads these values while the shell is in the
+project and removes them after leaving it. Existing `.envrc` files are preserved unchanged.
 
 ### Quality tools
 

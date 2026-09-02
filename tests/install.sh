@@ -90,6 +90,63 @@ test_dry_run_does_not_probe_apt_package_metadata() {
   local output
   output="$(install_system_packages)"
   [[ "$output" == *"Dry-run leaves the distro-specific LTTng package unresolved"* ]] || fail "dry-run must explain the unresolved LTTng package"
+  [[ "$output" == *" direnv"* ]] || fail "dry-run must install direnv"
+}
+
+test_shell_configuration_enables_direnv() {
+  local original_home="$HOME"
+  local expected_hook="eval \"\$(direnv hook bash)\""
+  HOME="$TEMP_DIR/home"
+  DRY_RUN=0
+
+  ensure_shell_configuration >/dev/null
+
+  [[ "$(<"$HOME/.bashrc")" == *"$expected_hook"* ]] || fail "managed Bash configuration must enable direnv"
+  HOME="$original_home"
+}
+
+test_project_configuration_creates_direnv_file_when_missing() {
+  local project_root="$TEMP_DIR/project-with-direnv"
+  PROJECT_PATH="$project_root"
+  DRY_RUN=0
+
+  mkdir -p "$project_root/.git"
+  # shellcheck disable=SC2329
+  openspec() { :; }
+
+  configure_project >/dev/null
+
+  assert_equal "$(<"$project_root/.envrc")" "dotenv_if_exists .env.local" "project setup must create a safe direnv configuration"
+}
+
+test_project_configuration_preserves_existing_direnv_file() {
+  local project_root="$TEMP_DIR/project-with-existing-direnv"
+  PROJECT_PATH="$project_root"
+  DRY_RUN=0
+
+  mkdir -p "$project_root/.git"
+  printf '%s\n' 'export PROJECT_SETTING=custom' > "$project_root/.envrc"
+  # shellcheck disable=SC2329
+  openspec() { :; }
+
+  configure_project >/dev/null
+
+  assert_equal "$(<"$project_root/.envrc")" "export PROJECT_SETTING=custom" "project setup must not overwrite an existing direnv configuration"
+}
+
+test_project_configuration_dry_run_previews_direnv_file_without_creating_it() {
+  local project_root="$TEMP_DIR/project-direnv-dry-run"
+  # shellcheck disable=SC2034
+  PROJECT_PATH="$project_root"
+  DRY_RUN=1
+
+  mkdir -p "$project_root/.git"
+
+  local output
+  output="$(configure_project)"
+
+  [[ "$output" == *"dotenv_if_exists .env.local"* ]] || fail "project dry-run must preview the direnv configuration"
+  [[ ! -e "$project_root/.envrc" ]] || fail "project dry-run must not create the direnv configuration"
 }
 
 test_mise_configuration_includes_quality_tools_by_default() {
@@ -134,6 +191,10 @@ load_installer_functions
 test_lttng_selector_prefers_time64_package_when_available
 test_lttng_selector_falls_back_to_legacy_package
 test_dry_run_does_not_probe_apt_package_metadata
+test_shell_configuration_enables_direnv
+test_project_configuration_creates_direnv_file_when_missing
+test_project_configuration_preserves_existing_direnv_file
+test_project_configuration_dry_run_previews_direnv_file_without_creating_it
 test_mise_configuration_includes_quality_tools_by_default
 test_mise_configuration_omits_quality_tools_when_skipped
 test_python_libraries_are_skipped_without_runtimes

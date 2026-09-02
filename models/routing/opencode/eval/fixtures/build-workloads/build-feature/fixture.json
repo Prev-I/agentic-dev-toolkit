@@ -1,1 +1,12 @@
-{"id":"build-feature","phase":"3-comparative","phase_r_admissible":false,"known_repository_snapshot":true,"bounded_task":true,"acceptance_tests":true,"regression_suite":true,"forbidden_scope_assertions":true}
+{
+  "id": "build-feature",
+  "phase": "3-comparative",
+  "phase_r_admissible": false,
+  "known_repository_snapshot": true,
+  "bounded_task": true,
+  "acceptance_tests_initially_failing": true,
+  "regression_command": "bash tests/regression.sh",
+  "required_artifacts": true,
+  "required_behavior_tests": true,
+  "forbidden_scope_assertions": true
+}

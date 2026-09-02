@@ -1,0 +1,5 @@
+{
+  "id":"compaction-invariants",
+  "invariants":["requirements","constraints","decisions","unresolved-risks"],
+  "gate":"preserved == N/N"
+}

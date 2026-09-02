@@ -1,0 +1,28 @@
+{
+  "name": "reviewer",
+  "mode": "subagent",
+  "model": "github-copilot/gpt-5.3-codex",
+  "variant": "max",
+  "tools": {
+    "apply_patch": false,
+    "bash": true,
+    "task": false,
+    "webfetch": true,
+    "websearch": true
+  },
+  "permissions": {
+    "edit": "deny",
+    "task": "deny",
+    "bash": {
+      "wildcard": "deny",
+      "allowed": [
+        "git status*",
+        "git diff*",
+        "git log*",
+        "git show*"
+      ]
+    },
+    "webfetch": null,
+    "websearch": "allow"
+  }
+}

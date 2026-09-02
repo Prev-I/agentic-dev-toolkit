@@ -9,11 +9,16 @@ import json
 import sys
 
 try:
-    data = json.load(open(sys.argv[1], encoding="utf-8"))["breakglass"]
+    profile = json.load(open(sys.argv[1], encoding="utf-8"))
+    data = profile["breakglass"]
 except (OSError, KeyError, TypeError, json.JSONDecodeError):
     raise SystemExit(1)
-raise SystemExit(0 if data.get("mode") == "primary" and
+raise SystemExit(0 if profile.get("non_production") is True and
+                 profile.get("normal_agent_task_permissions", {}).get("breakglass") == "deny" and
+                 data.get("mode") == "primary" and
                  data.get("model") == "openai/gpt-5.6-sol" and
-                 data.get("variant") == "max" else 1)
+                 data.get("variant") == "max" and
+                 data.get("human_selection_only") is True and
+                 data.get("task_routable") is False else 1)
 PY
 }

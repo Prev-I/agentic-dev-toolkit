@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-09-02T18:37:52.902575+02:00",
+  "runtime_version": "1.18.26",
+  "normal_agent_task_denied": true,
+  "normal_agent_exit_status": 0,
+  "human_primary_selected": true,
+  "human_primary_invocation_succeeded": false,
+  "human_primary_exit_status": 1,
+  "human_primary_provider_error": "usage limit has been reached",
+  "hidden_used_as_security_control": false,
+  "autonomous_escalation_present": false
+}

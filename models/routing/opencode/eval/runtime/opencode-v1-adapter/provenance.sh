@@ -9,8 +9,15 @@ emit_run_record() {
 }
 
 validate_installed_manifest() {
-  local file=$1 field
-  for field in profile_id source_commit installed_at opencode_version; do
-    grep -q "\"$field\"" "$file" || return 1
-  done
+  python3 - "$1" <<'PY'
+import json
+import sys
+
+try:
+    data = json.load(open(sys.argv[1], encoding="utf-8"))
+except (OSError, json.JSONDecodeError):
+    raise SystemExit(1)
+required = {"profile_id", "source_commit", "installed_at", "opencode_version"}
+raise SystemExit(0 if isinstance(data, dict) and required <= data.keys() else 1)
+PY
 }

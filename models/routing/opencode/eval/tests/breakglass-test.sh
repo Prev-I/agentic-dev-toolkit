@@ -12,4 +12,8 @@ for mode in missing all subagent; do
   if validate_breakglass "$file"; then fail "accepted Breakglass mode $mode"; fi
   rm -f "$file"
 done
+file=$(mktemp)
+printf '{"mode":"primary","model":"openai/gpt-5.6-sol","variant":"max","breakglass":{"mode":"all"}}' >"$file"
+if validate_breakglass "$file"; then fail "accepted unrelated primary mode"; fi
+rm -f "$file"
 printf 'PASS: Breakglass invariant\n'

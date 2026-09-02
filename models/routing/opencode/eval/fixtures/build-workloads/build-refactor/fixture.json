@@ -1,1 +1,1 @@
-{"id":"build-refactor","phase":"3-comparative","phase_r_admissible":false,"conditional":true}
+{"id":"build-refactor","phase":"3-comparative","phase_r_admissible":false,"conditional":true,"known_repository_snapshot":true,"bounded_task":true,"acceptance_tests":true,"regression_suite":true,"forbidden_scope_assertions":true}

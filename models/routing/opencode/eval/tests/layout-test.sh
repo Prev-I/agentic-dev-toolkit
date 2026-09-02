@@ -9,4 +9,7 @@ for directory in fixtures scoring thresholds decision-rules runtime/opencode-v1-
   assert_dir "$root/$directory"
 done
 
+assert_file "$root/run-tests.sh"
+assert_file "$root/tests/test-lib.sh"
+
 printf 'PASS: Phase 0 eval layout\n'

@@ -1,0 +1,6 @@
+{
+  "id":"reviewer-seeded-defects",
+  "seeded_categories":["concurrency","authorization-security","api-compatibility","boundary-handling","error-swallowing"],
+  "clean_control":{"material_defects":0},
+  "scoring":{"material_defects_detected":"count","clean_control_findings":"count","percentage_rate":false}
+}

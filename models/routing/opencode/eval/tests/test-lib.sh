@@ -19,3 +19,7 @@ assert_file() {
 assert_dir() {
   [[ -d "$1" ]] || fail "missing directory: $1"
 }
+
+assert_contains() {
+  [[ "$1" == *"$2"* ]] || fail "expected '$1' to contain '$2'"
+}

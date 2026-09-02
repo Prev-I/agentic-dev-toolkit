@@ -1,0 +1,10 @@
+{
+  "non_production": true,
+  "breakglass": {
+    "model": "openai/gpt-5.6-sol",
+    "variant": "max",
+    "mode": "primary",
+    "human_selection_only": true,
+    "task_routable": false
+  }
+}

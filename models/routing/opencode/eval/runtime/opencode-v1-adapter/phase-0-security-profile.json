@@ -1,5 +1,9 @@
 {
   "non_production": true,
+  "normal_agent_task_permissions": {
+    "*": "allow",
+    "breakglass": "deny"
+  },
   "breakglass": {
     "model": "openai/gpt-5.6-sol",
     "variant": "max",

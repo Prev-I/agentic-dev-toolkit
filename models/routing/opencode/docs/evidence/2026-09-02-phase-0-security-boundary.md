@@ -47,7 +47,23 @@ profile validator therefore requires all of these conditions:
 `hidden` is intentionally ignored by the validator because discoverability is
 not authorization. No autonomous escalation path is present.
 
-## Runtime result
+## Normal-agent runtime result
+
+OpenCode V1 `1.18.26` exposes resolved agent permissions and inventory through
+`opencode debug agent`, but no standalone command was found that serializes the
+exact model-facing Task-target schema. The strongest prompt-independent runtime
+evidence is therefore `resolved_permission_and_inventory`:
+
+- the normal non-production agent resolves broad Task allow followed by a
+  specific `breakglass` deny under V1's last-match-wins semantics;
+- Breakglass resolves as `primary`, `openai/gpt-5.6-sol`, `max`;
+- prompt behavior is not used as the oracle.
+
+`eval/records/breakglass-normal-agent-non-exposure.json` records this boundary
+as passing. A model is not required to emit a forbidden Task attempt merely to
+prove non-exposure.
+
+## Human-primary runtime result
 
 `eval/records/breakglass-boundary.json` records the live boundary probe:
 
@@ -58,9 +74,9 @@ not authorization. No autonomous escalation path is present.
 - the explicit provider call failed with `usage limit has been reached`, so
   this run does not claim a successful Breakglass response.
 
-The generated configuration and deterministic adapter tests establish the
-ordered `breakglass: deny` rule, reject unstructured denial or selection text,
-and require all live conditions before returning success. The current live
-record is therefore correctly blocked rather than accepted as closure. Earlier
+The previous combined probe required a model-emitted Task attempt and therefore
+does not determine the normal-agent non-exposure result. Its failed direct
+OpenAI execution remains valid historical evidence and is preserved. A separate
+human-primary attempt records the positive gate without weakening it. Earlier
 direct capability records remain timestamped evidence, not a guarantee of
 continuing quota availability.

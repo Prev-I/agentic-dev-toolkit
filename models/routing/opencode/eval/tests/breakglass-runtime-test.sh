@@ -11,6 +11,55 @@ trap 'rm -rf "$workspace"' EXIT
 cat >"$workspace/opencode" <<'FAKE'
 #!/usr/bin/env bash
 if [[ "$1" == --version ]]; then printf '1.18.26\n'; exit 0; fi
+if [[ "$*" == 'debug agent phase0-normal' ]]; then
+  printf '%s\n' '{"name":"phase0-normal","mode":"primary","permission":[{"permission":"task","pattern":"*","action":"allow"},{"permission":"task","pattern":"breakglass","action":"deny"}]}'
+  exit 0
+fi
+if [[ "$*" == 'debug agent breakglass' ]]; then
+  printf '%s\n' '{"name":"breakglass","mode":"primary","model":{"providerID":"openai","modelID":"gpt-5.6-sol"},"variant":"max"}'
+  exit 0
+fi
+exit 9
+FAKE
+chmod +x "$workspace/opencode"
+OPENCODE_BIN="$workspace/opencode" capture_breakglass_non_exposure \
+  "$root/runtime/opencode-v1-adapter/phase-0-security-profile.json" "$workspace/non-exposure.json"
+assert_contains "$(<"$workspace/non-exposure.json")" '"evidence_mechanism": "resolved_permission_and_inventory"'
+assert_contains "$(<"$workspace/non-exposure.json")" '"task_schema_directly_exposed": false'
+assert_contains "$(<"$workspace/non-exposure.json")" '"normal_agent_breakglass_task_action": "deny"'
+assert_contains "$(<"$workspace/non-exposure.json")" '"normal_agent_non_exposure": true'
+assert_contains "$(<"$workspace/non-exposure.json")" '"prompt_behavior_used_as_oracle": false'
+
+for mutation in reversed absent ask subagent wrong-model; do
+  cat >"$workspace/opencode" <<FAKE
+#!/usr/bin/env bash
+if [[ "\$1" == --version ]]; then printf '1.18.26\\n'; exit 0; fi
+if [[ "\$*" == 'debug agent phase0-normal' ]]; then
+  case "$mutation" in
+    reversed) printf '%s\\n' '{"name":"phase0-normal","mode":"primary","permission":[{"permission":"task","pattern":"breakglass","action":"deny"},{"permission":"task","pattern":"*","action":"allow"}]}' ;;
+    absent) printf '%s\\n' '{"name":"phase0-normal","mode":"primary","permission":[{"permission":"task","pattern":"*","action":"allow"}]}' ;;
+    *) printf '%s\\n' '{"name":"phase0-normal","mode":"primary","permission":[{"permission":"task","pattern":"*","action":"allow"},{"permission":"task","pattern":"breakglass","action":"ask"}]}' ;;
+  esac
+  exit 0
+fi
+if [[ "\$*" == 'debug agent breakglass' ]]; then
+  if [[ "$mutation" == subagent ]]; then mode=subagent; else mode=primary; fi
+  if [[ "$mutation" == wrong-model ]]; then model=gpt-5.6-terra; else model=gpt-5.6-sol; fi
+  printf '{"name":"breakglass","mode":"%s","model":{"providerID":"openai","modelID":"%s"},"variant":"max"}\\n' "\$mode" "\$model"
+  exit 0
+fi
+printf 'prompt refusal is not evidence\\n'
+FAKE
+  chmod +x "$workspace/opencode"
+  if OPENCODE_BIN="$workspace/opencode" capture_breakglass_non_exposure \
+    "$root/runtime/opencode-v1-adapter/phase-0-security-profile.json" "$workspace/$mutation.json"; then
+    fail "accepted invalid non-exposure evidence: $mutation"
+  fi
+done
+
+cat >"$workspace/opencode" <<'FAKE'
+#!/usr/bin/env bash
+if [[ "$1" == --version ]]; then printf '1.18.26\n'; exit 0; fi
 if [[ "$*" == 'debug agent breakglass' ]]; then
   printf '%s\n' '{"name":"breakglass","mode":"primary","model":{"providerID":"openai","modelID":"gpt-5.6-sol"},"variant":"max"}'
   exit 0

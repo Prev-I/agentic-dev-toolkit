@@ -132,19 +132,31 @@ primary_ok = any(
     and event.get("part", {}).get("text", "").strip() == "BREAKGLASS_PRIMARY_OK"
     for event in primary
 )
+status = int(os.environ["PRIMARY_STATUS"])
+raw_lower = primary_raw.lower()
+external_markers = ("usage limit", "provider unavailable", "authentication", "network", "429")
+if primary_selected and primary_ok and status == 0:
+    classification = "PASS"
+elif any(marker in raw_lower for marker in external_markers):
+    classification = "BLOCKED_EXTERNAL"
+else:
+    classification = "FAIL"
 record = {
     "timestamp": datetime.datetime.now().astimezone().isoformat(),
     "runtime_version": os.environ["VERSION"].strip(),
     "human_primary_selected": primary_selected,
     "human_primary_invocation_succeeded": primary_ok,
-    "human_primary_exit_status": int(os.environ["PRIMARY_STATUS"]),
-    "human_primary_provider_error": "usage limit has been reached" if "usage limit has been reached" in primary_raw.lower() else None,
+    "human_primary_exit_status": status,
+    "human_primary_provider_error": next((marker for marker in external_markers if marker in raw_lower), None),
+    "classification": classification,
+    "attempt_number": 1,
+    "retry_count": 0,
     "hidden_used_as_security_control": False,
     "autonomous_escalation_present": False,
 }
 with open(sys.argv[1], "w", encoding="utf-8") as handle:
     json.dump(record, handle, indent=2)
     handle.write("\n")
-raise SystemExit(0 if primary_selected and primary_ok and int(os.environ["PRIMARY_STATUS"]) == 0 else 1)
+raise SystemExit(0 if classification == "PASS" else 1)
 PY
 }

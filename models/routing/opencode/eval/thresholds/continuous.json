@@ -1,12 +1,31 @@
 {
-  "status": "blocked_until_self_variance",
-  "minimum_repeated_runs": 3,
-  "required_measurements": [
-    "fixture_determinism",
-    "scoring_repeatability",
-    "instrumentation_consistency",
-    "credit_report_consistency"
-  ],
+  "status": "frozen",
   "candidate_results_may_define_thresholds": false,
-  "thresholds": null
+  "threshold_source": "self-variance",
+  "thresholds": [
+    {
+      "metric": "wall_clock_ms",
+      "status": "frozen",
+      "observed_self_variance": {
+        "relative_range": 0.18944273312797535
+      },
+      "practical_separation_threshold": 0.3788854662559507,
+      "rule": "max(2 * relative_range, 0.20)",
+      "reasoning": "operational threshold; lower median alone is insufficient",
+      "lower_median_alone_is_sufficient": false,
+      "commit_reference": "58e5cf2"
+    },
+    {
+      "metric": "derived_credits",
+      "status": "frozen",
+      "observed_self_variance": {
+        "relative_range": 10.9744152701855
+      },
+      "practical_separation_threshold": 21.948830540371,
+      "rule": "max(2 * relative_range, 0.10)",
+      "reasoning": "operational threshold; lower median alone is insufficient",
+      "lower_median_alone_is_sufficient": false,
+      "commit_reference": "58e5cf2"
+    }
+  ]
 }

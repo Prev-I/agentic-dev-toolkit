@@ -77,6 +77,9 @@ prove non-exposure.
 The previous combined probe required a model-emitted Task attempt and therefore
 does not determine the normal-agent non-exposure result. Its failed direct
 OpenAI execution remains valid historical evidence and is preserved. A separate
-human-primary attempt records the positive gate without weakening it. Earlier
-direct capability records remain timestamped evidence, not a guarantee of
-continuing quota availability.
+human-primary attempt on 2026-09-03 selected the resolved primary
+`openai/gpt-5.6-sol` `max` agent, completed successfully, and returned the exact
+`BREAKGLASS_PRIMARY_OK` text event. The immutable attempt record is
+`eval/records/breakglass-primary-attempt-2026-09-03.json` and is classified
+`PASS` with retry count zero. Earlier direct capability records remain
+timestamped evidence, not a guarantee of continuing quota availability.

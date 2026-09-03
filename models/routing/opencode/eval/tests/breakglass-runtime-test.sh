@@ -67,6 +67,9 @@ OPENCODE_BIN="$workspace/opencode" probe_breakglass_primary \
   "$root/runtime/opencode-v1-adapter/phase-0-security-profile.json" "$workspace/primary.json"
 assert_contains "$(<"$workspace/primary.json")" '"human_primary_selected": true'
 assert_contains "$(<"$workspace/primary.json")" '"human_primary_invocation_succeeded": true'
+assert_contains "$(<"$workspace/primary.json")" '"classification": "PASS"'
+assert_contains "$(<"$workspace/primary.json")" '"attempt_number": 1'
+assert_contains "$(<"$workspace/primary.json")" '"retry_count": 0'
 
 write_fake "$valid_normal" primary gpt-5.6-sol failure
 if OPENCODE_BIN="$workspace/opencode" probe_breakglass_primary \
@@ -74,5 +77,20 @@ if OPENCODE_BIN="$workspace/opencode" probe_breakglass_primary \
   fail "accepted failed primary execution"
 fi
 assert_contains "$(<"$workspace/failed.json")" '"human_primary_invocation_succeeded": false'
+assert_contains "$(<"$workspace/failed.json")" '"classification": "BLOCKED_EXTERNAL"'
+if grep -q 'sessionID\|responseHeaders' "$workspace/failed.json"; then fail "raw provider metadata persisted"; fi
+
+cat >"$workspace/opencode" <<'FAKE'
+#!/usr/bin/env bash
+if [[ "$1" == --version ]]; then printf '1.18.26\n'; exit 0; fi
+if [[ "$*" == 'debug agent breakglass' ]]; then printf '%s\n' '{"name":"breakglass","mode":"primary","model":{"providerID":"openai","modelID":"gpt-5.6-sol"},"variant":"max"}'; exit 0; fi
+printf '%s\n' '{"type":"text","part":{"text":"WRONG"}}'
+FAKE
+chmod +x "$workspace/opencode"
+if OPENCODE_BIN="$workspace/opencode" probe_breakglass_primary \
+  "$root/runtime/opencode-v1-adapter/phase-0-security-profile.json" "$workspace/wrong.json"; then
+  fail "accepted wrong primary response"
+fi
+assert_contains "$(<"$workspace/wrong.json")" '"classification": "FAIL"'
 
 printf 'PASS: Breakglass runtime boundaries\n'

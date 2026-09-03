@@ -51,4 +51,17 @@ assert_contains "$targets" 'compaction github-copilot/gpt-5.6-terra medium'
 assert_contains "$targets" 'expert openai/gpt-5.6-sol xhigh'
 assert_contains "$targets" 'reviewer github-copilot/gpt-5.6-sol high'
 
+# Test cost extraction with null observed_cost to verify the fix for Finding 1:
+# Probe records without step_finish have observed_cost: null (JSON null, not the string "null").
+# The cost-extraction step must emit "null" (the JSON literal string), not "None" (Python's str(None)),
+# so that the ledger_credits_from_cost null guard recognizes it and returns "null" instead of
+# attempting float("None") which would crash the entire preflight under set -Eeuo pipefail.
+emit failure_no_cost.json '{"error_text":"MODEL_UNRESOLVABLE","observed_cost":null}'
+cost=$(python3 -c '
+import json, sys
+value = json.load(open(sys.argv[1]))["observed_cost"]
+print("null" if value is None else value)
+' "$workspace/failure_no_cost.json")
+assert_eq 'null' "$cost"
+
 printf 'PASS: Phase R capability preflight\n'

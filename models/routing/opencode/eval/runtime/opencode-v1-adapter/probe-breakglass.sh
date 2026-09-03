@@ -145,13 +145,23 @@ elif error_status in external_statuses or any(marker in message_lower for marker
     classification = "BLOCKED_EXTERNAL"
 else:
     classification = "FAIL"
+if error_status in {401, 403} or "invalid_api_key" in message_lower or "unauthorized" in message_lower:
+    error_class = "authentication_failure"
+elif error_status == 429 or "usage limit" in message_lower:
+    error_class = "quota_failure"
+elif "timeout" in message_lower or "network" in message_lower or "connection" in message_lower:
+    error_class = "network_failure"
+elif error_status in {500, 502, 503, 504} or "service unavailable" in message_lower or "provider unavailable" in message_lower:
+    error_class = "provider_failure"
+else:
+    error_class = None
 record = {
     "timestamp": datetime.datetime.now().astimezone().isoformat(),
     "runtime_version": os.environ["VERSION"].strip(),
     "human_primary_selected": primary_selected,
     "human_primary_invocation_succeeded": primary_ok,
     "human_primary_exit_status": status,
-    "human_primary_provider_error": error_message[:500] or None,
+    "human_primary_provider_error": error_class,
     "human_primary_provider_status": error_status,
     "resolved_model": f'{model.get("providerID")}/{model.get("modelID")}',
     "resolved_variant": resolved.get("variant"),

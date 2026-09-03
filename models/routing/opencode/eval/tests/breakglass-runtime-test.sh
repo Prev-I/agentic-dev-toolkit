@@ -85,7 +85,7 @@ if grep -q 'sessionID\|responseHeaders' "$workspace/failed.json"; then fail "raw
 for external in quota auth network outage; do
   case "$external" in
     quota) status=429; message='The usage limit has been reached' ;;
-    auth) status=401; message='invalid_api_key' ;;
+    auth) status=401; message='invalid_api_key sk-secret-value' ;;
     network) status=0; message='connection timeout' ;;
     outage) status=503; message='service unavailable' ;;
   esac
@@ -102,6 +102,7 @@ FAKE
     fail "accepted external $external failure"
   fi
   assert_contains "$(<"$workspace/$external-external.json")" '"classification": "BLOCKED_EXTERNAL"'
+  if grep -q 'sk-secret-value' "$workspace/$external-external.json"; then fail "provider error secret persisted"; fi
 done
 
 cat >"$workspace/opencode" <<'FAKE'

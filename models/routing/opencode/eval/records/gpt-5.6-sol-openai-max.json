@@ -1,0 +1,29 @@
+{
+  "timestamp": "2026-09-02T17:04:54.354623+02:00",
+  "runtime_version": "1.18.26",
+  "repository_commit": "2176b4647e28fe94b8dd30edef6decf9191848a9",
+  "environment": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+  "provider": "openai",
+  "model": "gpt-5.6-sol",
+  "variant": "max",
+  "exact_invocation": "opencode run --model openai/gpt-5.6-sol --variant max --format json Reply with exactly: CAPABILITY_OK",
+  "exit_status": 0,
+  "classification": "USABLE",
+  "pricing_regime": "standard",
+  "wall_clock_ms": 12529,
+  "retry_count": 0,
+  "observed_cost": 0,
+  "normalized_steady_state_cost": null,
+  "tokens": 10625,
+  "token_usage": {
+    "total": 10625,
+    "input": 10580,
+    "output": 9,
+    "reasoning": 36,
+    "cache": {
+      "write": 0,
+      "read": 0
+    }
+  },
+  "response_text": "CAPABILITY_OK"
+}

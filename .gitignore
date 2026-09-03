@@ -15,3 +15,6 @@
 .DS_Store
 Thumbs.db
 *.zip
+
+# subagent-driven-development worktrees
+.worktrees/

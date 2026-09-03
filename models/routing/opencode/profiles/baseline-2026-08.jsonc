@@ -1,0 +1,107 @@
+// HISTORICAL RECORD — DO NOT EDIT, DO NOT ACTIVATE.
+//
+// The published OpenCode V1 routing profile as it stood before Phase R.
+// Preserved under decision V3.4.3 §30 and §42.6. Superseded by
+// profiles/v1-restored-2026-09.jsonc once Phase R passes. This file is NOT a
+// Phase-R rollback target: Phase R has no supported rollback.
+//
+// Row-level status at the recorded capability check:
+//
+//   plan        Opus 4.6        MODEL_UNRESOLVABLE / ProviderModelNotFoundError
+//   build       Opus 4.6        MODEL_UNRESOLVABLE / ProviderModelNotFoundError
+//   general     Opus 4.6        MODEL_UNRESOLVABLE / ProviderModelNotFoundError
+//
+//   explore     GPT-5.3-Codex   resolves; abandoned by explicit risk decision
+//   scout       GPT-5.3-Codex   resolves; abandoned by explicit risk decision
+//   reviewer    GPT-5.3-Codex   resolves; abandoned by explicit risk decision
+//   compaction  GPT-5.3-Codex   resolves; abandoned by explicit risk decision
+//   title       GPT-5.3-Codex   resolves; abandoned by explicit risk decision
+//   summary     GPT-5.3-Codex   resolves; abandoned by explicit risk decision
+//
+//   expert      openai/gpt-5.6  working before-state, effort high
+//   breakglass  absent          not present in the pre-Phase-R production profile
+//
+// Codex is NOT retired and NOT globally unavailable. The six moves above are a
+// recorded risk decision, not a capability finding.
+{
+  // OpenCode multi-model routing configuration
+  "$schema": "https://opencode.ai/config.json",
+
+  // Global instruction files loaded into every session
+  "instructions": [
+    ".opencode/model-routing.md"
+  ],
+
+  // Baseline model applied when no agent override matches
+  "model": "github-copilot/claude-opus-4.6",
+
+  "permission": {
+    // Web search via Exa AI — requires OPENCODE_ENABLE_EXA=true in the environment
+    "websearch": "allow"
+  },
+
+  "agent": {
+    // ── Primary work agents (Opus family) ──────────────────────────
+
+    "plan": {
+      // Architectural planning and task decomposition
+      "mode": "primary",
+      "model": "github-copilot/claude-opus-4.6",
+      "variant": "max",
+      "permission": {
+        "edit": "deny",
+        "task": "allow",
+        "bash": "ask"
+      }
+    },
+
+    "build": {
+      // Hands-on code generation and modification
+      "mode": "primary",
+      "model": "github-copilot/claude-opus-4.6",
+      "variant": "high",
+      "permission": {
+        "edit": "allow",
+        "task": "allow",
+        "bash": {
+          "*": "allow",
+          "git push*": "deny"
+        }
+      }
+    },
+
+    "general": {
+      // Catch-all for tasks that do not fit plan or build
+      "model": "github-copilot/claude-opus-4.6",
+      "variant": "xhigh"
+    },
+
+    // ── Navigation and analysis agents (Codex family) ──────────────
+
+    "explore": {
+      // Codebase discovery, search, and context gathering
+      "model": "github-copilot/gpt-5.3-codex",
+      "variant": "high"
+    },
+
+    "scout": {
+      // Targeted lookup and fact-finding across repositories
+      "model": "github-copilot/gpt-5.3-codex",
+      "variant": "high"
+    },
+
+    // ── Lightweight utility agents (Codex family) ──────────────────
+
+    "compaction": {
+      "model": "github-copilot/gpt-5.3-codex"
+    },
+
+    "title": {
+      "model": "github-copilot/gpt-5.3-codex"
+    },
+
+    "summary": {
+      "model": "github-copilot/gpt-5.3-codex"
+    }
+  }
+}

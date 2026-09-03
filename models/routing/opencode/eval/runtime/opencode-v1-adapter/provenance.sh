@@ -21,3 +21,12 @@ required = {"profile_id", "source_commit", "installed_at", "opencode_version"}
 raise SystemExit(0 if isinstance(data, dict) and required <= data.keys() else 1)
 PY
 }
+
+derive_copilot_credits() {
+  local provider=$1 unit=$2 source=$3 cost=$4
+  [[ "$provider" == github-copilot && "$unit" == USD && "$source" == copilot_provider_reported ]] || { printf 'null\n'; return; }
+  python3 - "$cost" <<'PY'
+import sys
+print(float(sys.argv[1]) * 100)
+PY
+}

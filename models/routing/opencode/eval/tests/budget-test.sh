@@ -25,7 +25,10 @@ changes = {
     "headroom": ("current_remaining_headroom_credits", 7269),
 }
 key, value = changes[mutation]
-data[key] = value
+if mutation == "approval":
+    del data[key]
+else:
+    data[key] = value
 with open(output, "w", encoding="utf-8") as handle:
     json.dump(data, handle)
 PY

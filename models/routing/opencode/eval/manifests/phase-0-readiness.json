@@ -1,0 +1,24 @@
+{
+  "as_of": "2026-09-03",
+  "phase_0_complete": true,
+  "gates": [
+    {"gate":"candidate_model_capability","status":"PASS","evidence":"docs/evidence/2026-09-02-phase-0-capability-matrix.md"},
+    {"gate":"variant_effort_capability","status":"PASS","evidence":"docs/evidence/2026-09-02-phase-0-capability-matrix.md"},
+    {"gate":"agent_inventory","status":"PASS","evidence":"docs/evidence/2026-09-02-phase-0-capability-matrix.md"},
+    {"gate":"reviewer_permissions","status":"PASS","evidence":"eval/records/reviewer-permissions.json"},
+    {"gate":"expert_permissions","status":"PASS","evidence":"eval/records/expert-permissions.json"},
+    {"gate":"breakglass_normal_agent_non_exposure","status":"PASS","evidence":"eval/records/breakglass-normal-agent-non-exposure.json"},
+    {"gate":"breakglass_human_primary_execution","status":"PASS","evidence":"eval/records/breakglass-primary-attempt-2026-09-03.json"},
+    {"gate":"eval_budget","status":"PASS","evidence":"eval/manifests/phase-0-budgets.json"},
+    {"gate":"phase_r_recovery_budget","status":"PASS","evidence":"eval/manifests/phase-0-budgets.json"},
+    {"gate":"self_variance","status":"PASS","evidence":"eval/records/self-variance/summary.json"},
+    {"gate":"continuous_thresholds","status":"PASS","evidence":"eval/thresholds/continuous.json"},
+    {"gate":"eval_provenance","status":"PASS","evidence":"eval/records/self-variance/attempt-1.json"},
+    {"gate":"installed_profile_manifest","status":"PASS","evidence":"eval/manifests/installed-profile.json"},
+    {"gate":"build_restoration_fixture","status":"PASS","evidence":"eval/fixtures/build-workloads/build-restoration-gate/fixture.json"},
+    {"gate":"reviewer_clean_control","status":"PASS","evidence":"eval/fixtures/reviewer-seeded-defects/fixture.json"},
+    {"gate":"compaction_invariants","status":"PASS","evidence":"eval/fixtures/compaction-invariants/fixture.json"},
+    {"gate":"governance","status":"PASS","evidence":"docs/evidence/2026-09-02-governance-blockers.md"},
+    {"gate":"sol_pricing_regime_handling","status":"PASS","evidence":"docs/evidence/2026-09-02-phase-0-capability-matrix.md"}
+  ]
+}

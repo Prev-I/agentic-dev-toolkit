@@ -6,6 +6,10 @@ Phase 0 establishes the evaluation and security mechanisms needed before any
 routing restoration or comparative model work. It does not execute Phase R,
 Phase 3, or Phase 4 and does not change the published routing profile.
 
+Final closure status is recorded in
+`2026-09-03-phase-0-readiness.md`. All required Phase-0 gates are now `PASS`;
+this does not authorize Phase R.
+
 ## Implemented gates
 
 - Runtime provenance and installed-profile manifest validation.
@@ -27,14 +31,12 @@ and GitHub billing enforcement remain external organizational controls. The
 repository does not implement a spending-cap feature and must not represent the
 external Copilot guardrail as locally enforced.
 
-## Blocking budget inputs
+## Approved budget inputs
 
-Two separate numerical approvals are still absent:
-
-| Input | Status | Consequence |
-|---|---|---|
-| Project evaluation budget | `UNRESOLVED` | No candidate evaluation program may begin. |
-| Phase-R bisection/recovery budget | `UNRESOLVED` | Phase R may not begin or consume recovery attempts. |
+| Input | Status | Approved credits |
+|---|---|---:|
+| Project evaluation budget | `PASS` | 100 |
+| Phase-R bisection/recovery budget | `PASS` | 250 |
 
 The external organization-level Copilot guardrail is neither of these budgets.
 No value is inferred from observed cost, historic credit use, or provider quota.
@@ -50,13 +52,9 @@ profile manifest and runtime version. Without per-session runtime capture, it
 cannot prove that the installed file was the effective merged configuration for
 an individual session.
 
-## Remaining Phase-R blockers
+## Remaining Phase-R boundary
 
-- Human approval of the project evaluation budget.
-- Human approval of the distinct Phase-R bisection/recovery budget.
-- Repeated-run self-variance evidence and committed practical continuous
-  thresholds before candidate A/B results are exposed.
-- Current provider quota sufficient for any approved direct OpenAI work.
-- Explicit human authorization to begin Phase R after all gates are satisfied.
+Phase-0 readiness does not begin Phase R. A separate explicit human start
+decision is still required before restoration work.
 
 No statement in this record authorizes Phase R.

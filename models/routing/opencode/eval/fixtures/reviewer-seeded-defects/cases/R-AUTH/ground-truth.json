@@ -1,0 +1,1 @@
+{"base":"../../clean","overrides":["authorization.sh"],"expected_material_defect":{"id":"R-AUTH","description":"authenticated caller can access a resource owned by another caller"}}

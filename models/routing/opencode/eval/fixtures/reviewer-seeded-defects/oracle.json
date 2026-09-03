@@ -1,0 +1,7 @@
+{
+  "expected_ids": ["R-CONCURRENCY", "R-AUTH", "R-API", "R-BOUNDARY", "R-ERROR"],
+  "required_seeded_detections": 5,
+  "allowed_clean_material_findings": 0,
+  "material_severities": ["material", "blocking"],
+  "non_material_severities": ["suggestion"]
+}

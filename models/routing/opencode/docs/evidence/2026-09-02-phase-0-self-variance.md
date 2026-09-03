@@ -13,8 +13,8 @@ Each repeated harness run supplies:
 - `fixture_digest`: digest of the immutable fixture input;
 - `score`: complete scorer output for repeatability comparison;
 - `instrumentation_schema`: version of the captured run instrumentation;
-- `credit_report.observed_cost` and `credit_report.tokens`: required credit
-  instrumentation fields.
+- `credit_report.observed_cost` plus its source/unit metadata, and the top-level
+  structured `tokens` object: required usage instrumentation fields.
 
 At least three repeated records are required. The measurement refuses incomplete
 records and records no candidate output.

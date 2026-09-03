@@ -29,7 +29,7 @@ for run in runs:
 def measurement(values):
     median = statistics.median(values)
     spread = max(values) - min(values)
-    return {"values": values, "minimum": min(values), "median": median, "maximum": max(values), "range": spread, "relative_range": spread / median if median else None}
+    return {"status": "comparable", "values": values, "minimum": min(values), "median": median, "maximum": max(values), "range": spread, "relative_range": spread / median if median else None}
 
 valid = all(run.get("classification") == "VALID" for run in runs)
 wall_clock = measurement([run["wall_clock_ms"] for run in runs]) if valid else None
@@ -41,7 +41,10 @@ credit_comparable = valid and all(
     and isinstance(run["credit_report"].get("derived_credits"), (int, float))
     for run in runs
 )
-credits = measurement([run["credit_report"]["derived_credits"] for run in runs]) if credit_comparable else None
+credits = measurement([run["credit_report"]["derived_credits"] for run in runs]) if credit_comparable else {"status": "unavailable", "reason": "incompatible_or_invalid_credit_evidence"}
+if credit_comparable:
+    credits["cost_unit"] = "USD"
+    credits["cost_source"] = "copilot_provider_reported"
 
 record = {
     "sample_count": len(runs),

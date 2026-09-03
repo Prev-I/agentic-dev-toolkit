@@ -3,8 +3,8 @@
 ## Status
 
 The measurement mechanism and three-run repeated dataset are complete.
-Continuous thresholds remain blocked until they are derived and committed from
-this evidence. Candidate A/B results remain hidden.
+Continuous thresholds are frozen from this evidence. Candidate A/B results were
+not visible during derivation.
 
 ## Input record
 
@@ -81,3 +81,19 @@ calls. Threshold derivation must account for this observed warm-cache effect.
 
 This three-run operational measurement does not support a statistical
 significance claim.
+
+## Frozen thresholds
+
+Thresholds reference self-variance evidence commit `58e5cf2` and use
+`max(2 x relative range, practical floor)`:
+
+| Metric | Relative range | Floor | Frozen threshold |
+|---|---:|---:|---:|
+| Wall-clock time | 18.9443% | 20% | 37.8885% |
+| Comparable derived credits | 1097.4415% | 10% | 2194.8831% |
+
+The high cost threshold is intentional operational conservatism caused by the
+observed uncached first call versus two cache-read calls. A future lower median
+does not separate candidates unless it clears the threshold with compatible
+units and pricing regimes. These values are operational rules, not statistical
+significance claims.

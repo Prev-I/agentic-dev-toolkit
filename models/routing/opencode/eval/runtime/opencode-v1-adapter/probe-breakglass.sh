@@ -117,7 +117,6 @@ def events(path):
     return result
 
 primary = events(os.environ["PRIMARY_RAW"])
-primary_raw = open(os.environ["PRIMARY_RAW"], encoding="utf-8", errors="replace").read()
 resolved = json.load(open(os.environ["RESOLVED_AGENT"], encoding="utf-8"))
 model = resolved.get("model", {})
 primary_selected = (
@@ -133,11 +132,16 @@ primary_ok = any(
     for event in primary
 )
 status = int(os.environ["PRIMARY_STATUS"])
-raw_lower = primary_raw.lower()
-external_markers = ("usage limit", "provider unavailable", "authentication", "network", "429")
+errors = [event.get("error", {}).get("data", {}) for event in primary if event.get("type") == "error"]
+error_data = next((item for item in errors if isinstance(item, dict)), {})
+error_message = str(error_data.get("message", ""))
+error_status = error_data.get("statusCode")
+message_lower = error_message.lower()
+external_markers = ("usage limit", "provider unavailable", "authentication", "unauthorized", "invalid_api_key", "network", "timeout", "connection", "service unavailable")
+external_statuses = {401, 403, 429, 500, 502, 503, 504}
 if primary_selected and primary_ok and status == 0:
     classification = "PASS"
-elif any(marker in raw_lower for marker in external_markers):
+elif error_status in external_statuses or any(marker in message_lower for marker in external_markers):
     classification = "BLOCKED_EXTERNAL"
 else:
     classification = "FAIL"
@@ -147,7 +151,10 @@ record = {
     "human_primary_selected": primary_selected,
     "human_primary_invocation_succeeded": primary_ok,
     "human_primary_exit_status": status,
-    "human_primary_provider_error": next((marker for marker in external_markers if marker in raw_lower), None),
+    "human_primary_provider_error": error_message[:500] or None,
+    "human_primary_provider_status": error_status,
+    "resolved_model": f'{model.get("providerID")}/{model.get("modelID")}',
+    "resolved_variant": resolved.get("variant"),
     "classification": classification,
     "attempt_number": 1,
     "retry_count": 0,

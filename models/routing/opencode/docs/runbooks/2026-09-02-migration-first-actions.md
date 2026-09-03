@@ -108,3 +108,11 @@ policy fact
 risk decision
 fixture result
 ```
+
+## Phase-R ground-truth closure
+
+The dated readiness record at
+`../evidence/2026-09-03-phase-r-ground-truth-readiness.md` closes the executable
+Reviewer, Explore, and Compaction ground truth, exact Scout/Compaction variants,
+and user-global activation contract. Use that amendment with the approved
+V3.4.3 decision when preparing Phase R.

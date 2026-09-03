@@ -1,0 +1,22 @@
+{
+  "decision_date": "2026-09-03",
+  "status": "READY",
+  "targets": {
+    "scout": {"model": "github-copilot/gpt-5.6-luna", "variant": "low"},
+    "compaction": {"model": "github-copilot/gpt-5.6-terra", "variant": "medium"}
+  },
+  "reviewer_gate": {"required_ids": ["R-CONCURRENCY", "R-AUTH", "R-API", "R-BOUNDARY", "R-ERROR"], "required_detections": 5, "allowed_clean_material_findings": 0},
+  "explore_gate": {"required_hops": 4, "terminal_symbol": "PROTOCOL_VERSION", "terminal_value": "v3"},
+  "compaction_gate": {"required_preserved": 4, "allowed_contradictions": 0},
+  "activation": {
+    "scope": "user-global",
+    "root": "~/.config/opencode/",
+    "project_local": false,
+    "repository_owned_installer": false,
+    "default_target": "opencode.jsonc",
+    "both_files_action": "BLOCK",
+    "preserve_unrelated_configuration": true,
+    "local_backup_required": true,
+    "verify_effective_resolved_profile": true
+  }
+}

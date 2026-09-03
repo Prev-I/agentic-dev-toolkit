@@ -13,6 +13,18 @@ assert d["expected_ids"] == ["R-CONCURRENCY","R-AUTH","R-API","R-BOUNDARY","R-ER
 assert d["required_seeded_detections"] == 5
 assert d["allowed_clean_material_findings"] == 0
 PY
+python3 - "$fixture" <<'PY'
+import json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+fixture = json.load(open(root / "fixture.json"))
+oracle = json.load(open(root / "oracle.json"))
+filesystem_ids = sorted(path.name for path in (root / "cases").iterdir() if path.is_dir())
+assert filesystem_ids == sorted(fixture["seeded_cases"]) == sorted(oracle["expected_ids"])
+assert len(filesystem_ids) == oracle["required_seeded_detections"] == 5
+for case_id in filesystem_ids:
+    ground_truth = json.load(open(root / "cases" / case_id / "ground-truth.json"))
+    assert ground_truth["expected_material_defect"]["id"] == case_id
+PY
 for id in R-CONCURRENCY R-AUTH R-API R-BOUNDARY R-ERROR; do
   assert_file "$fixture/cases/$id/ground-truth.json"
   python3 - "$fixture" "$id" <<'PY'

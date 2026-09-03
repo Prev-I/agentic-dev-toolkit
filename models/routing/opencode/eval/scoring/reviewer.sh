@@ -17,7 +17,8 @@ findings = json.load(open(sys.argv[2], encoding="utf-8"))
 material = set(oracle["material_severities"])
 detected = {item["id"] for item in findings["seeded"] if item.get("severity") in material}
 clean_material = [item for item in findings["clean"] if item.get("severity") in material]
-passed = detected == set(oracle["expected_ids"]) and len(clean_material) == oracle["allowed_clean_material_findings"]
+expected = set(oracle["expected_ids"])
+passed = (len(expected) == oracle["required_seeded_detections"] and detected == expected and len(detected) == oracle["required_seeded_detections"] and len(clean_material) == oracle["allowed_clean_material_findings"])
 print("pass" if passed else "block")
 PY
 }

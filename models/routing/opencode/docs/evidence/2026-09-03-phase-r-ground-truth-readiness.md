@@ -17,8 +17,10 @@ are `READY`. This record does not activate routing or authorize model runs.
 | Compaction threshold | `READY` | 4/4 preserved; zero contradictions |
 | Scout production variant | `READY` | `github-copilot/gpt-5.6-luna` `low` |
 | Compaction production variant | `READY` | `github-copilot/gpt-5.6-terra` `medium` |
-| Activation target | `READY` | User-global `~/.config/opencode/` only |
-| Activation ambiguity rule | `READY` | Both JSON and JSONC present blocks activation |
+| Activation target | `READY` | Canonical `~/.config/opencode/opencode.jsonc` |
+| Activation selector | `READY` | Exactly one top-level global config remains active |
+| Effective configuration preservation | `PASS` | Normalized resolved explicit configuration is unchanged |
+| Project routing override | `PASS` | Ancestor/project configuration contains no routing-owned keys |
 
 ## Activation contract
 
@@ -33,6 +35,11 @@ routing-owned fields. After activation, Phase R must verify the effective
 resolved profile because project configuration may override global values. The
 installed-profile evidence must record target path, source routing commit,
 activation timestamp, OpenCode version, and resolved effective routing.
+
+The workstation ambiguity was resolved by the redacted activation preflight in
+`2026-09-03-activation-preflight.md`. The current selector now resolves the
+canonical JSONC target unambiguously. This normalization preserves the
+pre-Phase-R routing and does not itself begin activation.
 
 ## Historical decisions
 

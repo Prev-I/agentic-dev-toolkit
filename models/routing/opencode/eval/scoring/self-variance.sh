@@ -8,6 +8,7 @@ measure_self_variance() {
   (( $# >= 3 )) || return 1
   python3 - "$output" "$@" <<'PY'
 import json
+import statistics
 import sys
 
 output, *paths = sys.argv[1:]
@@ -19,9 +20,26 @@ if any(required - run.keys() for run in runs):
 credit_shapes = []
 for run in runs:
     report = run["credit_report"]
-    if not isinstance(report, dict) or not {"observed_cost", "tokens"} <= report.keys():
+    if not isinstance(report, dict) or "observed_cost" not in report or "tokens" not in run:
         raise SystemExit("credit_report is missing required fields")
     credit_shapes.append({key: type(value).__name__ for key, value in sorted(report.items())})
+
+def measurement(values):
+    median = statistics.median(values)
+    spread = max(values) - min(values)
+    return {"values": values, "minimum": min(values), "median": median, "maximum": max(values), "range": spread, "relative_range": spread / median if median else None}
+
+valid = all(run.get("classification") == "VALID" for run in runs)
+wall_clock = measurement([run["wall_clock_ms"] for run in runs]) if valid else None
+credit_comparable = valid and all(
+    run.get("provider") == "github-copilot"
+    and run.get("pricing_regime") == "standard"
+    and run["credit_report"].get("cost_unit") == "USD"
+    and run["credit_report"].get("cost_source") == "copilot_provider_reported"
+    and isinstance(run["credit_report"].get("derived_credits"), (int, float))
+    for run in runs
+)
+credits = measurement([run["credit_report"]["derived_credits"] for run in runs]) if credit_comparable else None
 
 record = {
     "sample_count": len(runs),
@@ -31,6 +49,8 @@ record = {
     "credit_report_consistency": all(shape == credit_shapes[0] for shape in credit_shapes),
     "self_variance_complete": True,
     "candidate_results_used": False,
+    "wall_clock_ms": wall_clock,
+    "derived_credits": credits,
 }
 with open(output, "w", encoding="utf-8") as handle:
     json.dump(record, handle, indent=2)

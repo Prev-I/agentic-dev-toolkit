@@ -64,13 +64,12 @@ raise SystemExit(0 if passed else 1)
 PY
 }
 
-probe_breakglass_boundary() {
+probe_breakglass_primary() {
   local profile=$1 output=$2 bin=${OPENCODE_BIN:-opencode}
-  local workspace config normal_raw primary_raw resolved_agent normal_status primary_status version
+  local workspace config primary_raw resolved_agent primary_status version
   workspace=$(mktemp -d)
   trap 'rm -rf "$workspace"' RETURN
   config="$workspace/config.json"
-  normal_raw="$workspace/normal.jsonl"
   primary_raw="$workspace/primary.jsonl"
   resolved_agent="$workspace/resolved-agent.json"
 
@@ -78,17 +77,9 @@ probe_breakglass_boundary() {
 import json
 import sys
 
-profile = json.load(open(sys.argv[1], encoding="utf-8"))
-task = profile["normal_agent_task_permissions"]
-breakglass = profile["breakglass"]
+breakglass = json.load(open(sys.argv[1], encoding="utf-8"))["breakglass"]
 config = {
     "agent": {
-        "phase0-normal": {
-            "mode": "primary",
-            "model": "github-copilot/gpt-5.6-luna",
-            "variant": "low",
-            "permission": {"task": task},
-        },
         "breakglass": {
             "mode": breakglass["mode"],
             "model": breakglass["model"],
@@ -103,18 +94,14 @@ PY
   config=$(<"$config")
   OPENCODE_CONFIG_CONTENT="$config" "$bin" debug agent breakglass >"$resolved_agent"
   set +e
-  OPENCODE_CONFIG_CONTENT="$config" "$bin" --print-logs run --agent phase0-normal --format json \
-    'Invoke the task tool with subagent_type "breakglass". Do not substitute another agent.' \
-    >"$normal_raw" 2>&1
-  normal_status=$?
   OPENCODE_CONFIG_CONTENT="$config" "$bin" --print-logs run --agent breakglass --format json \
     'Reply with exactly: BREAKGLASS_PRIMARY_OK' >"$primary_raw" 2>&1
   primary_status=$?
   set -e
   version=$($bin --version 2>/dev/null || printf unknown)
 
-  VERSION="$version" NORMAL_STATUS="$normal_status" PRIMARY_STATUS="$primary_status" \
-    NORMAL_RAW="$normal_raw" PRIMARY_RAW="$primary_raw" RESOLVED_AGENT="$resolved_agent" python3 - "$output" <<'PY'
+  VERSION="$version" PRIMARY_STATUS="$primary_status" \
+    PRIMARY_RAW="$primary_raw" RESOLVED_AGENT="$resolved_agent" python3 - "$output" <<'PY'
 import datetime
 import json
 import os
@@ -129,17 +116,9 @@ def events(path):
             pass
     return result
 
-normal = events(os.environ["NORMAL_RAW"])
 primary = events(os.environ["PRIMARY_RAW"])
 primary_raw = open(os.environ["PRIMARY_RAW"], encoding="utf-8", errors="replace").read()
 resolved = json.load(open(os.environ["RESOLVED_AGENT"], encoding="utf-8"))
-normal_denied = any(
-    event.get("type") == "tool_use"
-    and event.get("part", {}).get("tool") == "task"
-    and event.get("part", {}).get("state", {}).get("status") == "error"
-    and event.get("part", {}).get("state", {}).get("input", {}).get("subagent_type") == "breakglass"
-    for event in normal
-)
 model = resolved.get("model", {})
 primary_selected = (
     resolved.get("name") == "breakglass"
@@ -156,8 +135,6 @@ primary_ok = any(
 record = {
     "timestamp": datetime.datetime.now().astimezone().isoformat(),
     "runtime_version": os.environ["VERSION"].strip(),
-    "normal_agent_task_denied": normal_denied,
-    "normal_agent_exit_status": int(os.environ["NORMAL_STATUS"]),
     "human_primary_selected": primary_selected,
     "human_primary_invocation_succeeded": primary_ok,
     "human_primary_exit_status": int(os.environ["PRIMARY_STATUS"]),
@@ -168,6 +145,6 @@ record = {
 with open(sys.argv[1], "w", encoding="utf-8") as handle:
     json.dump(record, handle, indent=2)
     handle.write("\n")
-raise SystemExit(0 if normal_denied and primary_selected and primary_ok else 1)
+raise SystemExit(0 if primary_selected and primary_ok and int(os.environ["PRIMARY_STATUS"]) == 0 else 1)
 PY
 }

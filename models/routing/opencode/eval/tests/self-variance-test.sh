@@ -41,6 +41,12 @@ assert_contains "$(<"$state")" '"range": 200'
 assert_contains "$(<"$state")" '"relative_range": 0.18181818181818182'
 assert_contains "$(<"$state")" '"median": 1.1'
 assert_contains "$(<"$state")" '"range": 0.19999999999999996'
+python3 - "$state" <<'PY'
+import json,sys
+d=json.load(open(sys.argv[1]))
+assert d["wall_clock_ms"]["relative_range"] == 200/1100
+assert d["derived_credits"]["relative_range"] == (1.2-1.0)/1.1
+PY
 
 for mutation in units invalid null candidate; do
   cp "$workspace/run-3.json" "$workspace/mutated.json"

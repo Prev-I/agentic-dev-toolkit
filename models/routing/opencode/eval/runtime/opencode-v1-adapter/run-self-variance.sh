@@ -3,6 +3,7 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 adapter_root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$adapter_root/validate-budget.sh"
+source "$adapter_root/provenance.sh"
 
 run_self_variance_once() {
   local fixture=$1 budget=$2 output=$3 bin=${OPENCODE_BIN:-opencode}
@@ -44,7 +45,7 @@ PY
 run_self_variance_set() {
   local fixture=$1 budget=$2 output_dir=$3
   mkdir -p "$output_dir"
-  local valid attempts spent projected
+  local valid attempts spent projected reservation
   IFS=' ' read -r valid attempts spent < <(python3 - "$output_dir" <<'PY'
 import glob,json,sys
 rows=[json.load(open(p)) for p in glob.glob(sys.argv[1]+"/attempt-*.json")]
@@ -52,10 +53,14 @@ print(sum(r.get("classification")=="VALID" for r in rows),len(rows),sum((r.get("
 PY
 )
   (( valid < 3 )) || return 1
+  reservation=$(python3 - <<'PY'
+print(100 / 3)
+PY
+)
   while (( valid < 3 )); do
-    projected=$(python3 - "$spent" <<'PY'
+    projected=$(python3 - "$spent" "$reservation" <<'PY'
 import sys
-print(float(sys.argv[1])+1.0)
+print(float(sys.argv[1])+float(sys.argv[2]))
 PY
 )
     python3 - "$projected" <<'PY' || return 1

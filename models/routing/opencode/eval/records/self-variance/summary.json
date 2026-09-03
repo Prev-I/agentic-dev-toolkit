@@ -1,0 +1,37 @@
+{
+  "sample_count": 3,
+  "fixture_determinism": true,
+  "scoring_repeatability": true,
+  "instrumentation_consistency": true,
+  "credit_report_consistency": true,
+  "self_variance_complete": true,
+  "candidate_results_used": false,
+  "wall_clock_ms": {
+    "status": "comparable",
+    "values": [
+      7142,
+      7652,
+      6299
+    ],
+    "minimum": 6299,
+    "median": 7142,
+    "maximum": 7652,
+    "range": 1353,
+    "relative_range": 0.18944273312797535
+  },
+  "derived_credits": {
+    "status": "comparable",
+    "values": [
+      0.26724499999999995,
+      0.022317999999999998,
+      0.022317999999999998
+    ],
+    "minimum": 0.022317999999999998,
+    "median": 0.022317999999999998,
+    "maximum": 0.26724499999999995,
+    "range": 0.24492699999999995,
+    "relative_range": 10.9744152701855,
+    "cost_unit": "USD",
+    "cost_source": "copilot_provider_reported"
+  }
+}

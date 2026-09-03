@@ -1,0 +1,7 @@
+{
+  "id":"expert-reviewer-wrong",
+  "levels":{"A":{"pooled":false},"B":{"pooled":false},"C":{"pooled":false}},
+  "diagnostic_control":{"model":"github-copilot/claude-opus-5","routing_candidate":false},
+  "future_family_challenger":"github-copilot/grok-4.6",
+  "phase_4_executed":false
+}

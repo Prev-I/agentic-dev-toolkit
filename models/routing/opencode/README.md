@@ -65,8 +65,21 @@ The organization policy page is authoritative for policy state, not runtime
 capability state.
 
 The [governance blocker record](docs/evidence/2026-09-02-governance-blockers.md)
-lists the named Copilot, OpenAI, and OpenCode V2 RFC ownership decisions still
-required before Phase 0 can complete.
+records the resolved local Copilot, OpenAI, and OpenCode V2 RFC ownership
+decisions and distinguishes external organizational controls.
+
+## Phase 0 evaluation harness
+
+Run the dependency-free Phase 0 gate tests from the repository root:
+
+```bash
+bash models/routing/opencode/eval/run-tests.sh
+```
+
+The harness is evidence infrastructure only. It does not install or activate a
+routing profile, call candidate models during tests, or authorize Phase R. See
+the [Phase 0 gate record](docs/evidence/2026-09-02-phase-0-gates.md) for the
+implemented gates and unresolved budget inputs.
 
 ## 1. Verify model IDs and variants
 

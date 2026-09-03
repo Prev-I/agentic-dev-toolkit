@@ -7,26 +7,26 @@ readiness stage. This does not authorize or start Phase R.
 
 ## Gate matrix
 
-| Gate | Status | Evidence |
-|---|---|---|
-| Candidate model capability | `PASS` | `2026-09-02-phase-0-capability-matrix.md` |
-| Variant/effort capability | `PASS` | `2026-09-02-phase-0-capability-matrix.md` |
-| Agent inventory | `PASS` | `2026-09-02-phase-0-capability-matrix.md` |
-| Reviewer permissions | `PASS` | `eval/records/reviewer-permissions.json` |
-| Expert permissions | `PASS` | `eval/records/expert-permissions.json` |
-| Breakglass normal-agent non-exposure | `PASS` | `eval/records/breakglass-normal-agent-non-exposure.json` |
-| Breakglass human-primary execution | `PASS` | `eval/records/breakglass-primary-attempt-2026-09-03.json` |
-| Evaluation budget | `PASS` | `eval/manifests/phase-0-budgets.json` |
-| Phase-R recovery budget | `PASS` | `eval/manifests/phase-0-budgets.json` |
-| Harness self-variance | `PASS` | `eval/records/self-variance/summary.json` |
-| Continuous thresholds | `PASS` | `eval/thresholds/continuous.json` |
-| Eval provenance | `PASS` | `eval/records/self-variance/attempt-*.json` |
-| Installed-profile manifest | `PASS` | `eval/manifests/installed-profile.json` |
-| Build restoration fixture/state rules | `PASS` | `eval/fixtures/build-workloads/build-restoration-gate/fixture.json` |
-| Reviewer clean control | `PASS` | `eval/fixtures/reviewer-seeded-defects/fixture.json` |
-| Compaction invariants | `PASS` | `eval/fixtures/compaction-invariants/fixture.json` |
-| Governance | `PASS` | `2026-09-02-governance-blockers.md` |
-| Sol pricing-regime handling | `PASS` | `2026-09-02-phase-0-capability-matrix.md` |
+| Gate | Status | Evidence | Rationale |
+|---|---|---|---|
+| Candidate model capability | `PASS` | `2026-09-02-phase-0-capability-matrix.md` | Required candidates completed explicit calls. |
+| Variant/effort capability | `PASS` | `2026-09-02-phase-0-capability-matrix.md` | Required variants completed explicit calls. |
+| Agent inventory | `PASS` | `2026-09-02-phase-0-capability-matrix.md` | Expected V1 agents and modes were recorded. |
+| Reviewer permissions | `PASS` | `eval/records/reviewer-permissions.json` | Resolved permissions enforce the read-only boundary. |
+| Expert permissions | `PASS` | `eval/records/expert-permissions.json` | Resolved permissions deny mutation, delegation, shell, and web access. |
+| Breakglass normal-agent non-exposure | `PASS` | `eval/records/breakglass-normal-agent-non-exposure.json` | Resolved Task rules deny Breakglass and inventory marks it primary. |
+| Breakglass human-primary execution | `PASS` | `eval/records/breakglass-primary-attempt-2026-09-03.json` | Explicit primary execution returned the exact expected response. |
+| Evaluation budget | `PASS` | `eval/manifests/phase-0-budgets.json` | The human owner approved 100 credits. |
+| Phase-R recovery budget | `PASS` | `eval/manifests/phase-0-budgets.json` | The human owner reserved 250 non-reclaimable credits. |
+| Harness self-variance | `PASS` | `eval/records/self-variance/summary.json` | Three valid non-candidate runs passed all consistency checks. |
+| Continuous thresholds | `PASS` | `eval/thresholds/continuous.json` | Thresholds derive from previously committed self-variance evidence. |
+| Eval provenance | `PASS` | `eval/records/self-variance/attempt-*.json` | Every measured run records the required runtime and usage fields. |
+| Installed-profile manifest | `PASS` | `eval/manifests/installed-profile.json` | Schema and provenance ceiling are recorded without activation. |
+| Build restoration fixture/state rules | `PASS` | `eval/fixtures/build-workloads/build-restoration-gate/fixture.json` | Mechanical oracle and immutable state rules are committed and tested. |
+| Reviewer clean control | `PASS` | `eval/fixtures/reviewer-seeded-defects/fixture.json` | Seeded and clean controls provide grounded denominators. |
+| Compaction invariants | `PASS` | `eval/fixtures/compaction-invariants/fixture.json` | Tagged invariants use exact N/N preservation. |
+| Governance | `PASS` | `2026-09-02-governance-blockers.md` | Local ownership and external-control boundaries are resolved. |
+| Sol pricing-regime handling | `PASS` | `2026-09-02-phase-0-capability-matrix.md` | Promotional observations cannot become canonical steady-state cost. |
 
 ## Decisions and measurements
 
@@ -42,7 +42,8 @@ readiness stage. This does not authorize or start Phase R.
 - Breakglass normal boundary: resolved permission and inventory evidence;
   prompt behavior was not used as the oracle.
 - Breakglass positive boundary: explicit direct OpenAI primary selection and
-  exact response succeeded on the single approved retry.
+  exact response succeeded on the single closure attempt following the
+  preserved historical failure.
 
 The installed-profile manifest passes as the ordinary-session provenance schema
 and ceiling record. `installed_at` remains null because this closure did not

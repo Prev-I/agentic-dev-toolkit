@@ -141,7 +141,7 @@ external_markers = ("usage limit", "provider unavailable", "authentication", "un
 external_statuses = {401, 403, 429, 500, 502, 503, 504}
 if primary_selected and primary_ok and status == 0:
     classification = "PASS"
-elif error_status in external_statuses or any(marker in message_lower for marker in external_markers):
+elif primary_selected and (error_status in external_statuses or any(marker in message_lower for marker in external_markers)):
     classification = "BLOCKED_EXTERNAL"
 else:
     classification = "FAIL"

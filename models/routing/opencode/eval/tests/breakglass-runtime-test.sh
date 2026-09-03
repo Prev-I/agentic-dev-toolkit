@@ -118,4 +118,18 @@ if OPENCODE_BIN="$workspace/opencode" probe_breakglass_primary \
 fi
 assert_contains "$(<"$workspace/wrong.json")" '"classification": "FAIL"'
 
+cat >"$workspace/opencode" <<'FAKE'
+#!/usr/bin/env bash
+if [[ "$1" == --version ]]; then printf '1.18.26\n'; exit 0; fi
+if [[ "$*" == 'debug agent breakglass' ]]; then printf '%s\n' '{"name":"breakglass","mode":"subagent","model":{"providerID":"openai","modelID":"gpt-5.6-sol"},"variant":"max"}'; exit 0; fi
+printf '%s\n' '{"type":"error","error":{"data":{"message":"The usage limit has been reached","statusCode":429}}}'
+exit 1
+FAKE
+chmod +x "$workspace/opencode"
+if OPENCODE_BIN="$workspace/opencode" probe_breakglass_primary \
+  "$root/runtime/opencode-v1-adapter/phase-0-security-profile.json" "$workspace/misconfigured-external.json"; then
+  fail "accepted misconfigured external failure"
+fi
+assert_contains "$(<"$workspace/misconfigured-external.json")" '"classification": "FAIL"'
+
 printf 'PASS: Breakglass runtime boundaries\n'

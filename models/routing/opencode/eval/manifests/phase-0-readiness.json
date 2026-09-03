@@ -2,23 +2,113 @@
   "as_of": "2026-09-03",
   "phase_0_complete": true,
   "gates": [
-    {"gate":"candidate_model_capability","status":"PASS","evidence":"docs/evidence/2026-09-02-phase-0-capability-matrix.md"},
-    {"gate":"variant_effort_capability","status":"PASS","evidence":"docs/evidence/2026-09-02-phase-0-capability-matrix.md"},
-    {"gate":"agent_inventory","status":"PASS","evidence":"docs/evidence/2026-09-02-phase-0-capability-matrix.md"},
-    {"gate":"reviewer_permissions","status":"PASS","evidence":"eval/records/reviewer-permissions.json"},
-    {"gate":"expert_permissions","status":"PASS","evidence":"eval/records/expert-permissions.json"},
-    {"gate":"breakglass_normal_agent_non_exposure","status":"PASS","evidence":"eval/records/breakglass-normal-agent-non-exposure.json"},
-    {"gate":"breakglass_human_primary_execution","status":"PASS","evidence":"eval/records/breakglass-primary-attempt-2026-09-03.json"},
-    {"gate":"eval_budget","status":"PASS","evidence":"eval/manifests/phase-0-budgets.json"},
-    {"gate":"phase_r_recovery_budget","status":"PASS","evidence":"eval/manifests/phase-0-budgets.json"},
-    {"gate":"self_variance","status":"PASS","evidence":"eval/records/self-variance/summary.json"},
-    {"gate":"continuous_thresholds","status":"PASS","evidence":"eval/thresholds/continuous.json"},
-    {"gate":"eval_provenance","status":"PASS","evidence":"eval/records/self-variance/attempt-1.json"},
-    {"gate":"installed_profile_manifest","status":"PASS","evidence":"eval/manifests/installed-profile.json"},
-    {"gate":"build_restoration_fixture","status":"PASS","evidence":"eval/fixtures/build-workloads/build-restoration-gate/fixture.json"},
-    {"gate":"reviewer_clean_control","status":"PASS","evidence":"eval/fixtures/reviewer-seeded-defects/fixture.json"},
-    {"gate":"compaction_invariants","status":"PASS","evidence":"eval/fixtures/compaction-invariants/fixture.json"},
-    {"gate":"governance","status":"PASS","evidence":"docs/evidence/2026-09-02-governance-blockers.md"},
-    {"gate":"sol_pricing_regime_handling","status":"PASS","evidence":"docs/evidence/2026-09-02-phase-0-capability-matrix.md"}
+    {
+      "gate": "candidate_model_capability",
+      "status": "PASS",
+      "evidence": "docs/evidence/2026-09-02-phase-0-capability-matrix.md",
+      "rationale": "Every required candidate completed a successful explicit runtime call."
+    },
+    {
+      "gate": "variant_effort_capability",
+      "status": "PASS",
+      "evidence": "docs/evidence/2026-09-02-phase-0-capability-matrix.md",
+      "rationale": "Every required variant syntax completed a successful explicit runtime call."
+    },
+    {
+      "gate": "agent_inventory",
+      "status": "PASS",
+      "evidence": "docs/evidence/2026-09-02-phase-0-capability-matrix.md",
+      "rationale": "All expected OpenCode V1 agent names and modes were recorded."
+    },
+    {
+      "gate": "reviewer_permissions",
+      "status": "PASS",
+      "evidence": "eval/records/reviewer-permissions.json",
+      "rationale": "Resolved Reviewer permissions deny edits and nested Task with allowlisted Git inspection."
+    },
+    {
+      "gate": "expert_permissions",
+      "status": "PASS",
+      "evidence": "eval/records/expert-permissions.json",
+      "rationale": "Resolved Expert permissions deny edits, Bash, nested Task, and web access."
+    },
+    {
+      "gate": "breakglass_normal_agent_non_exposure",
+      "status": "PASS",
+      "evidence": "eval/records/breakglass-normal-agent-non-exposure.json",
+      "rationale": "Resolved V1 Task permissions deny Breakglass and inventory resolves it as primary."
+    },
+    {
+      "gate": "breakglass_human_primary_execution",
+      "status": "PASS",
+      "evidence": "eval/records/breakglass-primary-attempt-2026-09-03.json",
+      "rationale": "Explicit primary selection completed with the exact expected response."
+    },
+    {
+      "gate": "eval_budget",
+      "status": "PASS",
+      "evidence": "eval/manifests/phase-0-budgets.json",
+      "rationale": "Human owner approved a separate 100-credit evaluation allocation."
+    },
+    {
+      "gate": "phase_r_recovery_budget",
+      "status": "PASS",
+      "evidence": "eval/manifests/phase-0-budgets.json",
+      "rationale": "Human owner approved a reserved, non-reclaimable 250-credit recovery allocation."
+    },
+    {
+      "gate": "self_variance",
+      "status": "PASS",
+      "evidence": "eval/records/self-variance/summary.json",
+      "rationale": "Three valid non-candidate runs passed all four consistency checks."
+    },
+    {
+      "gate": "continuous_thresholds",
+      "status": "PASS",
+      "evidence": "eval/thresholds/continuous.json",
+      "rationale": "Operational thresholds were derived after committed self-variance evidence."
+    },
+    {
+      "gate": "eval_provenance",
+      "status": "PASS",
+      "evidence": "eval/records/self-variance/attempt-1.json",
+      "rationale": "Each measured run records profile, runtime, runner, model, variant, timing, and usage."
+    },
+    {
+      "gate": "installed_profile_manifest",
+      "status": "PASS",
+      "evidence": "eval/manifests/installed-profile.json",
+      "rationale": "The manifest schema and ordinary-session provenance ceiling are recorded without activation."
+    },
+    {
+      "gate": "build_restoration_fixture",
+      "status": "PASS",
+      "evidence": "eval/fixtures/build-workloads/build-restoration-gate/fixture.json",
+      "rationale": "The deterministic fixture and immutable 3-to-5 state rules are committed and tested."
+    },
+    {
+      "gate": "reviewer_clean_control",
+      "status": "PASS",
+      "evidence": "eval/fixtures/reviewer-seeded-defects/fixture.json",
+      "rationale": "Seeded defects and a clean control provide grounded Reviewer denominators."
+    },
+    {
+      "gate": "compaction_invariants",
+      "status": "PASS",
+      "evidence": "eval/fixtures/compaction-invariants/fixture.json",
+      "rationale": "Required tagged invariants use an exact N/N preservation gate."
+    },
+    {
+      "gate": "governance",
+      "status": "PASS",
+      "evidence": "docs/evidence/2026-09-02-governance-blockers.md",
+      "rationale": "Local owners, authorization, guardrail, and external controls are resolved and recorded."
+    },
+    {
+      "gate": "sol_pricing_regime_handling",
+      "status": "PASS",
+      "evidence": "docs/evidence/2026-09-02-phase-0-capability-matrix.md",
+      "rationale": "Promotional observations are separated from canonical steady-state cost."
+    }
   ]
 }

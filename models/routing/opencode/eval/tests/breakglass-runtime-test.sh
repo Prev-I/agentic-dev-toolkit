@@ -70,6 +70,8 @@ assert_contains "$(<"$workspace/primary.json")" '"human_primary_invocation_succe
 assert_contains "$(<"$workspace/primary.json")" '"classification": "PASS"'
 assert_contains "$(<"$workspace/primary.json")" '"attempt_number": 1'
 assert_contains "$(<"$workspace/primary.json")" '"retry_count": 0'
+assert_contains "$(<"$workspace/primary.json")" '"resolved_model": "openai/gpt-5.6-sol"'
+assert_contains "$(<"$workspace/primary.json")" '"resolved_variant": "max"'
 
 write_fake "$valid_normal" primary gpt-5.6-sol failure
 if OPENCODE_BIN="$workspace/opencode" probe_breakglass_primary \
@@ -79,6 +81,28 @@ fi
 assert_contains "$(<"$workspace/failed.json")" '"human_primary_invocation_succeeded": false'
 assert_contains "$(<"$workspace/failed.json")" '"classification": "BLOCKED_EXTERNAL"'
 if grep -q 'sessionID\|responseHeaders' "$workspace/failed.json"; then fail "raw provider metadata persisted"; fi
+
+for external in quota auth network outage; do
+  case "$external" in
+    quota) status=429; message='The usage limit has been reached' ;;
+    auth) status=401; message='invalid_api_key' ;;
+    network) status=0; message='connection timeout' ;;
+    outage) status=503; message='service unavailable' ;;
+  esac
+  cat >"$workspace/opencode" <<FAKE
+#!/usr/bin/env bash
+if [[ "\$1" == --version ]]; then printf '1.18.26\\n'; exit 0; fi
+if [[ "\$*" == 'debug agent breakglass' ]]; then printf '%s\\n' '{"name":"breakglass","mode":"primary","model":{"providerID":"openai","modelID":"gpt-5.6-sol"},"variant":"max"}'; exit 0; fi
+printf '%s\\n' '{"type":"error","error":{"data":{"message":"$message","statusCode":$status}}}'
+exit 1
+FAKE
+  chmod +x "$workspace/opencode"
+  if OPENCODE_BIN="$workspace/opencode" probe_breakglass_primary \
+    "$root/runtime/opencode-v1-adapter/phase-0-security-profile.json" "$workspace/$external-external.json"; then
+    fail "accepted external $external failure"
+  fi
+  assert_contains "$(<"$workspace/$external-external.json")" '"classification": "BLOCKED_EXTERNAL"'
+done
 
 cat >"$workspace/opencode" <<'FAKE'
 #!/usr/bin/env bash

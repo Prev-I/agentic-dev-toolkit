@@ -33,6 +33,11 @@ The current OpenCode V1 multi-model routing restoration is governed by:
 The decision document is the source of truth for migration gates,
 evaluation rules, recovery constraints, and model-routing decisions.
 
+The [Phase-R ground-truth readiness record](docs/evidence/2026-09-03-phase-r-ground-truth-readiness.md)
+adds the approved exact Scout `low` and Compaction `medium` variants, executable
+Reviewer/Explore/Compaction fixture ground truth, and the user-global activation
+contract. It does not change or activate the published routing profile.
+
 ## Capability status (Track A)
 
 The [2026-09-02 capability closure](docs/evidence/2026-09-02-capability-closure.md)

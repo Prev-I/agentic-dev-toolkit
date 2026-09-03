@@ -1,0 +1,1 @@
+{"base":"../../clean","overrides":["pagination.sh"],"expected_material_defect":{"id":"R-BOUNDARY","description":"pageSize zero accepted despite documented range 1..100"}}

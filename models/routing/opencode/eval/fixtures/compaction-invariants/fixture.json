@@ -1,5 +1,8 @@
 {
-  "id":"compaction-invariants",
-  "invariants":["requirements","constraints","decisions","unresolved-risks"],
-  "gate":"preserved == N/N"
+  "id": "compaction-invariants",
+  "corpus": "context.md",
+  "oracle": "oracle.json",
+  "required_preserved": 4,
+  "allowed_contradictions": 0,
+  "whole_summary_equality": false
 }

@@ -1,0 +1,16 @@
+{
+  "canonical": {
+    "INV-RUNTIME": "target_runtime=opencode-v1",
+    "INV-BREAKGLASS": "breakglass=primary-human-only",
+    "INV-BUDGET": "phase-r-recovery-budget=250-credits-non-reclaimable",
+    "INV-FAILURE": "valid-controller-failure=remains-in-denominator"
+  },
+  "aliases": {
+    "INV-RUNTIME": ["OpenCode V1"],
+    "INV-BREAKGLASS": ["human-selected primary only"],
+    "INV-BUDGET": ["250 credits reserved; evaluation cannot reclaim them"],
+    "INV-FAILURE": ["valid controller failures stay in the denominator"]
+  },
+  "required_preserved": 4,
+  "allowed_contradictions": 0
+}

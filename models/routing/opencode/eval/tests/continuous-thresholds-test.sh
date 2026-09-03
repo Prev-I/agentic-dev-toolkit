@@ -23,6 +23,12 @@ cat >"$w/incompatible.json" <<'JSON'
 {"self_variance_complete":true,"candidate_results_used":false,"wall_clock_ms":{"status":"comparable","relative_range":0.05},"derived_credits":{"status":"unavailable","reason":"incompatible_units"}}
 JSON
 derive_continuous_thresholds "$w/incompatible.json" "$w/incompatible-out.json" abc123
-assert_contains "$(<"$w/incompatible-out.json")" '"status": "unavailable"'
-assert_contains "$(<"$w/incompatible-out.json")" '"separation_allowed": false'
+python3 - "$w/incompatible-out.json" <<'PY'
+import json,sys
+rows={row["metric"]:row for row in json.load(open(sys.argv[1]))["thresholds"]}
+assert rows["derived_credits"]["status"] == "unavailable"
+assert rows["derived_credits"]["separation_allowed"] is False
+assert rows["wall_clock_ms"]["status"] == "frozen"
+assert rows["wall_clock_ms"]["practical_separation_threshold"] == 0.20
+PY
 printf 'PASS: continuous thresholds\n'

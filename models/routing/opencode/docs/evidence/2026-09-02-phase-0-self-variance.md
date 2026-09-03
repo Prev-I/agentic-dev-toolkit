@@ -43,10 +43,8 @@ The required order remains:
 2. Commit practical continuous-metric separation thresholds.
 3. Only then expose candidate A/B results.
 
-`eval/thresholds/continuous.json` therefore remains
-`blocked_until_self_variance`; it contains no numerical thresholds. This is a
-Phase-0 readiness boundary, not authority to execute Phase R or comparative
-candidate evaluations.
+The frozen threshold file is a Phase-0 readiness artifact, not authority to
+execute Phase R or comparative candidate evaluations.
 
 ## Measured run set
 
@@ -84,7 +82,7 @@ significance claim.
 
 ## Frozen thresholds
 
-Thresholds reference self-variance evidence commit `58e5cf2` and use
+Thresholds reference the enriched self-variance evidence commit `70679f0` and use
 `max(2 x relative range, practical floor)`:
 
 | Metric | Relative range | Floor | Frozen threshold |

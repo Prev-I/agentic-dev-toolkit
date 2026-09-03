@@ -13,7 +13,7 @@
       "rule": "max(2 * relative_range, 0.20)",
       "reasoning": "operational threshold; lower median alone is insufficient",
       "lower_median_alone_is_sufficient": false,
-      "commit_reference": "58e5cf2"
+      "commit_reference": "70679f0"
     },
     {
       "metric": "derived_credits",
@@ -25,7 +25,7 @@
       "rule": "max(2 * relative_range, 0.10)",
       "reasoning": "operational threshold; lower median alone is insufficient",
       "lower_median_alone_is_sufficient": false,
-      "commit_reference": "58e5cf2"
+      "commit_reference": "70679f0"
     }
   ]
 }

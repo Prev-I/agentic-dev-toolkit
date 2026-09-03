@@ -36,6 +36,7 @@ write_fake "$valid_normal" primary gpt-5.6-sol
 OPENCODE_BIN="$workspace/opencode" capture_breakglass_non_exposure \
   "$root/runtime/opencode-v1-adapter/phase-0-security-profile.json" "$workspace/non-exposure.json"
 assert_contains "$(<"$workspace/non-exposure.json")" '"evidence_mechanism": "resolved_permission_and_inventory"'
+assert_contains "$(<"$workspace/non-exposure.json")" '"task_schema_directly_exposed": false'
 assert_contains "$(<"$workspace/non-exposure.json")" '"normal_agent_breakglass_task_action": "deny"'
 assert_contains "$(<"$workspace/non-exposure.json")" '"normal_agent_non_exposure": true'
 assert_contains "$(<"$workspace/non-exposure.json")" '"prompt_behavior_used_as_oracle": false'

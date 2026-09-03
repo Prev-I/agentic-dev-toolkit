@@ -18,6 +18,7 @@ for run in 1 2 3; do
   "classification": "VALID",
   "provider": "github-copilot",
   "pricing_regime": "standard",
+  "candidate_results_used": false,
   "wall_clock_ms": $((900 + run * 100)),
   "tokens": {"total": $((run * 10))},
   "credit_report": {"observed_cost": $run, "cost_unit": "USD", "cost_source": "copilot_provider_reported", "derived_credits": $(python3 -c "print(0.9 + $run / 10)")}
@@ -39,6 +40,26 @@ assert_contains "$(<"$state")" '"median": 1100'
 assert_contains "$(<"$state")" '"range": 200'
 assert_contains "$(<"$state")" '"relative_range": 0.18181818181818182'
 assert_contains "$(<"$state")" '"median": 1.1'
+assert_contains "$(<"$state")" '"range": 0.19999999999999996'
+
+for mutation in units invalid null candidate; do
+  cp "$workspace/run-3.json" "$workspace/mutated.json"
+  python3 - "$workspace/mutated.json" "$mutation" <<'PY'
+import json,sys
+p,m=sys.argv[1:]; d=json.load(open(p))
+if m=="units": d["credit_report"]["cost_unit"]="credits"
+elif m=="invalid": d["classification"]="INVALID_ENVIRONMENT"
+elif m=="null": d["credit_report"]["derived_credits"]=None
+else: d["candidate_results_used"]=True
+json.dump(d,open(p,"w"))
+PY
+  if [[ "$mutation" == candidate ]]; then
+    if measure_self_variance "$workspace/$mutation.json" "$workspace/run-1.json" "$workspace/run-2.json" "$workspace/mutated.json"; then fail "accepted candidate result"; fi
+  else
+    measure_self_variance "$workspace/$mutation.json" "$workspace/run-1.json" "$workspace/run-2.json" "$workspace/mutated.json"
+    assert_contains "$(<"$workspace/$mutation.json")" '"derived_credits": null'
+  fi
+done
 
 if freeze_thresholds "$workspace/missing.json" self-variance; then
   fail "thresholds froze before self-variance"

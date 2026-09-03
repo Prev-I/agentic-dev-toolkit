@@ -13,6 +13,8 @@ import sys
 
 output, *paths = sys.argv[1:]
 runs = [json.load(open(path, encoding="utf-8")) for path in paths]
+if any(run.get("candidate_results_used") is not False for run in runs):
+    raise SystemExit("candidate results are forbidden")
 required = {"fixture_digest", "score", "instrumentation_schema", "credit_report"}
 if any(required - run.keys() for run in runs):
     raise SystemExit("self-variance run is missing required fields")
@@ -48,7 +50,7 @@ record = {
     "instrumentation_consistency": len({run["instrumentation_schema"] for run in runs}) == 1,
     "credit_report_consistency": all(shape == credit_shapes[0] for shape in credit_shapes),
     "self_variance_complete": True,
-    "candidate_results_used": False,
+    "candidate_results_used": any(run["candidate_results_used"] for run in runs),
     "wall_clock_ms": wall_clock,
     "derived_credits": credits,
 }

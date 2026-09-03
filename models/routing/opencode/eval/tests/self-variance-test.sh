@@ -63,7 +63,7 @@ PY
     if measure_self_variance "$workspace/$mutation.json" "$workspace/run-1.json" "$workspace/run-2.json" "$workspace/mutated.json"; then fail "accepted candidate result"; fi
   else
     measure_self_variance "$workspace/$mutation.json" "$workspace/run-1.json" "$workspace/run-2.json" "$workspace/mutated.json"
-    assert_contains "$(<"$workspace/$mutation.json")" '"derived_credits": null'
+    assert_contains "$(<"$workspace/$mutation.json")" '"status": "unavailable"'
   fi
 done
 

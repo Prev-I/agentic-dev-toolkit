@@ -7,6 +7,7 @@
   "self_variance_complete": true,
   "candidate_results_used": false,
   "wall_clock_ms": {
+    "status": "comparable",
     "values": [
       7142,
       7652,
@@ -19,6 +20,7 @@
     "relative_range": 0.18944273312797535
   },
   "derived_credits": {
+    "status": "comparable",
     "values": [
       0.26724499999999995,
       0.022317999999999998,
@@ -28,6 +30,8 @@
     "median": 0.022317999999999998,
     "maximum": 0.26724499999999995,
     "range": 0.24492699999999995,
-    "relative_range": 10.9744152701855
+    "relative_range": 10.9744152701855,
+    "cost_unit": "USD",
+    "cost_source": "copilot_provider_reported"
   }
 }

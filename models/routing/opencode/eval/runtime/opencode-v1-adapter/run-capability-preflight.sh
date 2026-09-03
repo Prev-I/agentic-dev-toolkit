@@ -38,7 +38,11 @@ run_capability_preflight() {
       classification=$(classify_capability_failure "$record")
       stop_class=$(capability_stop_class "$classification")
     fi
-    cost=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["observed_cost"])' "$record")
+    cost=$(python3 -c '
+import json, sys
+value = json.load(open(sys.argv[1]))["observed_cost"]
+print("null" if value is None else value)
+' "$record")
     credits=$(ledger_credits_from_cost "${model%%/*}" "$cost")
     [[ "$credits" == null ]] || ledger_append "$ledger" evaluation "preflight-$role" "${model%%/*}" "$credits"
     ROLE="$role" CLASSIFICATION="$classification" STOP_CLASS="$stop_class" CREDITS="$credits" \

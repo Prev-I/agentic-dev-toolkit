@@ -53,8 +53,30 @@ OBSERVATION: 331 AI credits consumed on 2026-09-01
 
 The actual GitHub billing configuration remains an external organizational
 control. This organization-level guardrail is distinct from the project eval
-budget and the Phase-R bisection/recovery budget; neither budget is established
-by this record.
+budget and the Phase-R bisection/recovery budget.
+
+### Project budgets
+
+Status: `RESOLVED`
+
+The human operational owner approved these separate internal allocations on
+2026-09-03:
+
+- Evaluation budget: `100` GitHub AI credits.
+- Phase-R bisection/recovery budget: `250` GitHub AI credits.
+- Recovery budget reclaimable for evaluation: `NO`.
+- Approval reference: Phase-0 closure task conversation, 2026-09-03.
+
+The organization-level user guardrail is four times the current standard
+Copilot Business allowance: `4 x 1900 = 7600` credits per billing cycle. Paid
+usage is allowed. GitHub billing and organizational controls enforce the
+guardrail; OpenCode has no native spending-cap mechanism. At the guardrail,
+execution stops and escalates to the spend owner without automatic fallback.
+
+The historical 331-credit observation implies 7269 credits of arithmetic
+headroom only at that historical timestamp. Current remaining headroom is
+unknown because this repository has no current billing snapshot or pooled-seat
+state.
 
 ### Direct OpenAI spend and operational governance
 

@@ -2,13 +2,74 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-probe_breakglass_boundary() {
+capture_breakglass_non_exposure() {
   local profile=$1 output=$2 bin=${OPENCODE_BIN:-opencode}
-  local workspace config normal_raw primary_raw resolved_agent normal_status primary_status version
+  local config normal_raw breakglass_raw version
+  config=$(python3 - "$profile" <<'PY'
+import json
+import sys
+profile = json.load(open(sys.argv[1], encoding="utf-8"))
+task = profile["normal_agent_task_permissions"]
+breakglass = profile["breakglass"]
+print(json.dumps({"agent": {
+    "phase0-normal": {"mode": "primary", "model": "github-copilot/gpt-5.6-luna", "variant": "low", "permission": {"task": task}},
+    "breakglass": {"mode": breakglass["mode"], "model": breakglass["model"], "variant": breakglass["variant"]},
+}}))
+PY
+)
+  normal_raw=$(mktemp)
+  breakglass_raw=$(mktemp)
+  trap 'rm -f "$normal_raw" "$breakglass_raw"' RETURN
+  OPENCODE_CONFIG_CONTENT="$config" "$bin" debug agent phase0-normal >"$normal_raw"
+  OPENCODE_CONFIG_CONTENT="$config" "$bin" debug agent breakglass >"$breakglass_raw"
+  version=$($bin --version 2>/dev/null || printf unknown)
+  VERSION="$version" NORMAL="$normal_raw" BREAKGLASS="$breakglass_raw" python3 - "$output" <<'PY'
+import datetime
+import fnmatch
+import json
+import os
+import sys
+
+normal = json.load(open(os.environ["NORMAL"], encoding="utf-8"))
+breakglass = json.load(open(os.environ["BREAKGLASS"], encoding="utf-8"))
+matches = [rule.get("action") for rule in normal.get("permission", [])
+           if rule.get("permission") == "task"
+           and fnmatch.fnmatchcase("breakglass", rule.get("pattern", ""))]
+action = matches[-1] if matches else None
+model = breakglass.get("model", {})
+resolved_primary = (
+    breakglass.get("name") == "breakglass"
+    and breakglass.get("mode") == "primary"
+    and model.get("providerID") == "openai"
+    and model.get("modelID") == "gpt-5.6-sol"
+    and breakglass.get("variant") == "max"
+)
+passed = action == "deny" and resolved_primary
+record = {
+    "timestamp": datetime.datetime.now().astimezone().isoformat(),
+    "runtime_version": os.environ["VERSION"].strip(),
+    "evidence_mechanism": "resolved_permission_and_inventory",
+    "task_schema_directly_exposed": False,
+    "normal_agent_breakglass_task_action": action,
+    "breakglass_mode": breakglass.get("mode"),
+    "breakglass_model": f'{model.get("providerID")}/{model.get("modelID")}',
+    "breakglass_variant": breakglass.get("variant"),
+    "normal_agent_non_exposure": passed,
+    "prompt_behavior_used_as_oracle": False,
+}
+with open(sys.argv[1], "w", encoding="utf-8") as handle:
+    json.dump(record, handle, indent=2)
+    handle.write("\n")
+raise SystemExit(0 if passed else 1)
+PY
+}
+
+probe_breakglass_primary() {
+  local profile=$1 output=$2 bin=${OPENCODE_BIN:-opencode}
+  local workspace config primary_raw resolved_agent primary_status version
   workspace=$(mktemp -d)
   trap 'rm -rf "$workspace"' RETURN
   config="$workspace/config.json"
-  normal_raw="$workspace/normal.jsonl"
   primary_raw="$workspace/primary.jsonl"
   resolved_agent="$workspace/resolved-agent.json"
 
@@ -16,17 +77,9 @@ probe_breakglass_boundary() {
 import json
 import sys
 
-profile = json.load(open(sys.argv[1], encoding="utf-8"))
-task = profile["normal_agent_task_permissions"]
-breakglass = profile["breakglass"]
+breakglass = json.load(open(sys.argv[1], encoding="utf-8"))["breakglass"]
 config = {
     "agent": {
-        "phase0-normal": {
-            "mode": "primary",
-            "model": "github-copilot/gpt-5.6-luna",
-            "variant": "low",
-            "permission": {"task": task},
-        },
         "breakglass": {
             "mode": breakglass["mode"],
             "model": breakglass["model"],
@@ -41,18 +94,14 @@ PY
   config=$(<"$config")
   OPENCODE_CONFIG_CONTENT="$config" "$bin" debug agent breakglass >"$resolved_agent"
   set +e
-  OPENCODE_CONFIG_CONTENT="$config" "$bin" --print-logs run --agent phase0-normal --format json \
-    'Invoke the task tool with subagent_type "breakglass". Do not substitute another agent.' \
-    >"$normal_raw" 2>&1
-  normal_status=$?
   OPENCODE_CONFIG_CONTENT="$config" "$bin" --print-logs run --agent breakglass --format json \
     'Reply with exactly: BREAKGLASS_PRIMARY_OK' >"$primary_raw" 2>&1
   primary_status=$?
   set -e
   version=$($bin --version 2>/dev/null || printf unknown)
 
-  VERSION="$version" NORMAL_STATUS="$normal_status" PRIMARY_STATUS="$primary_status" \
-    NORMAL_RAW="$normal_raw" PRIMARY_RAW="$primary_raw" RESOLVED_AGENT="$resolved_agent" python3 - "$output" <<'PY'
+  VERSION="$version" PRIMARY_STATUS="$primary_status" \
+    PRIMARY_RAW="$primary_raw" RESOLVED_AGENT="$resolved_agent" python3 - "$output" <<'PY'
 import datetime
 import json
 import os
@@ -67,17 +116,8 @@ def events(path):
             pass
     return result
 
-normal = events(os.environ["NORMAL_RAW"])
 primary = events(os.environ["PRIMARY_RAW"])
-primary_raw = open(os.environ["PRIMARY_RAW"], encoding="utf-8", errors="replace").read()
 resolved = json.load(open(os.environ["RESOLVED_AGENT"], encoding="utf-8"))
-normal_denied = any(
-    event.get("type") == "tool_use"
-    and event.get("part", {}).get("tool") == "task"
-    and event.get("part", {}).get("state", {}).get("status") == "error"
-    and event.get("part", {}).get("state", {}).get("input", {}).get("subagent_type") == "breakglass"
-    for event in normal
-)
 model = resolved.get("model", {})
 primary_selected = (
     resolved.get("name") == "breakglass"
@@ -91,21 +131,49 @@ primary_ok = any(
     and event.get("part", {}).get("text", "").strip() == "BREAKGLASS_PRIMARY_OK"
     for event in primary
 )
+status = int(os.environ["PRIMARY_STATUS"])
+errors = [event.get("error", {}).get("data", {}) for event in primary if event.get("type") == "error"]
+error_data = next((item for item in errors if isinstance(item, dict)), {})
+error_message = str(error_data.get("message", ""))
+error_status = error_data.get("statusCode")
+message_lower = error_message.lower()
+external_markers = ("usage limit", "provider unavailable", "authentication", "unauthorized", "invalid_api_key", "network", "timeout", "connection", "service unavailable")
+external_statuses = {401, 403, 429, 500, 502, 503, 504}
+if primary_selected and primary_ok and status == 0:
+    classification = "PASS"
+elif primary_selected and (error_status in external_statuses or any(marker in message_lower for marker in external_markers)):
+    classification = "BLOCKED_EXTERNAL"
+else:
+    classification = "FAIL"
+if error_status in {401, 403} or "invalid_api_key" in message_lower or "unauthorized" in message_lower:
+    error_class = "authentication_failure"
+elif error_status == 429 or "usage limit" in message_lower:
+    error_class = "quota_failure"
+elif "timeout" in message_lower or "network" in message_lower or "connection" in message_lower:
+    error_class = "network_failure"
+elif error_status in {500, 502, 503, 504} or "service unavailable" in message_lower or "provider unavailable" in message_lower:
+    error_class = "provider_failure"
+else:
+    error_class = None
 record = {
     "timestamp": datetime.datetime.now().astimezone().isoformat(),
     "runtime_version": os.environ["VERSION"].strip(),
-    "normal_agent_task_denied": normal_denied,
-    "normal_agent_exit_status": int(os.environ["NORMAL_STATUS"]),
     "human_primary_selected": primary_selected,
     "human_primary_invocation_succeeded": primary_ok,
-    "human_primary_exit_status": int(os.environ["PRIMARY_STATUS"]),
-    "human_primary_provider_error": "usage limit has been reached" if "usage limit has been reached" in primary_raw.lower() else None,
+    "human_primary_exit_status": status,
+    "human_primary_provider_error": error_class,
+    "human_primary_provider_status": error_status,
+    "resolved_model": f'{model.get("providerID")}/{model.get("modelID")}',
+    "resolved_variant": resolved.get("variant"),
+    "classification": classification,
+    "attempt_number": 1,
+    "retry_count": 0,
     "hidden_used_as_security_control": False,
     "autonomous_escalation_present": False,
 }
 with open(sys.argv[1], "w", encoding="utf-8") as handle:
     json.dump(record, handle, indent=2)
     handle.write("\n")
-raise SystemExit(0 if normal_denied and primary_selected and primary_ok else 1)
+raise SystemExit(0 if classification == "PASS" else 1)
 PY
 }

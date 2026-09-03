@@ -1,0 +1,16 @@
+{
+  "timestamp": "2026-09-03T08:50:40.900625+02:00",
+  "runtime_version": "1.18.26",
+  "human_primary_selected": true,
+  "human_primary_invocation_succeeded": true,
+  "human_primary_exit_status": 0,
+  "human_primary_provider_error": null,
+  "human_primary_provider_status": null,
+  "resolved_model": "openai/gpt-5.6-sol",
+  "resolved_variant": "max",
+  "classification": "PASS",
+  "attempt_number": 1,
+  "retry_count": 0,
+  "hidden_used_as_security_control": false,
+  "autonomous_escalation_present": false
+}

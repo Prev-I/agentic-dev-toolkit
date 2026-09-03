@@ -1,0 +1,39 @@
+{
+  "routing_profile_id": "phase-0-self-variance-non-production",
+  "routing_profile_commit": "3bde30f0d606ebf21e622f697d9c920f0e3a4453",
+  "runtime_version": "1.18.27",
+  "eval_runner_version": "phase0-self-variance-v1",
+  "timestamp": "2026-09-03T09:23:06.957015+02:00",
+  "environment": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+  "provider": "github-copilot",
+  "model": "gpt-5.6-luna",
+  "variant": "low",
+  "pricing_regime": "standard",
+  "exit_status": 0,
+  "classification": "VALID",
+  "fixture_digest": "sha256:e73d235d29ddb246244f72fc752bfb7475652076915824083b80779da7c1636d",
+  "score": {
+    "passed": 1,
+    "total": 1
+  },
+  "instrumentation_schema": "phase0-self-variance-v1",
+  "credit_report": {
+    "observed_cost": 0.00022318,
+    "cost_unit": "USD",
+    "cost_source": "copilot_provider_reported",
+    "derived_credits": 0.022317999999999998
+  },
+  "tokens": {
+    "total": 10660,
+    "input": 3,
+    "output": 8,
+    "reasoning": 0,
+    "cache": {
+      "write": 0,
+      "read": 10649
+    }
+  },
+  "wall_clock_ms": 6299,
+  "retry_count": 0,
+  "candidate_results_used": false
+}

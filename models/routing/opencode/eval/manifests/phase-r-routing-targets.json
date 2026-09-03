@@ -1,0 +1,32 @@
+{
+  "profile_id": "v1-restored-2026-09",
+  "decision_reference": "docs/decisions/2026-09-02-multi-model-routing-v3.4.3.md",
+  "ground_truth_reference": "eval/manifests/phase-r-ground-truth.json",
+  "default_model": "github-copilot/claude-opus-5",
+  "agents": {
+    "plan":       {"model": "github-copilot/claude-opus-5", "variant": "max",    "mode": "primary",  "migration_class": "capability-forced"},
+    "build":      {"model": "github-copilot/claude-opus-5", "variant": "high",   "mode": "primary",  "migration_class": "capability-forced"},
+    "general":    {"model": "github-copilot/gpt-5.6-terra", "variant": "high",   "mode": null,       "migration_class": "capability-forced"},
+    "explore":    {"model": "github-copilot/gpt-5.6-luna",  "variant": "medium", "mode": null,       "migration_class": "risk-decision"},
+    "scout":      {"model": "github-copilot/gpt-5.6-luna",  "variant": "low",    "mode": null,       "migration_class": "risk-decision"},
+    "reviewer":   {"model": "github-copilot/gpt-5.6-sol",   "variant": "high",   "mode": "subagent", "migration_class": "risk-decision"},
+    "compaction": {"model": "github-copilot/gpt-5.6-terra", "variant": "medium", "mode": null,       "migration_class": "risk-decision"},
+    "title":      {"model": "github-copilot/gpt-5.6-luna",  "variant": "low",    "mode": null,       "migration_class": "risk-decision"},
+    "summary":    {"model": "github-copilot/gpt-5.6-luna",  "variant": "low",    "mode": null,       "migration_class": "risk-decision"},
+    "expert":     {"model": "openai/gpt-5.6-sol",           "variant": "xhigh",  "mode": "subagent", "migration_class": "expert-effort-bump"},
+    "breakglass": {"model": "openai/gpt-5.6-sol",           "variant": "max",    "mode": "primary",  "migration_class": "decision-16-42-26"}
+  },
+  "capability_forced_rows": ["plan", "build", "general"],
+  "capability_forced_reason": "github-copilot/claude-opus-4.6 MODEL_UNRESOLVABLE / ProviderModelNotFoundError",
+  "risk_decision_rows": ["explore", "scout", "reviewer", "compaction", "title", "summary"],
+  "risk_decision_reason": "explicit decision not to depend on GPT-5.3-Codex for the staged migration; Codex still resolved at the recorded capability check",
+  "forbidden_model_references": ["claude-opus-4.6", "gpt-5.3-codex"],
+  "forbidden_effective_state": {
+    "description": "Reviewer and Expert must not both be Sol at effort high",
+    "reviewer": {"model": "github-copilot/gpt-5.6-sol", "variant": "high"},
+    "expert": {"model": "openai/gpt-5.6-sol", "variant": "high"}
+  },
+  "routing_authority": "opencode.jsonc agent block",
+  "markdown_agents_carry_routing_fields": false,
+  "plan_variant_capability_record": "eval/records/claude-opus-5-max.json"
+}

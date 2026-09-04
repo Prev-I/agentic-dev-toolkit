@@ -17,7 +17,7 @@ python3 -c '
 import json
 m = json.load(open("'"$manifest"'"))
 
-assert m["status"] == "PENDING_HUMAN_APPROVAL"
+assert m["status"] == "APPROVED"
 assert m["additional_live_spend_this_task"] == 0
 assert m["no_weighted_aggregate_score"] is True
 assert m["incumbent"] == {"model": "github-copilot/claude-opus-5", "variant": "high"}
@@ -81,7 +81,9 @@ assert prev["status"] == "COMPLETE_CLOSED"
 # 4 dispatches at ceiling rates plus one full replacement pair at ceiling
 # rates, with no slack fudge.
 b = m["proposed_phase3_build_gpt_budget"]
-assert b["status"] == "PENDING_HUMAN_APPROVAL"
+assert b["status"] == "APPROVED"
+assert b["approved_cap_credits"] == 264
+assert b["approved_cap_credits"] == b["conservative_ceiling_credits"]
 assert b["conservative_ceiling_credits"] > b["central_estimate_credits"], \
     "ceiling must exceed the central estimate"
 

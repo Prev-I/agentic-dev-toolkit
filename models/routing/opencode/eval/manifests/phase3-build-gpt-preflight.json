@@ -2,7 +2,8 @@
   "experiment_id": "phase3-build-opus5-vs-gpt5.6-sol-high",
   "decision_reference": "docs/decisions/2026-09-04-phase3-build-gpt-preflight.md",
   "frozen": "2026-09-04",
-  "status": "PENDING_HUMAN_APPROVAL",
+  "status": "APPROVED",
+  "approval_amendment_frozen": "2026-09-04",
   "hypothesis": "Can github-copilot/gpt-5.6-sol high outperform the current Build incumbent, github-copilot/claude-opus-5 high, strongly enough to justify considering a Build/Reviewer family inversion?",
   "previous_related_experiment": {
     "experiment_id": "phase3-build-opus5-vs-sonnet5-high",
@@ -103,9 +104,10 @@
     "note": "All prior budgets closed, not reused, not reset, not enlarged. This experiment requires its own new, separate prospective budget."
   },
   "proposed_phase3_build_gpt_budget": {
+    "status": "APPROVED",
+    "approved_cap_credits": 264,
     "central_estimate_credits": 122.42,
     "conservative_ceiling_credits": 264,
-    "status": "PENDING_HUMAN_APPROVAL",
     "cost_accounting_mechanism": "eval/runtime/opencode-v1-adapter/dispatch-fixture.sh (post-I1-fix, commit 505d35a: sums every step_finish part.cost across a multi-turn dispatch, not just the last step). The same mechanism already used, unmodified, for the Opus-vs-Sonnet execution.",
     "derivation": {
       "opus_cost_per_run": {

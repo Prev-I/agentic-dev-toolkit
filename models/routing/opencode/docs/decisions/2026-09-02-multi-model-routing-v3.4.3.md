@@ -60,6 +60,20 @@ human selection only
 4. Phase R has no supported rollback; any emergency Codex hybrid is pre-authorized only as a time-bounded incident mitigation.
 5. A successful Opus 5 Expert fixture control does not make Opus 5 the Expert routing candidate.
 6. Organization policy UI is authoritative for policy state, not runtime capability state.
+7. **2026-09-04, Phase-R scope amendment**: §27.1's Reviewer blocking-gate
+   criterion ("seeded material defects detected >= committed threshold,
+   false-positive findings on clean control <= committed threshold") is
+   reclassified from a Phase-R blocking gate to a Phase-3 targeted quality
+   evaluation. The threshold itself, the fixture, and the scorer are
+   unchanged; only which gate the criterion belongs to changes. Phase R's
+   Reviewer requirement is replaced by an operational-integration
+   criterion (model resolution, routing correctness, read-only
+   permissions, successful execution, adapter/output-path traversal, no
+   security regression) — see
+   `docs/decisions/2026-09-04-phase-r-scope-amendment.md` for the full
+   evidence and rationale. This is a separation-of-concerns correction
+   (restoration vs. optimization), approved by the human operational
+   owner, not a retroactive relaxation of §27.1's original threshold.
 
 The governing doctrine is:
 
@@ -1005,6 +1019,13 @@ Differences inside observed harness/run noise are not meaningful separation.
 ## 27.1 Phase-R blocking gates
 
 Only ground-truth anchored criteria may block Phase R.
+
+**Amended 2026-09-04** (implementation amendment 7, above): the Reviewer
+criterion below is reclassified from a Phase-R blocking gate to a Phase-3
+targeted quality evaluation. Phase R's Reviewer requirement is now
+operational integration, not the seeded-defect/clean-control threshold
+shown here. The threshold itself is unchanged as a Phase-3 quality bar —
+see `docs/decisions/2026-09-04-phase-r-scope-amendment.md`.
 
 Required gates:
 

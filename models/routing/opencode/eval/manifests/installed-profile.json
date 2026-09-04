@@ -19,11 +19,11 @@
     "breakglass": {"model": "openai/gpt-5.6-sol", "variant": "max", "mode": "primary"}
   },
   "effective_routing_evidence": "eval/records/phase-r/effective-routing.json",
-  "canonical": false,
-  "phase_r_status": "BLOCKED_REVIEWER_RERUN",
-  "operational_state": "active-provisional",
-  "canonical_quality_reference": false,
-  "status_note": "This routing is actively installed on the real, user-global OpenCode configuration and remains in effect -- that activation is not reversed by this status. 'canonical' and 'canonical_quality_reference' were flipped back to false because the Reviewer gate is blocked (see docs/evidence/2026-09-04-phase-r-execution.md and docs/evidence/2026-09-04-reviewer-observability-attribution-remediation.md), not because the activation itself is in question. Build/Explore/Compaction/routing-resolution/security gates remain valid and are not re-run by this correction. Status is BLOCKED_REVIEWER_RERUN, not plain BLOCKED_REVIEWER: the Reviewer fixture and scorer are now admissible (fixture integrity, R-API observability, and witness-based attribution all mechanically proven offline), but a fresh live 5/5 + clean-zero rerun is still required and no budget tranche for it is yet approved.",
+  "canonical": true,
+  "phase_r_status": "PASS",
+  "operational_state": "active",
+  "canonical_quality_reference": true,
+  "status_note": "Phase R amended and closed 2026-09-04 (docs/decisions/2026-09-04-phase-r-scope-amendment.md): Phase R now gates operational restoration (routing, security, Breakglass, Build, Explore, Compaction, Reviewer OPERATIONAL integration), not per-role model-quality optimization. Reviewer's 5/5 seeded-defect + clean-zero benchmark is reclassified to a Phase-3 quality evaluation -- unchanged threshold, unchanged fixture/scorer, historical runs still inadmissible for quality adjudication -- and is no longer a Phase-R gate. Reviewer's operational integration (model resolves, correct routing, read-only permissions, successful dispatch through the real OpenCode path, output traversing the evaluation/adapter path, no security regression) is fully evidenced by existing repository records; see the amendment doc's evidence table. This is a separation-of-concerns correction, not a threshold relaxation. Production routing is unchanged -- it was already installed and active on the real, user-global OpenCode configuration since Task 16 of the original Phase-R execution. 'canonical_quality_reference' here means restoration-quality reference, not a claim that every role's model is the optimal choice for its role; that remains a separate, ongoing, hypothesis-driven Phase-3 concern.",
   "restored_profile": "profiles/v1-restored-2026-09.jsonc",
   "provenance_ceiling": "Ordinary sessions are attributable only to the profile known to be installed at the time.",
   "global_configuration_contents_committed": false

@@ -1,0 +1,2 @@
+This is a small, well-defined, single-function addition with explicit constraints and existing tests defining the contract. No ambiguity requiring brainstorming — I'll implement directly and verify against the existing test suite.
+Added `reverse` to `lib/strings.sh:6-11`, leaving `upper` and `README.md` untouched. Both `tests/acceptance.sh` and `tests/regression.sh` pass, and `bash -n` confirms valid syntax.

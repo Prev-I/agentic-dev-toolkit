@@ -197,4 +197,51 @@ assert_eq missed "$(error_attr '2>/dev/null')"
 # a finding whose evidence names the actual causal fallback -> credited
 assert_eq detected "$(error_attr "\"\$storage\" list 2>/dev/null || printf '[]\\n'")"
 
+# --- robustness regressions, found by independent review ---
+
+# a finding whose "evidence" is present but not a string (e.g. a list)
+# must not match merely because Python's str() of it happens to contain
+# the witness -- require evidence to genuinely be a string.
+write_findings '[{"file": "pagination.sh", "severity": "material", "summary": "s", "evidence": ["10#$1 >= 0", "unrelated"]}]'
+assert_eq missed "$(attr)"
+
+# oracle.json used DETACHED from its fixture tree (e.g. copied elsewhere)
+# must fail closed for every witness-bearing case, not silently fall back
+# to file+severity -- that would defeat the entire witness mechanism for
+# any run where ground-truth.json isn't reachable, with no diagnostic at
+# all. Reproduced: a detached oracle.json credited 5 fully hallucinated,
+# witness-free findings as "pass".
+detached=$(mktemp -d)
+trap 'rm -f "$findings_path"; rm -rf "$detached"' EXIT
+cp "$fixture/oracle.json" "$detached/oracle.json"
+python3 -c "
+import json
+seeded = [{'id': cid, 'files': [f], 'severity': 'material',
+           'all_reported': [{'file': f, 'severity': 'material', 'summary': 'hallucinated', 'evidence': 'totally unrelated text'}]}
+          for cid, f in [('R-CONCURRENCY','counter.sh'),('R-AUTH','authorization.sh'),('R-API','api.sh'),('R-BOUNDARY','pagination.sh'),('R-ERROR','storage.sh')]]
+json.dump({'seeded': seeded, 'clean': []}, open('$detached/findings.json', 'w'))
+"
+assert_eq block "$(reviewer_structured_gate "$detached/oracle.json" "$detached/findings.json" 2>/dev/null)"
+
+# an empty-string witness (a corrupted/mis-authored ground-truth.json) must
+# never be treated as "matches everything" -- an empty substring is a
+# substring of every string in Python, so this must fail closed, not open.
+write_findings '[{"file": "pagination.sh", "severity": "material", "summary": "hallucinated", "evidence": "anything at all"}]'
+python3 -c "
+import json
+p = '$fixture/cases/R-BOUNDARY/ground-truth.json'
+d = json.load(open(p))
+d['witness'] = ''
+json.dump(d, open(p, 'w'))
+"
+result="$(attr)"
+python3 -c "
+import json
+p = '$fixture/cases/R-BOUNDARY/ground-truth.json'
+d = json.load(open(p))
+d['witness'] = '10#\$1 >= 0'
+json.dump(d, open(p, 'w'))
+"
+assert_eq missed "$result"
+
 printf 'PASS: witness-based scorer attribution\n'

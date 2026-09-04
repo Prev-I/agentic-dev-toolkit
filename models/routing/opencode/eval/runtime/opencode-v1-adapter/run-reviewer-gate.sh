@@ -3,6 +3,7 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 reviewer_runner_root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$reviewer_runner_root/dispatch-fixture.sh"
+source "$reviewer_runner_root/../../scoring/fixture-defect-detectors.sh"
 
 reviewer_request() {
   cat <<'PROMPT'
@@ -33,6 +34,20 @@ run_reviewer_gate() {
 
   local fixture prompt sandbox case_dir case_id
   fixture=$(cd "$reviewer_runner_root/../../fixtures/reviewer-seeded-defects" && pwd)
+
+  # Admission gate (docs/evidence/2026-09-04-reviewer-fixture-integrity-remediation.md):
+  # refuse to spend a single live dispatch against a fixture already known to
+  # violate its own contract. This is the exact failure mode that let a real
+  # defect in clean/pagination.sh go undetected until a live dispatch found
+  # it -- fixture-integrity-test.sh proves this mechanically and for free;
+  # there is no reason to ever discover it live again.
+  local integrity_violations
+  if ! integrity_violations=$(fixture_integrity_check "$fixture" 2>&1); then
+    printf 'run_reviewer_gate: refusing to dispatch -- fixture integrity check failed:\n%s\n' \
+      "$integrity_violations" >&2
+    return 1
+  fi
+
   mkdir -p "$outdir"
   prompt="$outdir/prompt.txt"
   reviewer_request >"$prompt"

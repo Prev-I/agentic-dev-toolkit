@@ -104,3 +104,86 @@ counter_lacks_locking() {
   local file=$1
   ! grep -qE 'flock|mkdir[^|]*\.lock|noclobber' "$file"
 }
+
+# Admission gate: mechanically proves clean/ has zero known material
+# defects and each seeded case's override carries exactly its own intended
+# defect and no other known one, WITHOUT any live model dispatch. Prints
+# every violation found (does not stop at the first) and returns nonzero if
+# any exist. See tests/fixture-integrity-test.sh for the test-harness
+# wrapper and docs/evidence/2026-09-04-reviewer-fixture-integrity-remediation.md
+# for why this exists: a real defect in clean/pagination.sh went undetected
+# by every prior review pass and was only found by a live, paid dispatch.
+FIXTURE_KNOWN_CHECKS=(
+  "pagination zero-boundary:pagination_has_zero_boundary_defect:pagination.sh"
+  "pagination octal/leading-zero:pagination_has_octal_defect:pagination.sh"
+  "api field renamed:api_emits_renamed_field:api.sh"
+  "api JSON injection:api_has_injection_defect:api.sh"
+  "storage swallows failure:storage_swallows_failure:storage.sh"
+  "auth bypasses ownership:auth_bypasses_ownership:authorization.sh"
+  "counter lacks locking:counter_lacks_locking:counter.sh"
+)
+
+declare -gA FIXTURE_EXPECTED_DEFECT=(
+  [R-API]=api_emits_renamed_field:api.sh
+  [R-AUTH]=auth_bypasses_ownership:authorization.sh
+  [R-BOUNDARY]=pagination_has_zero_boundary_defect:pagination.sh
+  [R-CONCURRENCY]=counter_lacks_locking:counter.sh
+  [R-ERROR]=storage_swallows_failure:storage.sh
+)
+
+fixture_integrity_check() {
+  local fixture=$1
+  local ok=0
+
+  local entry desc fn relfile
+  for entry in "${FIXTURE_KNOWN_CHECKS[@]}"; do
+    IFS=: read -r desc fn relfile <<<"$entry"
+    if "$fn" "$fixture/clean/$relfile"; then
+      printf 'FIXTURE INTEGRITY: clean/%s has known material defect (%s) -- clean must have zero\n' "$relfile" "$desc" >&2
+      ok=1
+    fi
+  done
+
+  local case_id case_dir overrides present_files expected_files own_fn own_relfile own_file
+  for case_id in "${!FIXTURE_EXPECTED_DEFECT[@]}"; do
+    case_dir="$fixture/cases/$case_id"
+    if [[ ! -f "$case_dir/ground-truth.json" ]]; then
+      printf 'FIXTURE INTEGRITY: %s/ground-truth.json missing\n' "$case_id" >&2
+      ok=1
+      continue
+    fi
+    overrides=$(python3 -c 'import json,sys; print(" ".join(json.load(open(sys.argv[1]))["overrides"]))' "$case_dir/ground-truth.json")
+    present_files=$(cd "$case_dir" && find . -maxdepth 1 -type f -name '*.sh' -printf '%f\n' | sort)
+    expected_files=$(printf '%s\n' $overrides | sort)
+    if [[ "$expected_files" != "$present_files" ]]; then
+      printf 'FIXTURE INTEGRITY: %s carries files other than its declared overrides (expected: %s; present: %s)\n' \
+        "$case_id" "${expected_files//$'\n'/,}" "${present_files//$'\n'/,}" >&2
+      ok=1
+    fi
+
+    IFS=: read -r own_fn own_relfile <<<"${FIXTURE_EXPECTED_DEFECT[$case_id]}"
+    own_file="$case_dir/$own_relfile"
+    if [[ ! -f "$own_file" ]]; then
+      printf 'FIXTURE INTEGRITY: %s/%s missing\n' "$case_id" "$own_relfile" >&2
+      ok=1
+      continue
+    fi
+    if ! "$own_fn" "$own_file"; then
+      printf 'FIXTURE INTEGRITY: %s/%s is missing its own intended seeded defect\n' "$case_id" "$own_relfile" >&2
+      ok=1
+    fi
+
+    for entry in "${FIXTURE_KNOWN_CHECKS[@]}"; do
+      IFS=: read -r desc fn relfile <<<"$entry"
+      [[ "$relfile" == "$own_relfile" ]] || continue
+      [[ "$fn" == "$own_fn" ]] && continue
+      if "$fn" "$own_file"; then
+        printf 'FIXTURE INTEGRITY: %s/%s carries an UNINTENDED known defect (%s) in addition to its seeded %s defect\n' \
+          "$case_id" "$relfile" "$desc" "$case_id" >&2
+        ok=1
+      fi
+    done
+  done
+
+  return "$ok"
+}

@@ -67,9 +67,17 @@ expected = {"model_resolves", "variant_correct", "routing_correct", "permissions
 assert required == expected, required
 '
 
-# --- all seven amended Phase-R hard gates are declared, each with evidence ---
+# --- all seven amended Phase-R hard gates are declared, each with
+# evidence that GENUINELY RESOLVES on disk -- not merely a non-empty
+# string. Every comma-separated path (globs included) must match at least
+# one real file, so the gate set cannot silently point at evidence that
+# was never actually produced. ---
 python3 -c '
-import json
+import glob, json, os
+
+# evidence paths are relative to models/routing/opencode/ (the package
+# root), one level above this test file'"'"'s own $root (eval/).
+package_root = os.path.dirname("'"$root"'")
 gates = json.load(open("'"$gate_set"'"))
 names = [g["gate"] for g in gates["hard_gates"]]
 expected = ["routing_resolution", "security_permissions", "breakglass_boundary",
@@ -77,7 +85,15 @@ expected = ["routing_resolution", "security_permissions", "breakglass_boundary",
             "compaction_invariant_preservation", "reviewer_operational_integration"]
 assert names == expected, names
 for g in gates["hard_gates"]:
-    assert g.get("evidence"), g["gate"] + " has no evidence reference"
+    evidence = g.get("evidence")
+    assert evidence, g["gate"] + " has no evidence reference"
+    for rel in [p.strip() for p in evidence.split(",")]:
+        path = os.path.join(package_root, rel)
+        if "*" in path:
+            matches = glob.glob(path)
+            assert matches, g["gate"] + " evidence glob resolves to nothing: " + rel
+        else:
+            assert os.path.isfile(path), g["gate"] + " evidence file does not exist: " + rel
 '
 
 printf 'PASS: Phase-R scope amendment (quality threshold unchanged, not a restoration gate)\n'

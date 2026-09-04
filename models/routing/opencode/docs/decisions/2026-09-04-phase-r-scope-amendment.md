@@ -56,20 +56,21 @@ PASS requires repository/runtime evidence establishing all of:
 | Model resolves | `github-copilot/gpt-5.6-sol` — `eval/manifests/installed-profile.json`, `eval/records/phase-r/security/reviewer.json`, `eval/records/phase-r/effective-routing.json` (all three agree) | PASS |
 | Variant | `high` — same three sources | PASS |
 | Routing correct | `eval/records/phase-r/effective-routing.json`: `status: "PASS"`, `mismatches: []`, neutral and project-working-directory resolution agree exactly, `breakglass_task_action: "deny"` present on both | PASS |
-| Permissions read-only | `eval/records/phase-r/security/reviewer.json`: `edit: "deny"`, `task: "deny"`, `bash.wildcard: "deny"` with only a read-only git allowlist (`git status*`, `git diff*`, `git log*`, `git show*`) | PASS |
+| Permissions read-only (repository/filesystem) | `eval/records/phase-r/security/reviewer.json`: `edit: "deny"`, `task: "deny"`, `bash.wildcard: "deny"` with only a read-only git allowlist (`git status*`, `git diff*`, `git log*`, `git show*`). `websearch: "allow"` is unchanged network egress per the bundle's own committed, documented contract (`README.md`'s "Enable web search" section) — not a repository-write capability, and not altered by this amendment | PASS |
 | Successful execution through the actual OpenCode path | `eval/records/phase-r/reviewer/*/dispatch/dispatch.json` (e.g. `R-AUTH`): `dispatch_target: "agent:reviewer"` (resolved via the real `--agent reviewer` invocation, not a raw model override), `exit_status: 0`, `classification: "OK"` | PASS |
 | Output traversed the evaluation/adapter path | `eval/records/phase-r/reviewer/findings.json`: `scorer: "eval/scoring/reviewer.sh::reviewer_structured_gate"`, all 5 seeded cases normalized from raw dispatch output through the adapter | PASS |
 | No permission/Breakglass boundary regression | `eval/records/phase-r/security/{reviewer,expert,breakglass-non-exposure,breakglass-primary}.json` all present, unchanged, and still valid — no code path touched by either Reviewer remediation altered any permission block | PASS |
 
 **All seven properties are established from evidence already in the
 repository.** No new model call was made to produce this table — every
-citation above resolves to a file that predates this amendment. This
-matches Section 4's own requirement: Phase R does not need quantitative
-defect-recall evidence, and none of Section 17's hard-stop conditions
-apply (Reviewer operational integration has demonstrably succeeded; the
-read-only boundary evidence is valid and unchanged; routing/security
-evidence is valid and unchanged; closing Phase R requires no new model
-call and no production routing change).
+citation above resolves to a file that predates this amendment. Phase R's
+restoration gate does not require quantitative defect-recall evidence, by
+design (that is precisely the property being moved to Phase 3). None of
+the conditions that would block this closure apply: Reviewer operational
+integration has demonstrably succeeded; the read-only boundary evidence is
+valid and unchanged; routing/security evidence is valid and unchanged;
+closing Phase R requires no new model call and no production routing
+change.
 
 ### Gates retained without rerun
 

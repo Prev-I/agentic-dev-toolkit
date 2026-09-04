@@ -166,7 +166,7 @@ It reports two severities, deliberately kept apart:
 
 | Severity | What it covers | Fails the check |
 |---|---|---|
-| `DRIFT` | Routing-owned configuration keys — the top-level `model`, the top-level `permission.task`, and the declared agent rows *including their permission blocks* — plus any agent's permission frontmatter | yes |
+| `DRIFT` | Routing-owned configuration keys — the top-level `model`, the top-level `permission.task`, and the declared agent rows *including their permission blocks* — plus the `permission:` frontmatter of each agent markdown this bundle ships | yes |
 | `STALE` | A support file whose prose differs while its permissions still match | no |
 
 Scope of "routing-owned" is taken verbatim from `activate-profile.sh`.
@@ -186,6 +186,14 @@ This answers a different question from
 whether the *runtime* resolves each role as declared. Alignment asks whether
 the *files on disk* still match this repository. Both are useful; neither
 subsumes the other.
+
+**`ALIGNED` is not "fully verified".** The check is bounded by the same
+routing-owned scope `activate-profile.sh` writes, so some things this bundle
+ships are deliberately outside it — notably the top-level `instructions`
+array and `permission.websearch`. A configuration that dropped its
+`instructions` entry would still report the routing policy perfectly in sync
+while the runtime never loads it. Widening the scope means widening what
+counts as "yours vs. the bundle's", which is a decision, not a bug fix.
 
 ## 1. Verify model IDs and variants
 
@@ -236,12 +244,24 @@ If you use the [agentic-dev-toolkit installer](../../../environments/linux/insta
 
 ## 3. Install the custom agents and routing policy
 
-Copy these files from this bundle into the matching target paths:
+Copy these files from this bundle into the matching target paths.
+
+For a **project-local** install, keep the `.opencode/` prefix:
 
 ```text
-.opencode/agents/reviewer.md -> .opencode/agents/reviewer.md
-.opencode/agents/expert.md -> .opencode/agents/expert.md
-.opencode/model-routing.md -> .opencode/model-routing.md
+.opencode/agents/reviewer.md -> <project>/.opencode/agents/reviewer.md
+.opencode/agents/expert.md   -> <project>/.opencode/agents/expert.md
+.opencode/model-routing.md   -> <project>/.opencode/model-routing.md
+```
+
+For a **user-global** install the files sit directly under the OpenCode
+config directory, with no `.opencode/` segment — this is the layout the
+alignment check inspects:
+
+```text
+.opencode/agents/reviewer.md -> ~/.config/opencode/agents/reviewer.md
+.opencode/agents/expert.md   -> ~/.config/opencode/agents/expert.md
+.opencode/model-routing.md   -> ~/.config/opencode/model-routing.md
 ```
 
 `reviewer` is independent and read-only. `expert` is hidden, read-only, cannot spawn subagents, and is capped at six agentic steps. GPT-5.6 Sol is not confined to `expert`: `reviewer` runs it through Copilot at `high`, `expert` runs it direct on OpenAI at `xhigh`, and `breakglass` runs it direct on OpenAI at `max` as a human-selected primary.

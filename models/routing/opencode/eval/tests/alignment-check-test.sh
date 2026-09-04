@@ -60,6 +60,12 @@ write_agent_md() {
 standard_perm=$'  edit: deny\n  task: deny\n  skill: allow\n'
 
 setup_aligned() {
+  # Reset to a known-aligned state. Cases below add and delete files, so this
+  # must clear the directories rather than only overwrite the files it knows
+  # about -- otherwise one case's leftovers silently become the next case's
+  # input, and a passing suite proves nothing.
+  rm -rf "$bundle" "$live"
+  mkdir -p "$bundle/agents" "$live/agents"
   write_profile "$bundle/profile.jsonc" ask ""
   write_profile "$live/opencode.jsonc" ask ""
   for name in reviewer expert; do
@@ -113,6 +119,54 @@ open(path, "w", encoding="utf-8").write(text.replace('"model": "p/m"', '"model":
 PY
 run_check && fail "a changed top-level default model must be DRIFT"
 
+# permission.task is the Breakglass containment control -- the single most
+# security-relevant routing-owned key, and the one an earlier revision of
+# this test left entirely uncovered.
+setup_aligned
+python3 - "$live/opencode.jsonc" <<'PY'
+import sys
+path = sys.argv[1]
+text = open(path, encoding="utf-8").read()
+open(path, "w", encoding="utf-8").write(
+    text.replace('"breakglass": "deny"', '"breakglass": "allow"', 1))
+PY
+run_check && fail "a weakened top-level permission.task (breakglass) must be DRIFT"
+grep -q 'permission.task' "$workdir/out.txt" \
+  || fail "drift report must name permission.task"
+
+# A declared role missing from the install takes its permission denies with
+# it, so absence must be drift -- not silence.
+setup_aligned
+python3 - "$live/opencode.jsonc" <<'PY'
+import json, re, sys
+path = sys.argv[1]
+raw = open(path, encoding="utf-8").read()
+body = re.sub(r"^//.*$", "", raw, flags=re.M)
+doc = json.loads(re.sub(r",(\s*[}\]])", r"\1", body))
+doc["agent"].pop("build")
+open(path, "w", encoding="utf-8").write(json.dumps(doc, indent=2) + "\n")
+PY
+run_check && fail "a declared agent row missing from the install must be DRIFT"
+
+# Dropping a subkey (rather than changing it) must also be drift: a live row
+# that loses its whole `permission` block is not "matching".
+setup_aligned
+python3 - "$live/opencode.jsonc" <<'PY'
+import json, re, sys
+path = sys.argv[1]
+raw = open(path, encoding="utf-8").read()
+body = re.sub(r"^//.*$", "", raw, flags=re.M)
+doc = json.loads(re.sub(r",(\s*[}\]])", r"\1", body))
+doc["agent"]["build"].pop("permission")
+open(path, "w", encoding="utf-8").write(json.dumps(doc, indent=2) + "\n")
+PY
+run_check && fail "an agent row that drops its permission block must be DRIFT"
+# ...and the report must NAME the dropped subkey. Diffing only the subkeys
+# present in both rows still flags the row, but yields an empty subkey list --
+# technically drift, uselessly reported.
+grep -q 'permission' "$workdir/out.txt" \
+  || fail "drift report must name the dropped 'permission' subkey, not just the row"
+
 # --- user-owned keys must NEVER be reported (the cry-wolf guard) ----------
 setup_aligned
 write_profile "$live/opencode.jsonc" ask '"plugin": ["something@1.0.0"], "theme": "dark"'
@@ -146,6 +200,14 @@ run_check && fail "an agent's differing permission frontmatter must be DRIFT"
 grep -q 'security boundary' "$workdir/out.txt" \
   || fail "permission frontmatter drift must be labelled a security boundary"
 
+# --- frontmatter comparison is order-sensitive, deliberately -------------
+# permission_block's docstring promises this: an equivalent block written in
+# a different order is reported as drift, because for a security boundary
+# over-sensitivity is the safe direction. Pinned so the claim stays true.
+setup_aligned
+write_agent_md "$live/agents/reviewer.md" $'  task: deny\n  edit: deny\n  skill: allow\n' "prose"
+run_check && fail "reordered permission frontmatter must be DRIFT (documented over-sensitivity)"
+
 # --- prose-only differences are STALE, not DRIFT -------------------------
 setup_aligned
 write_agent_md "$live/agents/reviewer.md" "$standard_perm" "different prose entirely"
@@ -156,6 +218,38 @@ setup_aligned
 printf 'a stale routing policy describing models that are no longer routed\n' >"$live/model-routing.md"
 run_check || fail "a differing model-routing.md must be STALE, not DRIFT"
 [[ "$(report_status)" == STALE ]] || fail "expected status STALE, got $(report_status)"
+
+# --- a UTF-8 BOM must not fake a security-boundary difference ------------
+# Common on a Windows/WSL workstation. The frontmatter probe keys off a
+# leading "---", so a BOM would otherwise make an identical file look like it
+# had no permissions at all -- the loudest possible false alarm.
+setup_aligned
+python3 - "$live/agents/expert.md" <<'PY'
+import sys
+path = sys.argv[1]
+data = open(path, encoding="utf-8").read()
+open(path, "w", encoding="utf-8-sig").write(data)
+PY
+run_check || fail "a UTF-8 BOM must not be reported as permission drift"
+[[ "$(report_status)" == ALIGNED ]] \
+  || fail "a BOM-only difference must leave status ALIGNED, got $(report_status)"
+
+# --- an installed-only agent file shadowing a declared role is DRIFT -----
+# The bundle ships nothing to verify it against, and its frontmatter can
+# override a routing-owned row while the JSON still matches perfectly.
+setup_aligned
+write_agent_md "$live/agents/build.md" $'  edit: allow\n  bash: allow\n' "shadow"
+run_check && fail "an installed-only agent file for a declared role must be DRIFT"
+grep -q 'build.md' "$workdir/out.txt" \
+  || fail "drift report must name the shadowing agent file"
+
+# ...but an installed-only agent file for a role this bundle does NOT route
+# is the user's own business and must stay silent.
+setup_aligned
+write_agent_md "$live/agents/my-own-agent.md" $'  edit: allow\n' "mine"
+run_check || fail "an installed-only agent file for an undeclared role must not be drift"
+[[ "$(report_status)" == ALIGNED ]] \
+  || fail "an undeclared installed-only agent must leave status ALIGNED, got $(report_status)"
 
 # --- an uninstalled support file is DRIFT, not silence -------------------
 setup_aligned

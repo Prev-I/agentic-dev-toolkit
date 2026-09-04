@@ -53,30 +53,35 @@ adds the approved exact Scout `low` and Compaction `medium` variants, executable
 Reviewer/Explore/Compaction fixture ground truth, and the user-global activation
 contract. It does not change or activate the published routing profile.
 
-Phase R executed against every committed gate; **status:
-`BLOCKED_REVIEWER_RERUN`**, not PASS — see the
+Phase R is **`PASS`**, as of the
+[2026-09-04 scope amendment](docs/decisions/2026-09-04-phase-r-scope-amendment.md)
+— see the
 [Phase-R execution evidence](docs/evidence/2026-09-04-phase-r-execution.md)
-for the full record. Build, Explore, Compaction, routing resolution and
-security boundaries passed and are not re-run by this correction; the
-Reviewer seeded-defect gate is blocked (see I1/I2, the
+for the full record. The amendment separates restoration (is this routing
+operationally viable?) from optimization (is each model the best choice for
+its role?): Build, Explore, Compaction, routing resolution and security
+boundaries passed and were not re-run to reach this status; the Reviewer
+5/5 seeded-defect + clean-zero benchmark (see I1/I2, the
 [Reviewer fixture-integrity remediation](docs/evidence/2026-09-04-reviewer-fixture-integrity-remediation.md),
 and the
-[Reviewer observability/attribution remediation](docs/evidence/2026-09-04-reviewer-observability-attribution-remediation.md)).
-The Reviewer fixture and scorer are now mechanically admissible offline;
-a fresh live 5/5 + clean-zero rerun and its own budget approval are still
-required. The routing profile is restored and active on the real,
-user-global OpenCode configuration (`operational_state: active-provisional`)
-— that activation stands independent of the Reviewer gate's status — but is
-**not** currently a `canonical_quality_reference`.
+[Reviewer observability/attribution remediation](docs/evidence/2026-09-04-reviewer-observability-attribution-remediation.md))
+is **reclassified** — unchanged threshold, fixture, and scorer — from a
+Phase-R restoration gate to targeted Phase-3 quality evidence; historical
+runs remain inadmissible for quality adjudication. Phase R instead gates
+Reviewer's *operational integration* (model resolution, routing,
+permissions, successful dispatch, adapter/output-path traversal, no
+security regression), fully evidenced without any new live dispatch. The
+routing profile is restored and active on the real, user-global OpenCode
+configuration (`operational_state: active`) and **is** now the
+`canonical_quality_reference` — meaning restoration-quality, not a claim
+that every role's model is optimal for its role.
 
 ## Restored reference profile
 
 [`profiles/v1-restored-2026-09.jsonc`](profiles/v1-restored-2026-09.jsonc) is
-a snapshot of the exact routing that was actively installed during Phase R.
-It is **not currently** the forward quality reference, the Phase-3 starting
-baseline, or a rollback target — see the corrected header comment in that
-file — pending a clean Reviewer gate rerun against an integrity-proven
-fixture.
+the canonical restored V1 baseline and the forward reference for
+hypothesis-driven Phase-3 optimization — see the header comment in that
+file for the full amended-gate provenance.
 
 [`profiles/baseline-2026-08.jsonc`](profiles/baseline-2026-08.jsonc) remains
 the preserved, untouched historical record of the pre-Phase-R profile.

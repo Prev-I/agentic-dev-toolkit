@@ -1,0 +1,55 @@
+{
+  "decision_reference": "docs/decisions/2026-09-04-phase-r-scope-amendment.md",
+  "amended": "2026-09-04",
+  "hard_gates": [
+    {
+      "gate": "routing_resolution",
+      "evidence": "eval/records/phase-r/effective-routing.json"
+    },
+    {
+      "gate": "security_permissions",
+      "evidence": "eval/records/phase-r/security/reviewer.json, eval/records/phase-r/security/expert.json"
+    },
+    {
+      "gate": "breakglass_boundary",
+      "evidence": "eval/records/phase-r/security/breakglass-non-exposure.json, eval/records/phase-r/security/breakglass-primary.json"
+    },
+    {
+      "gate": "build_operational_restoration",
+      "evidence": "eval/records/phase-r/build/outcome.json"
+    },
+    {
+      "gate": "explore_operational_gate",
+      "evidence": "eval/records/phase-r/explore/outcome.json"
+    },
+    {
+      "gate": "compaction_invariant_preservation",
+      "evidence": "eval/records/phase-r/compaction/outcome.json"
+    },
+    {
+      "gate": "reviewer_operational_integration",
+      "evidence": "eval/records/phase-r/security/reviewer.json, eval/records/phase-r/effective-routing.json, eval/records/phase-r/reviewer/*/dispatch/dispatch.json, eval/records/phase-r/reviewer/findings.json",
+      "required_properties": [
+        "model_resolves",
+        "variant_correct",
+        "routing_correct",
+        "permissions_read_only",
+        "successful_execution",
+        "adapter_output_path_traversal",
+        "no_security_regression"
+      ],
+      "note": "Operational integration only. Does not require quantitative defect-recall evidence."
+    }
+  ],
+  "not_a_hard_gate": [
+    {
+      "benchmark": "reviewer_seeded_defects_quality_benchmark",
+      "reference": "eval/fixtures/reviewer-seeded-defects/oracle.json",
+      "classification": "phase_3_targeted_quality_evaluation",
+      "reclassified_from": "phase_r_restoration_hard_gate",
+      "threshold_unchanged": true,
+      "historical_runs": "inadmissible_for_quality_adjudication",
+      "reason": "Restoration (operational viability) and optimization (per-role model quality) are separate questions; this benchmark answers the second, not the first."
+    }
+  ]
+}

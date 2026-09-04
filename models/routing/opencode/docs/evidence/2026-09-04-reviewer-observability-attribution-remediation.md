@@ -11,15 +11,27 @@ and zero additional AI credits**.
 ## Phase R status
 
 ```text
-Phase R: BLOCKED_REVIEWER_RERUN
+Phase R: BLOCKED_REVIEWER_RERUN (status at the time this document was written)
 ```
 
 Not `BLOCKED_REVIEWER` (the prior status), and not PASS. The distinction
 matters: the Reviewer fixture and scorer are now mechanically admissible
 (everything below is proven offline), but a fresh, complete live 5/5 +
-clean-zero rerun is still required, and no rerun budget is yet approved.
-Build, Explore, Compaction, routing resolution, and security/permission
-boundaries are unaffected and remain PASS.
+clean-zero rerun was, at the time this document was written, still
+believed required before Phase R could close. Build, Explore, Compaction,
+routing resolution, and security/permission boundaries are unaffected and
+remain PASS.
+
+**Superseded 2026-09-04 by the
+[Phase-R scope amendment](../decisions/2026-09-04-phase-r-scope-amendment.md):**
+that live rerun turned out not to be required at all. The amendment
+separates restoration from optimization and reclassifies this whole
+benchmark — unchanged threshold, fixture, and scorer, all the hardening
+below fully retained — as Phase-3 quality evidence rather than a Phase-R
+gate. Phase R now gates Reviewer's *operational* integration, which was
+already evidenced without any of this remediation's work. This section is
+preserved as the historical record of what was believed true when this
+document was written, not rewritten to claim the amendment existed then.
 
 ## Budget status (unchanged by this task)
 
@@ -368,12 +380,20 @@ reviewer_remediation_rerun_budget:
                 cases + clean control) plus the one bounded
                 INVALID_ENVIRONMENT replacement allowance -- no Phase 3,
                 no unrelated experimentation, no effort-level exploration
-    status: PENDING_HUMAN_APPROVAL
+    status: NOT_REQUIRED_FOR_PHASE_R / NOT_AUTHORIZED (superseded 2026-09-04
+                by the scope amendment -- was PENDING_HUMAN_APPROVAL when
+                this document was written)
 ```
 
-Not self-approved. Distinct from, and does not modify, the historical
-100/250 caps, which remain breached and unchanged. No new live dispatch
-may occur until this tranche is explicitly approved.
+Not self-approved, and never was. Distinct from, and does not modify, the
+historical 100/250 caps, which remain breached and unchanged. **Superseded
+by the [scope amendment](../decisions/2026-09-04-phase-r-scope-amendment.md)**:
+the derivation and arithmetic above remain accurate, but the rerun this
+tranche would have funded is no longer needed to close Phase R, since the
+benchmark it targets is no longer a Phase-R gate. No live spend was ever
+authorized against this proposal, and none is authorized now. If a future
+Phase-3 Reviewer evaluation is opened, its own budget must be proposed and
+approved at that time.
 
 ## Final classification matrix
 
@@ -439,7 +459,9 @@ future gate:
     central estimated credits: 204.2
     upper estimated credits: 290.8
     invalid-environment allowance: 1 dispatch, priced at the ceiling
-    proposed tranche: 340 credits, PENDING_HUMAN_APPROVAL
+    proposed tranche: 340 credits, NOT_REQUIRED_FOR_PHASE_R / NOT_AUTHORIZED
+                       (superseded by the 2026-09-04 scope amendment; was
+                       PENDING_HUMAN_APPROVAL when this document was written)
 ```
 
 ## Verification
@@ -466,6 +488,11 @@ global OpenCode config:            unchanged
 Build/Explore/Compaction evidence: unchanged (no files under those paths
                                     touched in this branch's commit range)
 Phase R:                           BLOCKED_REVIEWER_RERUN, not PASS
+                                    (status when this document was written;
+                                    superseded 2026-09-04 -- Phase R is now
+                                    PASS under the amended, operational-
+                                    restoration gate set -- see the scope
+                                    amendment)
 Phase 3:                           not started
 Phase 4:                           not started
 ```

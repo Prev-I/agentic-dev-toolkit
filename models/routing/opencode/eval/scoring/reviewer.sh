@@ -30,7 +30,14 @@ def classify(item, material):
     all_reported = item.get("all_reported")
     files = item.get("files")
     if all_reported is None or files is None:
-        # legacy/simplified shape: trust the top-level severity as-is.
+        # legacy/simplified shape: trust the top-level severity as-is. This
+        # is a real leniency path (it cannot detect ambiguity it has no
+        # data for), not silent -- flagged on stderr so a malformed,
+        # truncated, or hand-edited findings.json doesn't score leniently
+        # without anyone noticing.
+        print(f"reviewer_structured_gate: {item.get('id')} has no all_reported/files "
+              f"evidence -- falling back to trusting its top-level severity directly",
+              file=sys.stderr)
         return "detected" if item.get("severity") in material else "missed"
     override_names = {os.path.basename(str(f)) for f in files}
     matches = [f for f in all_reported

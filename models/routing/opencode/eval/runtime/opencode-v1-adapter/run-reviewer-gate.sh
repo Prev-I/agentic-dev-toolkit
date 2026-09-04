@@ -142,7 +142,7 @@ clean = [{"severity": str(item.get("severity")),
          for item in reported("clean")]
 
 document = {"seeded": seeded, "clean": clean,
-            "normalization": "highest severity the reviewer reported against the case's override file",
+            "normalization": "adapter records every reported finding (all_reported) and the override file set (files) per case; the scorer, not the adapter, decides detection from that evidence -- see eval/scoring/reviewer.sh::reviewer_structured_gate",
             "runner_decides_gate_outcome": False,
             "scorer": "eval/scoring/reviewer.sh::reviewer_structured_gate",
             "fixture_revision": os.environ.get("REVIEWER_FIXTURE_REVISION", "unknown"),

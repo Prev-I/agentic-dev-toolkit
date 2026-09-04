@@ -44,6 +44,19 @@ pagination_has_octal_defect() {
   (( accepts_0144 == 1 || accepts_08_cleanly == 0 ))
 }
 
+# Second, independent mechanism named in the same live finding that
+# motivated pagination_has_octal_defect (both are in
+# eval/records/phase-r/reviewer/R-BOUNDARY/dispatch/response.txt; only the
+# octal half was originally addressed, per independent review of the first
+# fix): bash's `(( ))` is signed 64-bit and silently WRAPS on overflow
+# rather than erroring. Present if "2^64 + 1" (a value that unambiguously
+# exceeds the documented 1..100 range) is wrongly accepted because it
+# wrapped into range.
+pagination_has_overflow_defect() {
+  local file=$1
+  ( source "$file"; validate_page_size 18446744073709551617 >/dev/null 2>&1 )
+}
+
 # R-API seed: the documented public field was silently renamed from
 # displayName to name. Present if the emitted JSON uses "name" instead of
 # "displayName".
@@ -116,6 +129,7 @@ counter_lacks_locking() {
 FIXTURE_KNOWN_CHECKS=(
   "pagination zero-boundary:pagination_has_zero_boundary_defect:pagination.sh"
   "pagination octal/leading-zero:pagination_has_octal_defect:pagination.sh"
+  "pagination overflow/wraparound:pagination_has_overflow_defect:pagination.sh"
   "api field renamed:api_emits_renamed_field:api.sh"
   "api JSON injection:api_has_injection_defect:api.sh"
   "storage swallows failure:storage_swallows_failure:storage.sh"
@@ -138,6 +152,11 @@ fixture_integrity_check() {
   local entry desc fn relfile
   for entry in "${FIXTURE_KNOWN_CHECKS[@]}"; do
     IFS=: read -r desc fn relfile <<<"$entry"
+    if [[ ! -f "$fixture/clean/$relfile" ]]; then
+      printf 'FIXTURE INTEGRITY: clean/%s missing\n' "$relfile" >&2
+      ok=1
+      continue
+    fi
     if "$fn" "$fixture/clean/$relfile"; then
       printf 'FIXTURE INTEGRITY: clean/%s has known material defect (%s) -- clean must have zero\n' "$relfile" "$desc" >&2
       ok=1
@@ -152,9 +171,13 @@ fixture_integrity_check() {
       ok=1
       continue
     fi
-    overrides=$(python3 -c 'import json,sys; print(" ".join(json.load(open(sys.argv[1]))["overrides"]))' "$case_dir/ground-truth.json")
+    # newline-joined (not space-joined): this file's IFS=$'\n\t' does not
+    # split on space, so a space-joined multi-override string previously
+    # collapsed into one malformed word here (see docs/evidence/
+    # 2026-09-04-reviewer-fixture-integrity-remediation.md, F3).
+    overrides=$(python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["overrides"]))' "$case_dir/ground-truth.json")
     present_files=$(cd "$case_dir" && find . -maxdepth 1 -type f -name '*.sh' -printf '%f\n' | sort)
-    expected_files=$(printf '%s\n' $overrides | sort)
+    expected_files=$(printf '%s\n' "$overrides" | sort)
     if [[ "$expected_files" != "$present_files" ]]; then
       printf 'FIXTURE INTEGRITY: %s carries files other than its declared overrides (expected: %s; present: %s)\n' \
         "$case_id" "${expected_files//$'\n'/,}" "${present_files//$'\n'/,}" >&2

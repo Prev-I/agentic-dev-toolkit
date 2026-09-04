@@ -27,22 +27,34 @@ reviewer_gate() {
 #     more: UNRESOLVABLE, fails closed as "ambiguous" rather than guessing.
 #     No evidence field at all (model did not comply with the extended
 #     contract): treated as non-matching, fails closed.
-#     KNOWN, ACCEPTED RESIDUAL LIMITATION: a finding whose evidence quotes
-#     the entire line (rather than a targeted snippet) will legitimately
-#     contain the witness too, since it is a genuine substring of that
-#     line in the vulnerable sandbox. This is not solved here -- solving it
-#     fully would require restructuring the fixture files so each concern
-#     occupies a separately-quotable region, out of scope for this fix.
+#     KNOWN, ACCEPTED RESIDUAL LIMITATION, wider than just whole-line
+#     quoting: every fixture file is a single line, so ANY evidence quote
+#     spanning enough of that line to include the witness will match --
+#     including a SUB-LINE quote about a genuinely different concern that
+#     happens to overlap the witness's position (independent review
+#     constructed exactly this for R-API: a hallucinated finding about
+#     JSON-injection, evidence `json.dumps({"name": sys.argv[1]})` -- the
+#     "smallest snippet demonstrating the issue" a well-behaved model would
+#     naturally quote for THAT concern -- scores "detected" because it
+#     happens to contain R-API's witness, `{"name"`). This is not solved
+#     here -- solving it fully would require restructuring the fixture
+#     files so each concern occupies a separately-quotable region, out of
+#     scope for this fix. The witness mechanism substantially narrows this
+#     remediation's original incident (a DIFFERENT, unrelated finding
+#     wrongly credited with no overlap check at all) without claiming to
+#     eliminate every coincidental-overlap case.
 #
 #   - WITHOUT a witness (R-AUTH, R-CONCURRENCY -- both PURE REMOVALS of a
-#     safety check, verified to introduce no new literal token a genuine
+#     safety check, verified to introduce no usable literal token a genuine
 #     finding would naturally quote): falls back to file+severity only,
-#     the same rule as before. This remains justified specifically because
-#     fixture-integrity-test.sh mechanically proves each of these files
-#     carries EXACTLY one known material defect and none of the other
-#     detector classes apply -- there is nothing else in that file to be
-#     materially wrong about, among KNOWN defect classes. It does NOT
-#     protect against a hallucinated, unrelated finding; that residual
+#     the same rule as before. Stated precisely, not overclaimed:
+#     fixture-integrity-test.sh proves these files trigger none of the 8
+#     detectors currently defined -- but only ONE detector exists for
+#     each of authorization.sh/counter.sh, so this is "no other KNOWN
+#     defect class has a detector here yet", not "nothing else could
+#     possibly be wrong". It does NOT protect against a hallucinated,
+#     unrelated finding, and does so less substantively than for
+#     pagination.sh/api.sh (2 detectors each); that residual
 #     risk is real and not claimed to be closed.
 #
 # Findings payloads without "all_reported"/"files" at all (older/simplified

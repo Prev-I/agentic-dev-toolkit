@@ -37,24 +37,39 @@ source "$root/scoring/reviewer.sh"
 # the case's own witness substring.
 #
 # R-AUTH and R-CONCURRENCY are pure REMOVALS (a safety check deleted
-# outright). Verified directly: R-AUTH's override is not derivable as an
-# addition of any new literal token -- it is a strict character-range
-# deletion from clean, nothing new appears. R-CONCURRENCY's override does
-# introduce one incidental new token ("local n", an artifact of how the
-# de-synchronized version happens to be written) but it is NOT the
-# semantically meaningful evidence of the mutation (the meaningful fact is
-# the ABSENCE of flock/locking, not the presence of "local n") -- treating
-# it as a witness would be an arbitrary, fragile hack a reviewer's genuine
-# evidence would have no natural reason to quote, not a real anchor.
-# NEITHER CASE HAS A WITNESS. This is deliberate and documented, not an
-# oversight: these two retain the file+severity attribution, which is
-# NOW justified specifically because fixture-integrity-test.sh mechanically
-# proves each of these files carries EXACTLY one known material defect and
-# none of the other 8 detector classes apply to authorization.sh/counter.sh
-# at all -- there is nothing else in that file to be materially wrong
-# about, among KNOWN defect classes. This does not protect against a model
-# hallucinating an unrelated concern; that residual risk is acknowledged
-# explicitly, not hidden.
+# outright). R-AUTH's override IS technically a strict character-range
+# deletion from clean (verified: every character in the override appears
+# in clean, in the same order) -- but "nothing new appears" is true only in
+# that narrow sense; incidental junction substrings (e.g. where two
+# previously-separated tokens now sit adjacent) are not literally in
+# clean's text either. None of them is a usable witness, though: a witness
+# has to be something a genuine finding would naturally quote as its
+# evidence, and an accidental junction substring is not that -- only a
+# whole-line quote would ever contain one, which defeats discrimination
+# the same way a whole-line quote defeats any witness (see the residual
+# limitation below). R-CONCURRENCY's override does introduce one clearly
+# separable new token ("local n", an artifact of how the de-synchronized
+# version happens to be written) but it is NOT the semantically meaningful
+# evidence of the mutation (the meaningful fact is the ABSENCE of
+# flock/locking, not the presence of a local-variable declaration) --
+# treating it as a witness would be an arbitrary, fragile hack a reviewer's
+# genuine evidence would have no natural reason to quote, not a real
+# anchor. NEITHER CASE GETS A WITNESS. This is deliberate and documented,
+# not an oversight: these two retain the file+severity attribution.
+#
+# The honest justification for that fallback, stated precisely rather than
+# overclaimed: fixture-integrity-test.sh proves each of these files
+# triggers none of the 8 detectors in FIXTURE_KNOWN_CHECKS. For
+# authorization.sh and counter.sh specifically, only ONE detector each is
+# even defined (auth_bypasses_ownership, counter_lacks_locking) -- so this
+# is not "we searched for other known defect classes and found none", it
+# is "we have not yet written a detector for any other defect class in
+# these two files". The residual risk this leaves open -- a model
+# hallucinating an unrelated concern about authorization.sh or counter.sh,
+# credited purely because it's material and in the right file -- is real
+# and is not claimed to be closed by fixture minimality for these two
+# cases the way it more substantively is for pagination.sh (2 detectors)
+# and api.sh (2 detectors, plus the R-API observability contract).
 
 fixture="$root/fixtures/reviewer-seeded-defects"
 
@@ -243,5 +258,36 @@ d['witness'] = '10#\$1 >= 0'
 json.dump(d, open(p, 'w'))
 "
 assert_eq missed "$result"
+
+# --- known, ACCEPTED, wider residual limitation than whole-line quoting
+# alone: a SUB-LINE quote about a genuinely different concern can still
+# coincidentally overlap a witness. Independent review constructed this
+# exact case for R-API: a hallucinated finding about JSON-injection safety
+# (not the field rename at all), whose natural "smallest snippet
+# demonstrating the issue" is the json.dumps(...) call itself -- which
+# happens to contain R-API's witness, `{"name"`. Asserted explicitly here,
+# not hidden: this is a real, disclosed gap, not a claim that witness
+# matching is airtight. ---
+api_attr() {
+  python3 - "$root/fixtures/reviewer-seeded-defects/.witness-test-findings.json" "$1" <<'PY'
+import json, sys
+path, evidence = sys.argv[1:]
+seeded = [
+    {"id": "R-API", "files": ["api.sh"],
+     "all_reported": [{"file": "api.sh", "severity": "material",
+                        "summary": "hallucinated JSON-injection concern, not about the field name at all",
+                        "evidence": evidence}],
+     "severity": "material"},
+    {"id": "R-AUTH", "files": ["authorization.sh"], "all_reported": [{"file": "authorization.sh", "severity": "blocking", "summary": "s"}], "severity": "blocking"},
+    {"id": "R-BOUNDARY", "files": ["pagination.sh"], "all_reported": [], "severity": "none"},
+    {"id": "R-CONCURRENCY", "files": ["counter.sh"], "all_reported": [{"file": "counter.sh", "severity": "material", "summary": "s"}], "severity": "material"},
+    {"id": "R-ERROR", "files": ["storage.sh"], "all_reported": [], "severity": "none"},
+]
+json.dump({"seeded": seeded, "clean": []}, open(path, "w"))
+PY
+  reviewer_structured_attribution "$fixture/oracle.json" "$root/fixtures/reviewer-seeded-defects/.witness-test-findings.json" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["R-API"])'
+}
+assert_eq detected "$(api_attr 'json.dumps({"name": sys.argv[1]})')"
 
 printf 'PASS: witness-based scorer attribution\n'

@@ -14,10 +14,19 @@ Build:      github-copilot/claude-opus-5, variant high
 Reviewer:   github-copilot/gpt-5.6-sol,   variant high
 ```
 
-Confirmed against `opencode.jsonc` (the loaded, active user-global
-configuration) and `eval/records/phase-r/effective-routing.json`
-(`status: "PASS"`, `mismatches: []`) at the time of writing. Neither role
-changed as a result of either experiment.
+Confirmed directly against the live `opencode.jsonc` (the loaded, active
+user-global configuration) at the time of writing; cross-checked against
+`eval/records/phase-r/effective-routing.json` (`status: "PASS"`,
+`mismatches: []`), which was itself captured before either Build experiment
+ran and so is corroborating evidence, not a post-hoc verification of these
+specific experiments. Neither role changed as a result of either
+experiment.
+
+**Evidence base for both experiments below, stated once rather than
+per-section**: each rests on 2 workloads, 1 dispatch per arm, no
+repetition, no replacement pairs needed (n=4 dispatches each) — the frozen
+initial sample per experiment, not extended. Both conclusions below should
+be read at that scale.
 
 ## Build: Opus vs Sonnet — COMPLETE, KEEP_OPUS
 
@@ -51,8 +60,14 @@ design-confirmation skill and stopped to request human approval, which a
 non-interactive, single-shot dispatch cannot provide, and so never
 implemented the required change. Per the frozen adoption rule, a
 functional regression on either workload is dispositive on its own;
-wall-clock and cost (where Sol was in fact faster and cheaper) were
-correctly not consulted as decision inputs.
+wall-clock and cost were correctly not consulted as decision inputs.
+**Correction, per independent review**: Sol was cheaper on both workloads,
+but not faster overall — it was faster only on the `build-feature` dispatch
+it never completed (stopping early is, unsurprisingly, quick), and 42.9%
+*slower* on `build-bugfix`, the one workload it actually finished. This
+sample is 2 workloads, one dispatch per arm, no repetition — too small to
+generalize a latency profile from regardless, and none of it changes the
+decision either way.
 
 **The supported conclusion is scoped narrowly, on purpose**:
 
@@ -119,8 +134,9 @@ not the policy. A future experiment requires at least one material trigger:
 - repeated human correction
 - unacceptable latency
 - unacceptable cost
-- a new credible model challenger
-- a material model/version change
+- a new credible model challenger, with a stated, specific reason to expect
+  it changes a current routing decision (not merely that it is new)
+- a material model/version change to an already-routed model
 - a change to the Build execution contract
 
 Governing principle, unchanged: **an experiment should exist only when its
@@ -136,8 +152,11 @@ The following non-blocking findings, already disclosed in the two
 experiment result docs, are **not** opened as new work by this closure —
 they may be reconsidered only if a future experiment actually requires it:
 
-- sandbox git visibility (both Build experiments' sandboxes were created
-  inside the git worktree; confirmed not to have affected either outcome)
+- sandbox git visibility — disclosed for the Opus-vs-Sol experiment in
+  `2026-09-04-phase3-build-gpt-result.md`; this closure additionally
+  confirms the same was true of the Opus-vs-Sonnet experiment's sandboxes
+  (not disclosed in that result doc, verified here instead), and that
+  neither outcome was affected in either experiment
 - skill-version provenance (the installed Superpowers version is not
   recorded in `dispatch.json`)
 - a reproducible experiment driver script

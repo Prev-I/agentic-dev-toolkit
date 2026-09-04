@@ -1,0 +1,6 @@
+Using `brainstorming` to confirm the smallest correct design before implementation. This is a bounded one-file utility change, so I’ll inspect the existing function and tests, then present a short design for approval.
+The change is bounded and requirements are clear; no clarification is needed.
+
+Design: add only `reverse()` to `lib/strings.sh`, leaving `upper()` and `README.md` untouched. It will reverse the first argument character-by-character using Bash string operations and print one newline-terminated result. Verification will run the existing acceptance and regression tests plus a Bash syntax check.
+
+Approve this design so I can implement it.

@@ -1,0 +1,35 @@
+I'll start by exploring the sandbox to understand the existing code.
+Tests already exist. Let me confirm the acceptance test currently fails (red state).
+Red confirmed. Now implementing `reverse` in pure bash, matching the file's conventions:
+Both pass. Additional sanity checks and scope verification:
+Done.
+
+**Change:** added `reverse` to `lib/strings.sh:9-15`:
+
+```bash
+reverse() {
+  local s=${1-} out='' i
+  for ((i = ${#s} - 1; i >= 0; i--)); do
+    out+=${s:i:1}
+  done
+  printf '%s\n' "$out"
+}
+```
+
+**Verification (evidence, not assertion):**
+
+| Check | Before | After |
+|---|---|---|
+| `bash tests/acceptance.sh` | exit 1 | exit 0 |
+| `bash tests/regression.sh` | exit 0 | exit 0 |
+| `bash -n lib/strings.sh` | — | OK |
+| `shellcheck lib/strings.sh` | — | clean |
+
+Edge cases confirmed manually: empty string, single char, embedded spaces, palindrome, glob metacharacters (`*?[]` → `][?*`, no globbing), and UTF-8 (`héllo` → `olléh`).
+
+**Scope:** only `lib/strings.sh` was written to. `README.md` was read but not modified, and `upper` is byte-identical — the regression test asserting `upper abc == ABC` still passes.
+
+**Implementation notes:**
+- Pure bash rather than the external `rev`, per the repo's Bash-only convention, and it avoids a subshell/pipeline.
+- `${s:i:1}` slices by character (not byte) under a UTF-8 locale, so multibyte input reverses correctly. Note this reverses *code points*, so combining-mark sequences or emoji ZWJ clusters would still be split — out of scope for the stated requirement, but worth knowing if that input ever matters.
+- `${1-}` guards against unset `$1` tripping `set -u` if the function is ever called with no argument; it prints an empty line rather than erroring. If you'd prefer a missing argument to be a hard failure, say so and I'll make it fail loudly instead.

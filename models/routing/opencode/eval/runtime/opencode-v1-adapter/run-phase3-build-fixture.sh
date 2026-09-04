@@ -11,11 +11,12 @@ source "$runner_root/dispatch-fixture.sh"
 # own oracle.sh and regression.sh are the sole verdicts on the work product.
 
 run_phase3_build_fixture() {
-  local outdir="" ledger="" attempt=1 fixture_id="" model="" variant="" timeout_seconds=1800 label=""
+  local outdir="" ledger="" account="" attempt=1 fixture_id="" model="" variant="" timeout_seconds=1800 label=""
   while (( $# )); do
     case "$1" in
       --outdir) outdir=$2; shift 2 ;;
       --ledger) ledger=$2; shift 2 ;;
+      --account) account=$2; shift 2 ;;
       --attempt) attempt=$2; shift 2 ;;
       --fixture) fixture_id=$2; shift 2 ;;
       --model) model=$2; shift 2 ;;
@@ -27,6 +28,7 @@ run_phase3_build_fixture() {
   done
   [[ -n "$outdir" && -n "$fixture_id" && -n "$model" && -n "$variant" ]] || return 2
   [[ -n "$label" ]] || label="$fixture_id"
+  [[ -z "$ledger" || -n "$account" ]] || return 2
 
   local fixture sandbox prompt oracle_status regression_status dispatch_status initially_failing regression_ok
   fixture=$(cd "$runner_root/../../fixtures/build-workloads/$fixture_id" && pwd)
@@ -45,7 +47,7 @@ run_phase3_build_fixture() {
   fi
 
   local ledger_args=()
-  [[ -n "$ledger" ]] && ledger_args=(--ledger "$ledger" --account phase3_build_ab)
+  [[ -n "$ledger" ]] && ledger_args=(--ledger "$ledger" --account "$account")
 
   set +e
   dispatch_fixture --outdir "$outdir/dispatch" --label "$label" \

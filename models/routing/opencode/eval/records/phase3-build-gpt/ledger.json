@@ -1,0 +1,36 @@
+{
+  "caps": {
+    "phase3_build_gpt": 264
+  },
+  "entries": [
+    {
+      "timestamp": "2026-09-04T22:26:57.762756+02:00",
+      "account": "phase3_build_gpt",
+      "label": "phase3-build-gpt-pair1-feature-opus",
+      "provider": "github-copilot",
+      "credits": 29.515900000000006,
+      "correction_note": "account field corrected from phase3_build_ab (harness copy-paste bug in run-phase3-build-fixture.sh, fixed same-session) to phase3_build_gpt; credits value itself was always correct"
+    },
+    {
+      "timestamp": "2026-09-04T22:28:58.125704+02:00",
+      "account": "phase3_build_gpt",
+      "label": "phase3-build-gpt-pair1-feature-sol",
+      "provider": "github-copilot",
+      "credits": 16.1865
+    },
+    {
+      "timestamp": "2026-09-04T22:30:46.723466+02:00",
+      "account": "phase3_build_gpt",
+      "label": "phase3-build-gpt-pair2-bugfix-sol",
+      "provider": "github-copilot",
+      "credits": 20.4542
+    },
+    {
+      "timestamp": "2026-09-04T22:31:47.981713+02:00",
+      "account": "phase3_build_gpt",
+      "label": "phase3-build-gpt-pair2-bugfix-opus",
+      "provider": "github-copilot",
+      "credits": 27.8814
+    }
+  ]
+}

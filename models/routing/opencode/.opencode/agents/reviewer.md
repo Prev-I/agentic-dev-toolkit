@@ -1,8 +1,6 @@
 ---
-description: Independent reviewer — validates spec compliance, code quality, and architectural coherence on a separate model family from implementers
+description: Independent reviewer — validates spec compliance, code quality, and architectural coherence on a separate model family from implementers. Model and variant are assigned by opencode.jsonc.
 mode: subagent
-model: github-copilot/gpt-5.3-codex
-variant: max
 temperature: 0.1
 permission:
   edit: deny

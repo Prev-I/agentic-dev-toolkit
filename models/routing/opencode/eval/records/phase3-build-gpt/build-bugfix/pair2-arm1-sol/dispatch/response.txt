@@ -1,0 +1,16 @@
+Using `systematic-debugging` to reproduce the boundary error and identify its cause before making the minimal fix. I’ll use test-driven development to capture the strict-positive requirement and preserve `is_blank`.
+The failure reproduces in `tests/acceptance.sh`, while the `is_blank` regression test passes. The integer-format guard is already correct for the fixture; the root cause is the inclusive `>= 0` arithmetic comparison, so I’m changing only that operator.
+Using `verification-before-completion` to run the full fixture tests, syntax-check the changed script, and confirm the forbidden files/functions were untouched.
+Updated `lib/validate.sh` so `is_positive` now requires integers strictly greater than zero:
+
+```bash
+(( $1 > 0 ))
+```
+
+`README.md` and `is_blank` were not modified.
+
+Verification passed:
+
+- `bash tests/acceptance.sh`
+- `bash tests/regression.sh`
+- Bash syntax checks for all scripts

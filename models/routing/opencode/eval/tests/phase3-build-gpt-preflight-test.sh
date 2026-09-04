@@ -17,7 +17,8 @@ python3 -c '
 import json
 m = json.load(open("'"$manifest"'"))
 
-assert m["status"] == "APPROVED"
+assert m["status"] == "EXECUTED"
+assert m["final_decision"] == "KEEP_OPUS"
 assert m["additional_live_spend_this_task"] == 0
 assert m["no_weighted_aggregate_score"] is True
 assert m["incumbent"] == {"model": "github-copilot/claude-opus-5", "variant": "high"}

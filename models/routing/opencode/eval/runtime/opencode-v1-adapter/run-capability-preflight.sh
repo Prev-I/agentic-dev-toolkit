@@ -24,7 +24,17 @@ run_capability_preflight() {
   local output_dir=$1 manifest=$2 ledger=$3 targets=$4
   mkdir -p "$output_dir"
   local role model variant record status classification stop_class credits cost line
-  while IFS= read -r line; do
+  # Read every target line into an array up front, fully draining and closing
+  # the process-substitution pipe before the loop body runs anything. Feeding
+  # a `while read` loop directly from `< <(process substitution)` shares fd 0
+  # with every command the loop body invokes; probe_model_variant ultimately
+  # execs the opencode CLI without redirecting its stdin, and if that CLI
+  # reads/peeks at stdin at all, it silently steals bytes from this same pipe,
+  # causing the loop to see EOF early and stop with no error. Draining to an
+  # array up front removes the shared-fd hazard entirely.
+  local lines=()
+  mapfile -t lines < <(preflight_targets "$targets")
+  for line in "${lines[@]}"; do
     IFS=' ' read -r role model variant <<<"$line"
     [[ -n "${role:-}" ]] || continue
     record="$output_dir/${role}.json"
@@ -74,7 +84,7 @@ with open(sys.argv[1], "w", encoding="utf-8") as handle:
     json.dump(record, handle, indent=2)
     handle.write("\n")
 PY
-  done < <(preflight_targets "$targets")
+  done
 
   python3 - "$manifest" "$output_dir" "$targets" <<'PY'
 import datetime

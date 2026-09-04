@@ -12,3 +12,12 @@ vulnerability — not detections of either case's seeded ground-truth defect.
 Preserved for provenance and audit history. Not used as adjudication
 evidence for the Reviewer gate — see `../R-API/` and `../R-BOUNDARY/` for
 the post-repair rerun.
+
+**Also FIXTURE_DEFECT, independently of the above** (2026-09-04, Reviewer
+fixture-integrity remediation): at the time of this dispatch,
+`clean/pagination.sh` itself carried a real defect (bash reinterprets
+leading-zero input as octal), present in this sandbox's copy too, on top of
+the already-noted I2 issue. See
+`../outcome.json`'s `fixture_defect_note` for full detail. This directory's
+evidence is inadmissible as Phase-R Reviewer quality gate evidence for two
+independent reasons, not one.

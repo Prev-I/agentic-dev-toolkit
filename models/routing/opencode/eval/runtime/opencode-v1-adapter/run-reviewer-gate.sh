@@ -76,7 +76,6 @@ ground_truth_path, case_dir, sandbox = sys.argv[1:]
 for override in json.load(open(ground_truth_path, encoding="utf-8"))["overrides"]:
     shutil.copy(f"{case_dir}/{override}", f"{sandbox}/{override}")
 PY
-    printf '%s\n' "$case_id" >"$sandbox/.case"
     run_one "$case_id" "$sandbox"
   done
 

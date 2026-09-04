@@ -79,27 +79,44 @@ matrix's completeness.
 
 ## Investigation: the shared pagination bug
 
+**This bug had two independent mechanisms.** An initial pass (commits
+`a157136`/`d9d6235`) fixed only the first (octal reinterpretation). An
+independent adversarial review of that fix caught that the live finding
+this whole investigation is built on
+(`eval/records/phase-r/reviewer/R-BOUNDARY/dispatch/response.txt`) actually
+names **two** mechanisms, and only one had been addressed — leaving
+`clean/ground-truth.json`'s `"known_material_defects": 0` claim still
+false. The second (overflow/wraparound) was then independently reproduced,
+root-caused, and fixed the same way (`33e3c6f`/`760e8d2`), before this
+document was finalized. Both are recorded below as one investigation,
+since they are the same underlying "the guard proves less than it looks
+like it proves" class of defect.
+
 ### Reproduction
 
-`eval/tests/decimal-pagination-test.sh` (committed RED in `a157136`, GREEN
-after the fix in `d9d6235`) exercises `clean/pagination.sh`'s
-`validate_page_size` against the required domain table:
+`eval/tests/decimal-pagination-test.sh` (mechanism 1 committed RED in
+`a157136`, GREEN in `d9d6235`; mechanism 2 committed RED in `33e3c6f`,
+GREEN in `760e8d2`) exercises `clean/pagination.sh`'s `validate_page_size`
+against the required domain table plus the overflow class:
 
-| Input | Required | Pre-fix actual | Post-fix actual |
-|---|---|---|---|
-| `0` | reject | reject | reject |
-| `1` | accept | accept | accept |
-| `8` | accept | accept | accept |
-| `08` | accept (decimal 8) | **crash** (bash arithmetic error) | accept |
-| `99` | accept | accept | accept |
-| `100` | accept | accept | accept |
-| `101` | reject | reject | reject |
-| `0144` | reject (decimal 144 > 100) | **accept** (wrong) | reject |
-| `-1`, `1x`, `abc`, `''` | reject | reject | reject |
+| Input | Required | Before either fix | After mechanism-1 fix only | After both fixes |
+|---|---|---|---|---|
+| `0` | reject | reject | reject | reject |
+| `1` | accept | accept | accept | accept |
+| `8` | accept | accept | accept | accept |
+| `08` | accept (decimal 8) | **crash** | accept | accept |
+| `99` | accept | accept | accept | accept |
+| `100` | accept | accept | accept | accept |
+| `101` | reject | reject | reject | reject |
+| `0144` | reject (decimal 144 > 100) | **accept** (wrong) | reject | reject |
+| `-1`, `1x`, `abc`, `''` | reject | reject | reject | reject |
+| `18446744073709551617` (2^64+1) | reject | reject (overflow happens to reject here) | **accept** (wrong — wraps to 1) | reject |
+| `000000000000000001` (18-char zero-padded 1) | accept | accept | accept | accept |
 
 ### Root cause
 
-Confirmed via `man bash`, ARITHMETIC EVALUATION section, quoted directly:
+**Mechanism 1 — octal reinterpretation.** Confirmed via `man bash`,
+ARITHMETIC EVALUATION section, quoted directly:
 
 > "Constants with a leading 0 are interpreted as octal numbers."
 
@@ -116,16 +133,25 @@ not an LLM finding rediscovered after the fact — it was independently
 reproduced from bash's own manual and direct execution before any fix was
 written.
 
+**Mechanism 2 — 64-bit arithmetic overflow/wraparound.** `(( ))` performs
+signed 64-bit integer arithmetic and, like C, silently wraps rather than
+erroring on overflow. Direct reproduction: `bash -c '(( 10#18446744073709551617 >= 1 && 10#18446744073709551617 <= 100 ))'`
+succeeds (exit 0) — the value 2^64+1 wraps to 1, which passes the `>= 1`
+check. The `10#` base-prefix fix (mechanism 1) does not bound magnitude at
+all; it only forces decimal parsing of whatever value eventually reaches
+the wrapped 64-bit representation.
+
 ### Classification
 
-**FIXTURE_DEFECT.** `clean/ground-truth.json` declares
-`"known_material_defects": 0`; the fixture had one. This is a material bug
-(a documented 1..100 boundary is silently bypassed) present in the shared
-baseline every one of the six sandboxes (clean + 5 seeded cases) receives —
-confirmed structurally: each `cases/<ID>/` directory contains **only** its
-declared override file(s) (verified by `fixture-integrity-test.sh` and by
-direct `ls`), so every non-override file, including `pagination.sh` for
-every case except R-BOUNDARY, is supplied fresh from `clean/` at
+**FIXTURE_DEFECT**, both mechanisms. `clean/ground-truth.json` declares
+`"known_material_defects": 0`; the fixture had (and, until the second fix,
+still had) at least one. This is a material bug (a documented 1..100
+boundary is silently bypassed) present in the shared baseline every one of
+the six sandboxes (clean + 5 seeded cases) receives — confirmed
+structurally: each `cases/<ID>/` directory contains **only** its declared
+override file(s) (verified by `fixture-integrity-test.sh` and by direct
+`ls`), so every non-override file, including `pagination.sh` for every
+case except R-BOUNDARY, is supplied fresh from `clean/` at
 sandbox-construction time (`run-reviewer-gate.sh`). There is no stale
 hand-copied file that could have drifted independently — the defect's
 blast radius is exactly "every sandbox," by the fixture's own declared
@@ -133,22 +159,34 @@ architecture, not by any additional propagation bug.
 
 ### Fix
 
-Smallest decimal-safe change (`d9d6235`): bash's own `10#` base-prefix
-notation, forcing explicit decimal interpretation regardless of leading
-zeros — `(( 10#$1 >= 1 && 10#$1 <= 100 ))` — applied to `clean/pagination.sh`
-and, because it is a genuine standalone override rather than a derived
-copy, independently to `cases/R-BOUNDARY/pagination.sh` (preserving its own
-seeded defect: lower bound `0` instead of `1`). No other case file needed
-touching — confirmed by the same structural fact above.
+**Mechanism 1** (`d9d6235`): bash's own `10#` base-prefix notation, forcing
+explicit decimal interpretation regardless of leading zeros —
+`(( 10#$1 >= 1 && 10#$1 <= 100 ))`.
+
+**Mechanism 2** (`760e8d2`): an explicit length guard, `(( ${#1} <= 18 ))`,
+before the arithmetic comparison. 18 decimal digits is safely below bash's
+signed 64-bit range (max ~9.2×10^18, 19 digits), so any string this short
+that reaches `10#$1` cannot wrap, while legitimately small values padded
+with arbitrarily many leading zeros (verified up to 18 characters) are
+still accepted correctly.
+
+Both applied to `clean/pagination.sh` and, because it is a genuine
+standalone override rather than a derived copy, independently to
+`cases/R-BOUNDARY/pagination.sh` (preserving its own seeded defect: lower
+bound `0` instead of `1`). No other case file needed touching — confirmed
+by the same structural fact above.
 
 ### Regression tests
 
-- `decimal-pagination-test.sh`: the full domain table, RED before the fix,
-  GREEN after.
+- `decimal-pagination-test.sh`: the full domain table including the
+  overflow class, RED before each fix, GREEN after.
 - `fixture-integrity-test.sh` (below): proves `clean/` and every case
-  mechanically, not just `pagination.sh` in isolation.
-- Adversarial verification: reintroducing the bug in `clean/`, and adding
-  an unrelated second defect to a case override, both correctly fail.
+  mechanically via `pagination_has_octal_defect` AND the newly added
+  `pagination_has_overflow_defect`, not just the octal mechanism in
+  isolation.
+- Adversarial verification: reintroducing either bug in `clean/`
+  independently, and adding an unrelated second defect to a case override,
+  all correctly fail.
 
 ## Fixture integrity
 
@@ -256,6 +294,25 @@ the Reviewer output contract with a stable per-finding evidence anchor
 vocabulary) that a deterministic scorer could match against — this is a
 prompt/contract design decision requiring its own human review, not
 something to bundle into this remediation.
+
+**Framing correction from independent review**: stating this as flatly
+"undecidable without an LLM judge or a contract change" overstates it.
+There is a third, already-partially-exercised lever: **fixture
+minimality**. R-BOUNDARY was miscredited specifically because its override
+file carried a *second* real defect (the overflow/octal bug) alongside its
+seeded one; the pagination fix above closes that instance. An override
+file mechanically proven (via `fixture-integrity-test.sh`) to carry
+*exactly one* known defect makes "any material finding against this file"
+a much stronger signal than it was — not a deterministic proof for
+*unknown* defect classes the detectors don't yet cover, but a real,
+zero-LLM, zero-prompt-change reduction in ambiguity for every class this
+fixture already knows about. The honest statement is: single-finding
+attribution is undecidable in general (for defect classes with no
+detector), and the deterministic lever available today is fixture
+minimality plus one detector per known class — which is exactly what
+[Fixture integrity](#fixture-integrity) above builds, and it is
+incomplete by construction (it only covers classes someone has already
+found and written a detector for).
 
 ### Tests
 
@@ -457,6 +514,43 @@ historical. This is a distinct, forward-looking tranche a human must
 explicitly approve before any future dispatch. No new live run may occur
 until that approval is given.
 
+## Independent review findings
+
+Before finalizing this document, the full diff was sent to an independent,
+adversarial review (a fresh agent instance with no access to this
+document's earlier drafts). It reproduced the pagination bug itself, read
+every fixture file directly, ran the full test suite, and cross-checked
+every claim in this document against the code and persisted evidence. It
+found six issues, all addressed:
+
+```text
+F1 (moderate) -- the octal fix left the overflow/wraparound mechanism from
+    the SAME live finding unfixed; clean/ was not actually zero-defect as
+    claimed. Fixed: see "Investigation: the shared pagination bug" above.
+F2 (low/moderate) -- fixture_integrity_check silently false-PASSed a
+    MISSING clean/ file (no existence check, asymmetric with the case
+    side). Fixed: explicit existence check added.
+F3 (low, fails closed) -- the override-list comparison space-joined
+    overrides then relied on word-splitting under an IFS that does not
+    split on space, spuriously failing any future 2+-override case. Fixed:
+    newline-joined instead.
+F4 (low) -- findings.json's "normalization" field still described the OLD
+    scoring behavior after the scorer was hardened. Fixed: corrected.
+F5 (low) -- the scorer's legacy-shape fallback was a silent leniency path.
+    Fixed: now warns on stderr which case fell back and why.
+F6 (trivial) -- a test comment overstated what it actually verified.
+    Fixed: corrected.
+```
+
+All six are fixed in commit `760e8d2` (F1-F5) and the RED regression for
+F1 in `33e3c6f`; full suite (33/33) and install suite green after. The
+review's other main contribution was the framing correction on the scorer
+attribution limitation, folded into that section above (the "fixture
+minimality" third lever). No issue was found with: fixture-content
+accuracy (area 2), admission-gate ordering (area 3), scorer backward
+compatibility (area 4), the R-API classification (area 6), absence of
+forbidden actions (area 7), or test integrity (area 8).
+
 ## Final classification matrix
 
 ```text
@@ -467,14 +561,20 @@ I1 cost undercounting
                             raw evidence unrecoverable, floor only)
     budget consequence: BREACHED (both accounts)
 
-shared Bash decimal/octal defect
-    root cause: CONFIRMED (man bash ARITHMETIC EVALUATION + direct
-                reproduction, independent of the original live-model finding)
+shared Bash pagination defect (two independent mechanisms)
+    root cause: CONFIRMED, both mechanisms (man bash ARITHMETIC EVALUATION
+                + direct reproduction for octal reinterpretation; direct
+                64-bit-wraparound reproduction for overflow -- both
+                independent of the original live-model finding, which named
+                both mechanisms in one response)
     classification: FIXTURE_DEFECT
-    clean repaired: PASS
+    clean repaired: PASS (both mechanisms; the octal-only fix was caught as
+                incomplete by independent review before this document was
+                finalized -- see "Independent review findings" below)
     all cases regenerated: PASS (structurally unnecessary for 4 of 5 cases
                 — no case besides R-BOUNDARY ever carried its own copy of
-                pagination.sh — confirmed and directly fixed for R-BOUNDARY)
+                pagination.sh — confirmed and directly fixed for R-BOUNDARY,
+                both mechanisms)
 
 Reviewer scorer attribution
     root cause: CONFIRMED (SCORER_DEFECT -- any material finding against

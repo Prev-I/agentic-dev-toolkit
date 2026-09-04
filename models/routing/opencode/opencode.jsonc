@@ -71,7 +71,7 @@
         },
         "bash": {
           "*": "allow",
-          "git push*": "deny"
+          "git push*": "ask"
         }
       }
     },

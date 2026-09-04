@@ -50,6 +50,8 @@ assert far["functional_tie"]["required"]["build-feature"]
 assert far["functional_tie"]["required"]["build-bugfix"]
 assert far["anything_else"]["decision"] == "KEEP_OPUS"
 assert far["cost"] == "observational only -- cannot trigger adoption under any branch of this rule"
+assert far["functional_tie"]["aggregation"].startswith("none"), \
+    "wall-clock adjudication must not be averaged across workloads"
 
 # activation policy: a Sol win never silently changes production routing
 ap = m["activation_policy"]
@@ -93,16 +95,28 @@ assert opus["ceiling_per_run"] == max(opus["build_feature"], opus["build_bugfix"
 
 observed = sol["observed_reviewer_dispatch_credits"]
 assert len(observed) == 6
-assert abs(sol["mean"] - sum(observed) / len(observed)) < 1e-3
-assert abs(sol["min"] - min(observed)) < 1e-3
-assert abs(sol["max"] - max(observed)) < 1e-3
-assert abs(sol["ceiling_per_run_estimate"] - max(observed)) < 1e-3
+assert abs(sol["mean"] - sum(observed) / len(observed)) < 1e-6
+assert abs(sol["min"] - min(observed)) < 1e-6
+assert abs(sol["max"] - max(observed)) < 1e-6
+assert abs(sol["ceiling_per_run_estimate"] - max(observed)) < 1e-6
 
-no_savings_floor = 2 * opus["ceiling_per_run"] + 2 * sol["ceiling_per_run_estimate"]
-replacement_floor = opus["ceiling_per_run"] + sol["ceiling_per_run_estimate"]
+# central estimate arithmetic: must actually equal opus + sol central rates,
+# not a hand-typed figure that drifted from its own inputs
+assert abs(b["central_estimate_credits"] - (opus["central_2_runs"] + sol["central_2_runs"])) < 0.01
+
+# role-transfer margin: the ceiling must use the MARGINED sol per-run rate,
+# not the raw cross-workload max with no headroom (independent review found
+# the raw max left ~0% margin against a same-turn-depth Sol Build projection)
+margin = sol["role_transfer_margin"]
+assert margin["factor"] > 1.0
+margined_sol_ceiling = sol["ceiling_per_run_estimate"] * margin["factor"]
+assert abs(margin["ceiling_per_run_with_margin"] - margined_sol_ceiling) < 1e-3
+
+no_savings_floor = 2 * opus["ceiling_per_run"] + 2 * margin["ceiling_per_run_with_margin"]
+replacement_floor = opus["ceiling_per_run"] + margin["ceiling_per_run_with_margin"]
 required_floor = no_savings_floor + replacement_floor
 assert b["conservative_ceiling_credits"] >= required_floor, \
-    "ceiling too low for 4 dispatches + 1 replacement pair at ceiling rates"
+    "ceiling too low for 4 dispatches + 1 replacement pair at margined ceiling rates"
 
 # organizational guardrail recorded as a distinct, separate control
 assert m["organizational_guardrail_credits_per_billing_cycle"] == 7600

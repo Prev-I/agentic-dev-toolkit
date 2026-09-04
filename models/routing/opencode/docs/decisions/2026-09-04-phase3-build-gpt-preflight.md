@@ -113,8 +113,8 @@ criterion (1-5), either workload -> **KEEP_OPUS**. No operational
 compensation.
 
 **Functional improvement.** Sol strictly better under the earliest
-differentiating functional criterion, not worse on the other workload under
-any earlier-or-equal-priority functional criterion -> **SOL_WINS_BUILD_EXPERIMENT**.
+differentiating functional criterion (1-5), not worse on the other workload
+under any earlier-or-equal-priority functional criterion -> **SOL_WINS_BUILD_EXPERIMENT**.
 Wall-clock not required. Production routing still does not change
 immediately — see Activation policy below.
 
@@ -134,11 +134,20 @@ not reached, inconclusive, insufficient valid evidence in budget) ->
 
 **Wall-clock threshold caveat, preserved unchanged**: 37.8885% is a
 precommitted minimum-practical-effect bar derived from Phase-0 self-variance
-on a *different* fixture family (`github-copilot/gpt-5.6-luna`). It is not a
+on a *different* fixture family (`github-copilot/gpt-5.6-luna`,
+`docs/evidence/2026-09-02-phase-0-self-variance.md`). It is not a
 statistical-significance threshold and is not claimed to characterize
-Build-specific latency variance. **Not retuned after the Opus-vs-Sonnet
-result, and not re-derived merely because Sol is a different challenger** —
-using the identical rule is what keeps the two Build experiments comparable.
+Build-specific latency variance — Build's own historical wall-clock range is
+**10.7%-1081.5%** depending on cold-cache inclusion
+(`eval/records/phase-r/build/attempt-{1,2,3}/dispatch/dispatch.json`), a
+materially wider range than the frozen threshold, already disclosed by the
+Opus-vs-Sonnet preflight and not re-litigated here. Requiring both workloads
+to clear the threshold independently is deliberate outlier protection: with
+one dispatch per arm per pair, a single cold-cache or otherwise atypical
+dispatch could dominate the primary criterion for an entire pair. **Not
+retuned after the Opus-vs-Sonnet result, and not re-derived merely because
+Sol is a different challenger** — using the identical rule is what keeps
+the two Build experiments comparable.
 
 ## Activation policy — frozen regardless of outcome
 
@@ -189,8 +198,9 @@ separate prospective budget, below.
 ```text
 phase3_build_gpt_budget:
     central estimate:     122.42 credits
-    conservative ceiling: 223 credits (includes a 1-pair replacement
-                          allowance for INVALID_ENVIRONMENT)
+    conservative ceiling: 264 credits (includes a 1.3x role-transfer
+                          margin on the Sol side, plus a 1-pair
+                          replacement allowance for INVALID_ENVIRONMENT)
     status:               PENDING_HUMAN_APPROVAL
 ```
 
@@ -230,31 +240,55 @@ cross-workload directional anchor for **Build-role** cost (read-write; edits
 files, runs two test suites) — no Sol Build history exists to derive from
 directly. The decimal precision above should not be read as workload-specific
 accuracy; it is the real observed distribution, reported honestly, not a
-manufactured estimate. It is judged a **defensible** anchor rather than
-grounds to stop because the token/turn-count order of magnitude (24k-30k
-tokens, 3-6 `step_finish` events per dispatch) is broadly comparable to the
-real Opus Build dispatches (21k-28k tokens) — unlike a single trivial
-capability probe considered and **rejected**:
-`eval/records/phase-r/preflight/reviewer.json` (cost 5.3532 credits, 10686
-tokens, **no cache** at all) has a token/cache shape incomparable to both the
-real Opus Build dispatches and the ratio-derivation probes used for the
-Sonnet estimate (~18.1-18.2k tokens, high cache-write) — using it would have
-manufactured false precision from one unrepresentative sample. A second Sol
-probe (`eval/records/gpt-5.6-sol-copilot-high.json`) was excluded for a
-different reason: its `pricing_regime` is `promotional`, not `standard`, so
-it is not comparable to any of the other evidence used throughout this and
-the prior preflight.
+manufactured estimate. The token/turn-count ranges are **adjacent, not
+overlapping**: the real Opus Build dispatches ran 23,457-24,193 tokens across
+7-8 turns; the 6 Sol Reviewer dispatches ran 24,548-29,706 tokens across
+3-10 turns. (An earlier draft of this document stated "21k-28k tokens,
+3-6 turns" for the Opus side — independent review measured the real figures
+directly from the raw dispatch records and found that range manufactured a
+false overlap that does not exist in the data; corrected here.) Because the
+ranges are adjacent rather than overlapping, this is judged a **defensible**
+anchor rather than grounds to stop — but only with an explicit role-transfer
+margin applied to the ceiling (below), not by treating the raw Reviewer max
+as already conservative. A single trivial capability probe considered and
+**rejected**: `eval/records/phase-r/preflight/reviewer.json` (cost 5.3532
+credits, 10686 tokens, **no cache** at all) has a token/cache shape
+incomparable to both the real Opus Build dispatches and the ratio-derivation
+probes used for the Sonnet estimate (~18.1-18.2k tokens, high cache-write) —
+using it would have manufactured false precision from one unrepresentative
+sample. A second Sol probe (`eval/records/gpt-5.6-sol-copilot-high.json`) was
+excluded for a different reason: its `pricing_regime` is `promotional`, not
+`standard`, so it is not comparable to any of the other evidence used
+throughout this and the prior preflight. (Pricing regime is recorded once at
+the run level, in `eval/records/phase-r/reviewer/outcome.json`'s
+`pricing_regime` field — the individual `dispatch.json` files do not carry
+it themselves.) Separately: this Reviewer gate run's own review-quality
+verdict is marked invalidated by a fixture defect
+(`eval/records/phase-r/reviewer/outcome.json`) — that invalidation concerns
+review-quality adjudication, not dispatch cost, which is real and unaffected.
+
+**Role-transfer margin, added per independent review (2026-09-04)**: the
+review measured credits-per-turn directly — Opus Build ran 7-8 turns at
+3.58-3.85 credits/turn; the 6 Sol Reviewer dispatches ran 3-10 turns at a
+mean 5.73 credits/turn (~1.54x Opus's per-turn rate). Projecting Sol's own
+observed per-turn rate across an Opus-like 7-8 turn Build dispatch already
+lands at ~43-46 credits — essentially equal to the raw (unmargined)
+per-run ceiling of 45.5993, meaning that figure had almost no headroom for
+the cross-workload uncertainty this estimate already discloses. A **1.3x**
+margin is applied to the Sol ceiling (not the central estimate, which stays
+the unpadded mean) to restore genuine headroom: 45.5993 x 1.3 = 59.2792
+credits/run.
 
 ```text
 central (4 dispatches):    55.58255 (opus) + 66.8417 (sol)  = 122.42425 -> 122.42
-ceiling (4 dispatches):    57.2473 (opus, 2x28.62365) + 91.1987 (sol, 2x45.5993) = 148.446
-replacement allowance:     1 pair at ceiling rates: 28.62365 (opus) + 45.5993 (sol) = 74.223
-total conservative ceiling:                                                          222.669
-                                                                            rounded to 223
+ceiling (4 dispatches):    57.2473 (opus, 2x28.62365) + 118.5583 (sol with margin, 2x59.2792) = 175.8056
+replacement allowance:     1 pair at margined ceiling rates: 28.62365 (opus) + 59.2792 (sol) = 87.90285
+total conservative ceiling:                                                                    263.70845
+                                                                                        rounded up to 264
 ```
 
-Internally consistent: the ceiling (223) exceeds the central estimate
-(122.42) and the ceiling-without-replacement (148.446), so the proposed cap
+Internally consistent: the ceiling (264) exceeds the central estimate
+(122.42) and the ceiling-without-replacement (175.81), so the proposed cap
 genuinely covers its own stated worst case plus the replacement allowance —
 the same class of arithmetic error flagged and fixed in the prior Reviewer
 remediation and re-checked in the Opus-vs-Sonnet preflight is checked for
@@ -269,7 +303,7 @@ accounting code is introduced by this preflight.
 Not self-approved. Distinct from, and does not modify, the historical
 100/250 caps, the closed 158-credit Opus-vs-Sonnet budget, or the
 organizational 7,600-credit/billing-cycle guardrail (a separate, external
-control — 223 credits does not implicate it).
+control — 264 credits does not implicate it).
 
 ## Known non-blocking limitations
 
@@ -285,6 +319,17 @@ control — 223 credits does not implicate it).
 - No proactive harness hardening was performed. The rule applied throughout:
   "could this issue materially cause the wrong Build controller to be
   selected?" — nothing found here meets that bar.
+- **Disclosed, not fixed, per independent review (2026-09-04)**: the new
+  consistency test catches every mutation targeting the budget-defensibility,
+  routing-safety, and Reviewer-scope checks above, but not every conceivable
+  mutation of the manifest's prose fields (e.g. an internally-absurd but
+  self-consistent central estimate, or a citation swap that a downstream
+  number-check would still catch independently). None of these gaps affect
+  what this preflight actually asserts — they are test-coverage margin, not
+  design defects — and are recorded rather than chased with further hardening.
+  No replacement-pair cap beyond "at most one" is separately enforced in
+  code; this mirrors the Opus-vs-Sonnet experiment (which needed zero
+  replacements) and is not a regression.
 
 None of these can cause a *wrong* Opus-vs-Sol adoption decision (the
 tie/inconclusive policy holds regardless, and a Sol win still does not

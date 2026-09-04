@@ -52,7 +52,7 @@
       "note": "Operational advantages cannot compensate. Adjudication stops here."
     },
     "functional_improvement": {
-      "condition": "Sol is strictly better under the earliest differentiating functional criterion and is not worse on the other workload under any earlier-or-equal-priority functional criterion",
+      "condition": "Sol is strictly better under the earliest differentiating functional criterion (1-5) and is not worse on the other workload under any earlier-or-equal-priority functional criterion",
       "decision": "SOL_WINS_BUILD_EXPERIMENT",
       "note": "Wall-clock superiority is not required in this case. Does NOT trigger immediate production routing change -- see activation_policy below."
     },
@@ -71,7 +71,18 @@
       "includes": ["tie", "mixed operational result", "advantage on only one workload", "threshold not reached", "genuine inconclusive result", "insufficient valid evidence inside budget"]
     },
     "cost": "observational only -- cannot trigger adoption under any branch of this rule",
-    "wall_clock_threshold_caveat": "37.8885% is a precommitted minimum practical effect derived from Phase-0 self-variance on a different fixture family (github-copilot/gpt-5.6-luna). It is not a statistical-significance threshold and is not claimed to characterize Build-specific latency variance. Not retuned after the Opus-vs-Sonnet result; not re-derived merely because Sol is a different challenger -- using the same rule keeps the Build experiments comparable."
+    "wall_clock_threshold_caveat": "37.8885% is a precommitted minimum practical effect derived from Phase-0 self-variance on a different fixture family (github-copilot/gpt-5.6-luna, source: docs/evidence/2026-09-02-phase-0-self-variance.md frozen thresholds). It is not a statistical-significance threshold and is not claimed to characterize Build-specific latency variance -- Build's own historical wall-clock range is 10.7%-1081.5% depending on cold-cache inclusion (eval/records/phase-r/build/attempt-{1,2,3}/dispatch/dispatch.json), a materially wider range than the frozen threshold, which the Opus-vs-Sonnet preflight already disclosed and this preflight does not retune or re-litigate. Requiring both workloads to clear the threshold independently is deliberate outlier protection: with one dispatch per arm per pair, a single cold-cache or otherwise atypical dispatch could dominate the primary criterion for an entire pair; requiring independent clearance on both workloads makes a one-workload timing artifact insufficient on its own. Not retuned after the Opus-vs-Sonnet result; not re-derived merely because Sol is a different challenger -- using the same rule keeps the Build experiments comparable.",
+    "primary_operational_advantage_threshold": {
+      "metric": "wall_clock_ms",
+      "practical_separation_threshold_relative_range": 0.378885,
+      "source": "docs/evidence/2026-09-02-phase-0-self-variance.md frozen thresholds"
+    },
+    "secondary_observational_criterion": {
+      "metric": "derived_credits",
+      "practical_separation_threshold_relative_range": 21.948831,
+      "status": "non_discriminating_at_current_variance",
+      "reason": "Frozen threshold requires a >2194.8831% relative-range separation to count as a real difference; no plausible Opus-vs-Sol cost gap can clear this. Cost is recorded and reported, never used to declare a winner."
+    }
   },
   "activation_policy": {
     "gpt_loses_ties_or_inconclusive": {
@@ -93,7 +104,7 @@
   },
   "proposed_phase3_build_gpt_budget": {
     "central_estimate_credits": 122.42,
-    "conservative_ceiling_credits": 223,
+    "conservative_ceiling_credits": 264,
     "status": "PENDING_HUMAN_APPROVAL",
     "cost_accounting_mechanism": "eval/runtime/opencode-v1-adapter/dispatch-fixture.sh (post-I1-fix, commit 505d35a: sums every step_finish part.cost across a multi-turn dispatch, not just the last step). The same mechanism already used, unmodified, for the Opus-vs-Sonnet execution.",
     "derivation": {
@@ -106,21 +117,28 @@
         "ceiling_note": "Uses the higher of the two real observed Opus Build costs (build-feature). Consistent with the broader historical Opus Build range (build-restoration-gate: 23.194-26.192, 3 attempts) -- 28.62365 remains the highest Opus Build cost observed to date across all evidence."
       },
       "sol_cost_per_run": {
-        "source": "No live Sol Build history exists (this experiment would produce the first). Estimated from 6 real, corrected, github-copilot/gpt-5.6-sol/high, standard-pricing-regime, multi-turn Reviewer dispatches (Phase-R reviewer gate, current/final run, post-I1-cost-correction): eval/records/phase-r/reviewer/{R-API,R-AUTH,R-BOUNDARY,R-CONCURRENCY,R-ERROR,clean}/dispatch/dispatch.json",
+        "source": "No live Sol Build history exists (this experiment would produce the first). Estimated from 6 real, corrected, github-copilot/gpt-5.6-sol/high, multi-turn Reviewer dispatches (Phase-R reviewer gate's current, cost-corrected dispatch set -- note: this run's own Reviewer-quality gate verdict is separately marked invalidated by a fixture defect in eval/records/phase-r/reviewer/outcome.json; that invalidation concerns review-quality adjudication, not dispatch cost, which is unaffected and real): eval/records/phase-r/reviewer/{R-API,R-AUTH,R-BOUNDARY,R-CONCURRENCY,R-ERROR,clean}/dispatch/dispatch.json. Pricing regime (standard) is recorded once at the run level in eval/records/phase-r/reviewer/outcome.json's pricing_regime field, not per-dispatch.",
         "observed_reviewer_dispatch_credits": [45.599349999999994, 22.540000000000003, 36.435249999999996, 30.087775, 34.921425, 30.941049999999997],
-        "mean": 33.4208,
-        "min": 22.54,
-        "max": 45.5993,
-        "central_per_run_estimate": 33.4208,
-        "ceiling_per_run_estimate": 45.5993,
-        "central_2_runs": 66.8417,
-        "ceiling_2_runs": 91.1987,
-        "uncertainty": "This is Reviewer-role evidence (read-only code review, no file edits, no test execution), used as a cross-workload directional anchor for Build-role cost (read-write, edits files, runs two test suites) because no Sol Build history exists. It is NOT claimed to be a precise Build estimate -- do not read the decimal precision above as workload-specific accuracy. The token/turn-count order of magnitude (24k-30k tokens, 3-6 step_finish events per dispatch) is broadly comparable to the real Opus Build dispatches (21k-28k tokens), which is why this is judged a defensible, if imprecise, anchor rather grounds for a STOP. A single trivial capability probe (eval/records/phase-r/preflight/reviewer.json, cost 5.3532 credits, 10686 tokens, no cache) was considered and rejected as the basis: its token/cache shape (no cache write, ~10.7k tokens) is not comparable to either the real Opus Build dispatches or the ratio-derivation probes used for the Sonnet estimate (~18.1-18.2k tokens, high cache-write), so using it would manufacture false precision from an unrepresentative single sample."
+        "mean": 33.42080833333333,
+        "min": 22.540000000000003,
+        "max": 45.599349999999994,
+        "central_per_run_estimate": 33.42080833333333,
+        "ceiling_per_run_estimate": 45.599349999999994,
+        "central_2_runs": 66.84161666666667,
+        "ceiling_2_runs": 91.19869999999999,
+        "role_transfer_margin": {
+          "applied_to": "ceiling only, not the central estimate",
+          "factor": 1.3,
+          "ceiling_per_run_with_margin": 59.279154999999996,
+          "ceiling_2_runs_with_margin": 118.55830999999999,
+          "justification": "Independent review (2026-09-04) measured credits-per-turn: Opus Build dispatches ran 7-8 step_finish turns at 3.58-3.85 credits/turn; the 6 Sol Reviewer dispatches ran 3-10 turns at a mean 5.73 credits/turn (~1.54x Opus's per-turn rate). Projecting Sol's own observed per-turn rate across an Opus-like 7-8 turn Build dispatch already lands at ~43-46 credits -- essentially equal to the raw (unmargined) ceiling_per_run_estimate of 45.5993, meaning that figure had near-zero headroom for the cross-workload uncertainty this estimate already discloses. The 1.3x margin restores a real safety margin without pretending to new precision; it is applied only to the ceiling (the central estimate stays the unpadded 6-dispatch mean, since padding a central estimate would misrepresent it as conservative when it is meant to be typical)."
+        },
+        "uncertainty": "This is Reviewer-role evidence (read-only code review, no file edits, no test execution), used as a cross-workload directional anchor for Build-role cost (read-write, edits files, runs two test suites) because no Sol Build history exists. It is NOT claimed to be a precise Build estimate -- do not read the decimal precision above as workload-specific accuracy. The token/turn-count order of magnitude is adjacent to, not overlapping with, the real Opus Build dispatches: Opus Build ran 23,457-24,193 tokens across 7-8 turns; the 6 Sol Reviewer dispatches ran 24,548-29,706 tokens across 3-10 turns (independent review measured and corrected these figures; an earlier draft of this manifest incorrectly stated 21k-28k tokens / 3-6 turns, which manufactured a false overlap that does not exist in the raw data -- corrected here). The ranges being adjacent rather than overlapping is why a role-transfer margin (above) is applied to the ceiling rather than treating the raw Reviewer max as already conservative. A single trivial capability probe (eval/records/phase-r/preflight/reviewer.json, cost 5.3532 credits, 10686 tokens, no cache) was considered and rejected as the basis: its token/cache shape (no cache write, ~10.7k tokens) is not comparable to either the real Opus Build dispatches or the ratio-derivation probes used for the Sonnet estimate (~18.1-18.2k tokens, high cache-write), so using it would manufacture false precision from an unrepresentative single sample."
       },
       "central_4_dispatches": "55.58255 (opus) + 66.8417 (sol) = 122.42425, rounded to 122.42",
-      "ceiling_4_dispatches": "57.2473 (opus, 2x28.62365) + 91.1987 (sol, 2x45.5993) = 148.446",
-      "replacement_allowance": "1 additional complete paired comparison (2 dispatches) priced at ceiling per-run rates = 28.62365 (opus) + 45.5993 (sol) = 74.223",
-      "total_ceiling": "148.446 + 74.223 = 222.669, rounded up to 223"
+      "ceiling_4_dispatches": "57.2473 (opus, 2x28.62365) + 118.5583 (sol with 1.3x role-transfer margin, 2x59.2792) = 175.8056",
+      "replacement_allowance": "1 additional complete paired comparison (2 dispatches) priced at margined ceiling per-run rates = 28.62365 (opus) + 59.2792 (sol) = 87.90285",
+      "total_ceiling": "175.8056 + 87.90285 = 263.70845, rounded up to 264"
     }
   },
   "additional_live_spend_this_task": 0,

@@ -56,12 +56,32 @@ import json
 import os
 import sys
 
+# Sentinel distinguishing "ground-truth.json read/parsed but has no witness
+# key" (a genuine, expected non-witness case -- fall back to file+severity)
+# from "ground-truth.json could not be read at all" (a configuration
+# problem -- e.g. oracle.json used detached from its fixture tree -- that
+# must fail closed for every case, not silently disable witness
+# enforcement the way returning None for both would). An empty-string
+# witness is also routed through UNREADABLE: "" is a substring of every
+# string in Python, so treating it as a real witness would match anything.
+UNREADABLE = object()
+
 def load_witness(fixture_root, case_id):
     path = os.path.join(fixture_root, "cases", case_id, "ground-truth.json")
     try:
-        return json.load(open(path, encoding="utf-8")).get("witness")
-    except (OSError, json.JSONDecodeError):
-        return None
+        data = json.load(open(path, encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"reviewer_structured_gate: cannot read {path} to resolve {case_id}'s "
+              f"witness ({exc}) -- failing closed rather than assuming no witness applies",
+              file=sys.stderr)
+        return UNREADABLE
+    witness = data.get("witness")
+    if witness == "":
+        print(f"reviewer_structured_gate: {case_id}'s witness is an empty string -- "
+              f"an empty substring matches anything, treating as invalid and failing closed",
+              file=sys.stderr)
+        return UNREADABLE
+    return witness
 
 def classify(item, material, fixture_root):
     all_reported = item.get("all_reported")
@@ -76,8 +96,11 @@ def classify(item, material, fixture_root):
                      if os.path.basename(str(f.get("file", ""))) in override_names
                      and f.get("severity") in material]
     witness = load_witness(fixture_root, item["id"])
-    if witness is not None:
-        matches = [f for f in file_matches if witness in str(f.get("evidence") or "")]
+    if witness is UNREADABLE:
+        matches = []
+    elif witness is not None:
+        matches = [f for f in file_matches
+                   if isinstance(f.get("evidence"), str) and witness in f["evidence"]]
     else:
         matches = file_matches
     if len(matches) == 0:

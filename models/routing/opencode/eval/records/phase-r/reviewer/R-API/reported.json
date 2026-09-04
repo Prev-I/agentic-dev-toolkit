@@ -1,14 +1,14 @@
 {
   "findings": [
     {
-      "file": "api.sh",
-      "severity": "blocking",
-      "summary": "public_response interpolates its argument into JSON without escaping, so input containing a double quote can inject arbitrary JSON fields or emit invalid JSON."
-    },
-    {
       "file": "pagination.sh",
       "severity": "material",
-      "summary": "validate_page_size accepts leading zeros in the regex but evaluates them as octal in the arithmetic test, so '08' errors and is rejected while '010' and '0100' are validated as 8 and 64."
+      "summary": "Leading zeros pass the digit regex and are then evaluated as octal in the arithmetic test, so \"0144\" is wrongly accepted (decimal 144 > 100) and \"09\" is wrongly rejected with an arithmetic error on stderr."
+    },
+    {
+      "file": "authorization.sh",
+      "severity": "suggestion",
+      "summary": "An empty caller and empty owner compare equal and grant access, so the function should reject unpopulated identity arguments rather than rely on callers always supplying them."
     }
   ]
 }

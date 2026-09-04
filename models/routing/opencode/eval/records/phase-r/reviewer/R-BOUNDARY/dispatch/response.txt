@@ -1,13 +1,13 @@
 I'll review the shell scripts in the current directory.
-Confirmed arbitrary command execution in `pagination.sh`. Let me stress-test the counter's locking and check the remaining scripts empirically.
-Review complete. I read all five scripts and empirically verified each behavior rather than reasoning by inspection alone:
+Reviewed all five scripts, including runtime verification (concurrency test on `counter.sh`, JSON escaping on `api.sh`, pattern/glob behavior on `authorization.sh`, exit-status propagation on `storage.sh`, boundary inputs on `pagination.sh`).
 
-- **pagination.sh** — confirmed defect. Bash arithmetic context evaluates array subscripts, so `(( $1 >= 0 ... ))` with an unvalidated argument executes embedded command substitution. `validate_page_size 'x[$(touch PWNED)]'` created the file and returned status 0 (a *passing* validation). Page size is by definition attacker-controlled request input, so this is remote command execution in a validator.
-- **counter.sh** — sound. `flock` on the sidecar lock file serializes correctly; 60 concurrent increments yielded exactly 60.
-- **api.sh** — sound. `json.dumps` escapes quotes/markup, and the single-quoted `-c` program plus argv passing means `$(...)` and backticks are inert data.
-- **authorization.sh** — sound. The right-hand side of `[[ == ]]` is quoted, so a literal `*` owner does not glob-match an arbitrary caller; denial returns non-zero and withholds the value.
-- **storage.sh** — sound. The command's exit status propagates unchanged (1 and 127 observed), so failure is distinguishable from an empty list.
+Verified-correct, no findings:
+- `api.sh` — argument passed positionally to `python3 -c`; `json.dumps` escapes quotes/angle brackets correctly. No injection path.
+- `authorization.sh` — RHS of `[[ ]]` is quoted, so the comparison is literal, not glob-matched; `a*e` vs `alice` correctly denies.
+- `counter.sh` — `flock` creates and holds the lock file for the whole read-modify-write; 50 concurrent increments produced exactly +50.
+- `storage.sh` — propagates the underlying command's exit status (127 on missing binary, 0 on success).
 
-I found no defect in the other four and am deliberately not reporting stylistic nits on them.
+One real defect:
+- `pagination.sh:1` — the regex only ensures digits, then `(( ))` reinterprets the value. `0144` is parsed as octal 100 and accepted although it denotes 144, and `18446744073709551617` overflows/wraps and is accepted although it unambiguously exceeds the cap of 100. A caller relying on this to bound page size can be handed an out-of-range value. Using `10#` normalization and an explicit length/magnitude guard would fix it.
 
-{"findings":[{"file":"pagination.sh","severity":"blocking","summary":"Passing untrusted input to bash arithmetic evaluation allows arbitrary command execution via an array-subscript command substitution such as 'x[$(cmd)]', which both runs the command and makes validation succeed."}]}
+{"findings":[{"file":"pagination.sh","severity":"material","summary":"validate_page_size accepts out-of-range values because (( )) reinterprets digit strings, so leading-zero inputs are read as octal (0144 passes as 100) and values above INTMAX wrap around (18446744073709551617 passes), bypassing the 0-100 bound."}]}

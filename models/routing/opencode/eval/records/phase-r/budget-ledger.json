@@ -209,6 +209,48 @@
       "label": "compaction-invariants",
       "provider": "",
       "credits": 1.1198
+    },
+    {
+      "timestamp": "2026-09-04T12:06:41.488761+02:00",
+      "account": "recovery",
+      "label": "reviewer-clean-v2",
+      "provider": "",
+      "credits": 3.44805
+    },
+    {
+      "timestamp": "2026-09-04T12:07:55.773334+02:00",
+      "account": "recovery",
+      "label": "reviewer-R-CONCURRENCY-v2",
+      "provider": "",
+      "credits": 4.961275
+    },
+    {
+      "timestamp": "2026-09-04T12:08:43.983848+02:00",
+      "account": "recovery",
+      "label": "reviewer-R-AUTH-v2",
+      "provider": "",
+      "credits": 6.24665
+    },
+    {
+      "timestamp": "2026-09-04T12:10:09.255601+02:00",
+      "account": "recovery",
+      "label": "reviewer-R-API-v2",
+      "provider": "",
+      "credits": 4.409075
+    },
+    {
+      "timestamp": "2026-09-04T12:11:23.845424+02:00",
+      "account": "recovery",
+      "label": "reviewer-R-BOUNDARY-v2",
+      "provider": "",
+      "credits": 4.555325000000001
+    },
+    {
+      "timestamp": "2026-09-04T12:12:51.974970+02:00",
+      "account": "recovery",
+      "label": "reviewer-R-ERROR-v2",
+      "provider": "",
+      "credits": 5.658225
     }
   ]
 }

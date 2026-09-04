@@ -1,0 +1,130 @@
+{
+  "seeded": [
+    {
+      "id": "R-API",
+      "severity": "blocking",
+      "files": [
+        "api.sh"
+      ],
+      "summary": "public_response interpolates its argument into JSON without escaping, so input containing a double quote can inject arbitrary JSON fields or emit invalid JSON.",
+      "all_reported": [
+        {
+          "file": "api.sh",
+          "severity": "blocking",
+          "summary": "public_response interpolates its argument into JSON without escaping, so input containing a double quote can inject arbitrary JSON fields or emit invalid JSON."
+        },
+        {
+          "file": "pagination.sh",
+          "severity": "material",
+          "summary": "validate_page_size accepts leading zeros in the regex but evaluates them as octal in the arithmetic test, so '08' errors and is rejected while '010' and '0100' are validated as 8 and 64."
+        }
+      ]
+    },
+    {
+      "id": "R-AUTH",
+      "severity": "blocking",
+      "files": [
+        "authorization.sh"
+      ],
+      "summary": "read_resource takes caller and owner but never compares them, returning the resource value to any caller regardless of ownership.",
+      "all_reported": [
+        {
+          "file": "authorization.sh",
+          "severity": "blocking",
+          "summary": "read_resource takes caller and owner but never compares them, returning the resource value to any caller regardless of ownership."
+        }
+      ]
+    },
+    {
+      "id": "R-BOUNDARY",
+      "severity": "blocking",
+      "files": [
+        "pagination.sh"
+      ],
+      "summary": "Passing untrusted input to bash arithmetic evaluation allows arbitrary command execution via an array-subscript command substitution such as 'x[$(cmd)]', which both runs the command and makes validation succeed.",
+      "all_reported": [
+        {
+          "file": "pagination.sh",
+          "severity": "blocking",
+          "summary": "Passing untrusted input to bash arithmetic evaluation allows arbitrary command execution via an array-subscript command substitution such as 'x[$(cmd)]', which both runs the command and makes validation succeed."
+        }
+      ]
+    },
+    {
+      "id": "R-CONCURRENCY",
+      "severity": "blocking",
+      "files": [
+        "counter.sh"
+      ],
+      "summary": "increment_counter performs an unsynchronized read-modify-write with no locking, so concurrent invocations lose updates (50 parallel increments yielded 3).",
+      "all_reported": [
+        {
+          "file": "counter.sh",
+          "severity": "blocking",
+          "summary": "increment_counter performs an unsynchronized read-modify-write with no locking, so concurrent invocations lose updates (50 parallel increments yielded 3)."
+        },
+        {
+          "file": "pagination.sh",
+          "severity": "material",
+          "summary": "Zero-padded input is evaluated as octal by (( )), so 0144 wrongly passes the <=100 bound while 08 raises an arithmetic error and rejects a valid size."
+        },
+        {
+          "file": "authorization.sh",
+          "severity": "suggestion",
+          "summary": "With both arguments absent, caller and owner are both empty and compare equal, granting the read; an explicit non-empty owner check would fail closed."
+        },
+        {
+          "file": "storage.sh",
+          "severity": "suggestion",
+          "summary": "The _or_fail name implies failure handling that is absent; it never verifies $storage is executable, so a missing backend surfaces only as exit 127."
+        }
+      ]
+    },
+    {
+      "id": "R-ERROR",
+      "severity": "material",
+      "files": [
+        "storage.sh"
+      ],
+      "summary": "Every backend failure is swallowed and converted into an empty JSON array with exit status 0, making an unreachable store indistinguishable from an empty one and risking data loss in read-modify-write callers.",
+      "all_reported": [
+        {
+          "file": "authorization.sh",
+          "severity": "material",
+          "summary": "read_resource performs no arity or non-empty check, so an empty caller and empty owner compare equal and the function returns the value with success status, authorizing unauthenticated access."
+        },
+        {
+          "file": "pagination.sh",
+          "severity": "material",
+          "summary": "The digit regex is followed by an arithmetic range check, so values above 2^64 wrap around and are accepted as valid page sizes while leading-zero inputs like 08 are parsed as octal and fail with a bash error."
+        },
+        {
+          "file": "storage.sh",
+          "severity": "material",
+          "summary": "Every backend failure is swallowed and converted into an empty JSON array with exit status 0, making an unreachable store indistinguishable from an empty one and risking data loss in read-modify-write callers."
+        },
+        {
+          "file": "counter.sh",
+          "severity": "suggestion",
+          "summary": "Locking and increment logic are correct, but non-numeric file content is silently coerced to 0, resetting the counter instead of reporting corruption."
+        },
+        {
+          "file": "api.sh",
+          "severity": "suggestion",
+          "summary": "JSON encoding is safe, but a missing argument silently yields an empty displayName instead of an error."
+        }
+      ]
+    }
+  ],
+  "clean": [
+    {
+      "severity": "suggestion",
+      "file": "pagination.sh",
+      "summary": "Leading-zero input is evaluated as octal in the arithmetic context, so 007 is accepted as 7 while 08 is rejected with a stderr error; failing closed is safe but inconsistent, and prefixing with 10# would normalize it."
+    }
+  ],
+  "normalization": "highest severity the reviewer reported against the case's override file",
+  "runner_decides_gate_outcome": false,
+  "scorer": "eval/scoring/reviewer.sh::reviewer_structured_gate",
+  "run_note": "Complete re-run against the repaired fixture (commit f4026c9, load_items -> load_items_or_fail), production Reviewer (github-copilot/gpt-5.6-sol, high), charged to the Phase-R recovery budget per explicit human authorization."
+}

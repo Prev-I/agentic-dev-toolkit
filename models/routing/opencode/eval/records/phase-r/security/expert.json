@@ -1,0 +1,23 @@
+{
+  "name": "expert",
+  "mode": "subagent",
+  "model": "openai/gpt-5.6-sol",
+  "variant": "xhigh",
+  "tools": {
+    "apply_patch": false,
+    "bash": false,
+    "task": false,
+    "webfetch": false,
+    "websearch": false
+  },
+  "permissions": {
+    "edit": "deny",
+    "task": "deny",
+    "bash": {
+      "wildcard": "deny",
+      "allowed": []
+    },
+    "webfetch": "deny",
+    "websearch": "deny"
+  }
+}

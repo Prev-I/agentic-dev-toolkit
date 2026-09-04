@@ -1,0 +1,24 @@
+{
+  "findings": [
+    {
+      "file": "counter.sh",
+      "severity": "blocking",
+      "summary": "increment_counter performs an unsynchronized read-modify-write with no locking, so concurrent invocations lose updates (50 parallel increments yielded 3)."
+    },
+    {
+      "file": "pagination.sh",
+      "severity": "material",
+      "summary": "Zero-padded input is evaluated as octal by (( )), so 0144 wrongly passes the <=100 bound while 08 raises an arithmetic error and rejects a valid size."
+    },
+    {
+      "file": "authorization.sh",
+      "severity": "suggestion",
+      "summary": "With both arguments absent, caller and owner are both empty and compare equal, granting the read; an explicit non-empty owner check would fail closed."
+    },
+    {
+      "file": "storage.sh",
+      "severity": "suggestion",
+      "summary": "The _or_fail name implies failure handling that is absent; it never verifies $storage is executable, so a missing backend surfaces only as exit 127."
+    }
+  ]
+}

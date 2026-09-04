@@ -1,0 +1,325 @@
+{
+  "caps": {
+    "evaluation": 100,
+    "recovery": 250
+  },
+  "recovery_reclaimable_for_eval": false,
+  "organization_guardrail_credits": 7600,
+  "at_guardrail": "stop_and_escalate_no_automatic_fallback",
+  "entries": [
+    {
+      "timestamp": "2026-09-04T05:15:41.226012+02:00",
+      "account": "evaluation",
+      "label": "preflight-plan",
+      "provider": "github-copilot",
+      "credits": 11.4335
+    },
+    {
+      "timestamp": "2026-09-04T05:31:05.658609+02:00",
+      "account": "evaluation",
+      "label": "preflight-build",
+      "provider": "github-copilot",
+      "credits": 11.422875000000001
+    },
+    {
+      "timestamp": "2026-09-04T05:42:34.106905+02:00",
+      "account": "evaluation",
+      "label": "preflight-general",
+      "provider": "github-copilot",
+      "credits": 2.6785
+    },
+    {
+      "timestamp": "2026-09-04T05:42:41.126882+02:00",
+      "account": "evaluation",
+      "label": "preflight-explore",
+      "provider": "github-copilot",
+      "credits": 0.26785
+    },
+    {
+      "timestamp": "2026-09-04T05:42:48.253222+02:00",
+      "account": "evaluation",
+      "label": "preflight-scout",
+      "provider": "github-copilot",
+      "credits": 0.26785
+    },
+    {
+      "timestamp": "2026-09-04T05:42:55.611359+02:00",
+      "account": "evaluation",
+      "label": "preflight-reviewer",
+      "provider": "github-copilot",
+      "credits": 5.3532
+    },
+    {
+      "timestamp": "2026-09-04T05:43:02.462333+02:00",
+      "account": "evaluation",
+      "label": "preflight-compaction",
+      "provider": "github-copilot",
+      "credits": 2.6785
+    },
+    {
+      "timestamp": "2026-09-04T05:43:09.746548+02:00",
+      "account": "evaluation",
+      "label": "preflight-title",
+      "provider": "github-copilot",
+      "credits": 0.022256
+    },
+    {
+      "timestamp": "2026-09-04T05:43:16.844157+02:00",
+      "account": "evaluation",
+      "label": "preflight-summary",
+      "provider": "github-copilot",
+      "credits": 0.022256
+    },
+    {
+      "timestamp": "2026-09-04T10:55:02.217179+02:00",
+      "account": "evaluation",
+      "label": "breakglass-primary",
+      "provider": "",
+      "credits": 0.0
+    },
+    {
+      "timestamp": "2026-09-04T11:02:20.610277+02:00",
+      "account": "evaluation",
+      "label": "build-restoration-gate",
+      "provider": "",
+      "credits": 26.191575,
+      "original_recorded_credits": 2.238925,
+      "cost_correction": "I1 fix: recomputed from surviving raw.jsonl (see matching dispatch.json)"
+    },
+    {
+      "timestamp": "2026-09-04T11:03:05.512517+02:00",
+      "account": "evaluation",
+      "label": "build-restoration-gate",
+      "provider": "",
+      "credits": 23.1935,
+      "original_recorded_credits": 1.657875,
+      "cost_correction": "I1 fix: recomputed from surviving raw.jsonl (see matching dispatch.json)"
+    },
+    {
+      "timestamp": "2026-09-04T11:03:44.014209+02:00",
+      "account": "evaluation",
+      "label": "build-restoration-gate",
+      "provider": "",
+      "credits": 24.711275,
+      "original_recorded_credits": 1.6723499999999998,
+      "cost_correction": "I1 fix: recomputed from surviving raw.jsonl (see matching dispatch.json)"
+    },
+    {
+      "timestamp": "2026-09-04T11:06:19.392392+02:00",
+      "account": "evaluation",
+      "label": "reviewer-clean",
+      "provider": "",
+      "credits": 3.669475,
+      "cost_correction": "UNRECOVERABLE: this dispatch's raw.jsonl was overwritten by a later dispatch reusing the same output directory. The recorded credits value is KNOWN TO BE UNDERCOUNTED by the same I1 bug (every sibling dispatch in this batch showed a ~6-12x undercount) but the true value cannot be reconstructed. Treat this figure as a floor, not an accurate total."
+    },
+    {
+      "timestamp": "2026-09-04T11:07:31.525074+02:00",
+      "account": "evaluation",
+      "label": "reviewer-R-API",
+      "provider": "",
+      "credits": 4.39085,
+      "cost_correction": "UNRECOVERABLE: this dispatch's raw.jsonl was overwritten by a later dispatch reusing the same output directory. The recorded credits value is KNOWN TO BE UNDERCOUNTED by the same I1 bug (every sibling dispatch in this batch showed a ~6-12x undercount) but the true value cannot be reconstructed. Treat this figure as a floor, not an accurate total."
+    },
+    {
+      "timestamp": "2026-09-04T11:08:19.786703+02:00",
+      "account": "evaluation",
+      "label": "reviewer-R-AUTH",
+      "provider": "",
+      "credits": 3.635225,
+      "cost_correction": "UNRECOVERABLE: this dispatch's raw.jsonl was overwritten by a later dispatch reusing the same output directory. The recorded credits value is KNOWN TO BE UNDERCOUNTED by the same I1 bug (every sibling dispatch in this batch showed a ~6-12x undercount) but the true value cannot be reconstructed. Treat this figure as a floor, not an accurate total."
+    },
+    {
+      "timestamp": "2026-09-04T11:09:18.456303+02:00",
+      "account": "evaluation",
+      "label": "reviewer-R-BOUNDARY",
+      "provider": "",
+      "credits": 3.1962499999999996,
+      "cost_correction": "UNRECOVERABLE: this dispatch's raw.jsonl was overwritten by a later dispatch reusing the same output directory. The recorded credits value is KNOWN TO BE UNDERCOUNTED by the same I1 bug (every sibling dispatch in this batch showed a ~6-12x undercount) but the true value cannot be reconstructed. Treat this figure as a floor, not an accurate total."
+    },
+    {
+      "timestamp": "2026-09-04T11:10:07.417040+02:00",
+      "account": "evaluation",
+      "label": "reviewer-R-CONCURRENCY",
+      "provider": "",
+      "credits": 4.473450000000001,
+      "cost_correction": "UNRECOVERABLE: this dispatch's raw.jsonl was overwritten by a later dispatch reusing the same output directory. The recorded credits value is KNOWN TO BE UNDERCOUNTED by the same I1 bug (every sibling dispatch in this batch showed a ~6-12x undercount) but the true value cannot be reconstructed. Treat this figure as a floor, not an accurate total."
+    },
+    {
+      "timestamp": "2026-09-04T11:11:28.974656+02:00",
+      "account": "evaluation",
+      "label": "reviewer-R-ERROR",
+      "provider": "",
+      "credits": 3.781975,
+      "cost_correction": "UNRECOVERABLE: this dispatch's raw.jsonl was overwritten by a later dispatch reusing the same output directory. The recorded credits value is KNOWN TO BE UNDERCOUNTED by the same I1 bug (every sibling dispatch in this batch showed a ~6-12x undercount) but the true value cannot be reconstructed. Treat this figure as a floor, not an accurate total."
+    },
+    {
+      "timestamp": "2026-09-04T11:25:40.264195+02:00",
+      "account": "evaluation",
+      "label": "reviewer-clean",
+      "provider": "",
+      "credits": 30.847599999999996,
+      "original_recorded_credits": 4.227175,
+      "cost_correction": "I1 fix: recomputed from surviving raw.jsonl (see matching dispatch.json)"
+    },
+    {
+      "timestamp": "2026-09-04T11:26:32.123408+02:00",
+      "account": "evaluation",
+      "label": "reviewer-R-API",
+      "provider": "",
+      "credits": 8.647124999999999,
+      "cost_correction": "UNRECOVERABLE: this dispatch's raw.jsonl was overwritten by a later dispatch reusing the same output directory. The recorded credits value is KNOWN TO BE UNDERCOUNTED by the same I1 bug (every sibling dispatch in this batch showed a ~6-12x undercount) but the true value cannot be reconstructed. Treat this figure as a floor, not an accurate total."
+    },
+    {
+      "timestamp": "2026-09-04T11:27:32.197213+02:00",
+      "account": "evaluation",
+      "label": "reviewer-R-AUTH",
+      "provider": "",
+      "credits": 28.938825,
+      "original_recorded_credits": 6.167725,
+      "cost_correction": "I1 fix: recomputed from surviving raw.jsonl (see matching dispatch.json)"
+    },
+    {
+      "timestamp": "2026-09-04T11:28:38.248494+02:00",
+      "account": "evaluation",
+      "label": "reviewer-R-BOUNDARY",
+      "provider": "",
+      "credits": 3.5863,
+      "cost_correction": "UNRECOVERABLE: this dispatch's raw.jsonl was overwritten by a later dispatch reusing the same output directory. The recorded credits value is KNOWN TO BE UNDERCOUNTED by the same I1 bug (every sibling dispatch in this batch showed a ~6-12x undercount) but the true value cannot be reconstructed. Treat this figure as a floor, not an accurate total."
+    },
+    {
+      "timestamp": "2026-09-04T11:29:30.329537+02:00",
+      "account": "evaluation",
+      "label": "reviewer-R-CONCURRENCY",
+      "provider": "",
+      "credits": 27.076875,
+      "original_recorded_credits": 4.572725,
+      "cost_correction": "I1 fix: recomputed from surviving raw.jsonl (see matching dispatch.json)"
+    },
+    {
+      "timestamp": "2026-09-04T11:31:00.715349+02:00",
+      "account": "evaluation",
+      "label": "reviewer-R-ERROR",
+      "provider": "",
+      "credits": 39.591675,
+      "original_recorded_credits": 3.9481,
+      "cost_correction": "I1 fix: recomputed from surviving raw.jsonl (see matching dispatch.json)"
+    },
+    {
+      "timestamp": "2026-09-04T11:39:30.353465+02:00",
+      "account": "recovery",
+      "label": "reviewer-R-API-retry",
+      "provider": "",
+      "credits": 48.4647,
+      "original_recorded_credits": 6.8157,
+      "cost_correction": "I1 fix: recomputed from surviving raw.jsonl (see matching dispatch.json)"
+    },
+    {
+      "timestamp": "2026-09-04T11:41:12.816332+02:00",
+      "account": "recovery",
+      "label": "reviewer-R-BOUNDARY-retry",
+      "provider": "",
+      "credits": 34.721925,
+      "original_recorded_credits": 6.391774999999999,
+      "cost_correction": "I1 fix: recomputed from surviving raw.jsonl (see matching dispatch.json)"
+    },
+    {
+      "timestamp": "2026-09-04T11:47:49.530044+02:00",
+      "account": "evaluation",
+      "label": "explore-dependency-chain",
+      "provider": "",
+      "credits": 17.813475,
+      "original_recorded_credits": 1.6219750000000002,
+      "cost_correction": "I1 fix: recomputed from surviving raw.jsonl (see matching dispatch.json)"
+    },
+    {
+      "timestamp": "2026-09-04T11:49:08.298986+02:00",
+      "account": "evaluation",
+      "label": "compaction-invariants",
+      "provider": "",
+      "credits": 1.1198,
+      "original_recorded_credits": 1.1198,
+      "cost_correction": "I1 fix: recomputed from surviving raw.jsonl (see matching dispatch.json)"
+    },
+    {
+      "timestamp": "2026-09-04T12:06:41.488761+02:00",
+      "account": "recovery",
+      "label": "reviewer-clean-v2",
+      "provider": "",
+      "credits": 30.941049999999997,
+      "original_recorded_credits": 3.44805,
+      "cost_correction": "I1 fix: recomputed from surviving raw.jsonl (see matching dispatch.json)"
+    },
+    {
+      "timestamp": "2026-09-04T12:07:55.773334+02:00",
+      "account": "recovery",
+      "label": "reviewer-R-CONCURRENCY-v2",
+      "provider": "",
+      "credits": 30.087775,
+      "original_recorded_credits": 4.961275,
+      "cost_correction": "I1 fix: recomputed from surviving raw.jsonl (see matching dispatch.json)"
+    },
+    {
+      "timestamp": "2026-09-04T12:08:43.983848+02:00",
+      "account": "recovery",
+      "label": "reviewer-R-AUTH-v2",
+      "provider": "",
+      "credits": 22.540000000000003,
+      "original_recorded_credits": 6.24665,
+      "cost_correction": "I1 fix: recomputed from surviving raw.jsonl (see matching dispatch.json)"
+    },
+    {
+      "timestamp": "2026-09-04T12:10:09.255601+02:00",
+      "account": "recovery",
+      "label": "reviewer-R-API-v2",
+      "provider": "",
+      "credits": 33.302749999999996,
+      "original_recorded_credits": 4.409075,
+      "cost_correction": "I1 fix: recomputed from surviving raw.jsonl (see matching dispatch.json)"
+    },
+    {
+      "timestamp": "2026-09-04T12:11:23.845424+02:00",
+      "account": "recovery",
+      "label": "reviewer-R-BOUNDARY-v2",
+      "provider": "",
+      "credits": 32.93005,
+      "original_recorded_credits": 4.555325000000001,
+      "cost_correction": "I1 fix: recomputed from surviving raw.jsonl (see matching dispatch.json)"
+    },
+    {
+      "timestamp": "2026-09-04T12:12:51.974970+02:00",
+      "account": "recovery",
+      "label": "reviewer-R-ERROR-v2",
+      "provider": "",
+      "credits": 34.921425,
+      "original_recorded_credits": 5.658225,
+      "cost_correction": "I1 fix: recomputed from surviving raw.jsonl (see matching dispatch.json)"
+    },
+    {
+      "timestamp": "2026-09-04T13:11:55.015619+02:00",
+      "account": "recovery",
+      "label": "reviewer-R-API-i2fix",
+      "provider": "",
+      "credits": 45.599349999999994
+    },
+    {
+      "timestamp": "2026-09-04T13:13:14.315901+02:00",
+      "account": "recovery",
+      "label": "reviewer-R-BOUNDARY-i2fix",
+      "provider": "",
+      "credits": 36.435249999999996
+    }
+  ],
+  "i1_correction": {
+    "bug": "dispatch-fixture.sh and probe.sh overwrote observed_cost on each step_finish event instead of summing across a multi-turn dispatch's steps. Fixed 2026-09-04 (dispatch-fixture.sh commit 505d35a). probe.sh's capability-preflight probes are single-turn (verified: cache.read=0 in every preflight record) so they were not affected in practice and were left uncorrected.",
+    "corrected_entries": 17,
+    "unrecoverable_entries": 8,
+    "unrecoverable_reason": "raw.jsonl for these 8 dispatches was overwritten on disk by a later dispatch reusing the same --outdir before this bug was discovered; their recorded credits are a known-undercounted FLOOR, not the true spend.",
+    "corrected_evaluation_total_credits": 289.012037,
+    "corrected_recovery_total_credits": 349.944275,
+    "evaluation_cap": 100,
+    "recovery_cap": 250,
+    "evaluation_cap_status": "EXCEEDED (floor; true total is higher due to 6 unrecoverable entries in this account)",
+    "recovery_cap_status": "EXCEEDED (this account's total has no unrecoverable entries, so this figure is accurate, not a floor)",
+    "note": "Every ledger_admit check performed live during Phase R execution operated on the undercounted figures and reported 'admitted' at each step. This retroactive correction shows both caps were almost certainly breached in real terms. This was not caught at the time because the bug corrupted the very numbers the admission check compared against the cap. Updated 2026-09-04 after the I2 rerun (2 new recovery-account dispatches, total 82.03 credits, both correctly accumulated by the now-fixed cost logic): recovery total is now 349.944275 / 250."
+  }
+}

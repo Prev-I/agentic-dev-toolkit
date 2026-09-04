@@ -1,0 +1,6 @@
+Binding invariants:
+
+[INV-RUNTIME] target_runtime=opencode-v1
+[INV-BREAKGLASS] breakglass=primary-human-only
+[INV-BUDGET] phase-r-recovery-budget=250-credits-non-reclaimable
+[INV-FAILURE] valid-controller-failure=remains-in-denominator

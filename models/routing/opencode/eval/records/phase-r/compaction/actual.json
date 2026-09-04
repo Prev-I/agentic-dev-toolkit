@@ -1,0 +1,26 @@
+{
+  "invariants": {
+    "INV-BREAKGLASS": "breakglass=primary-human-only",
+    "INV-BUDGET": "phase-r-recovery-budget=250-credits-non-reclaimable",
+    "INV-FAILURE": "valid-controller-failure=remains-in-denominator",
+    "INV-RUNTIME": "target_runtime=opencode-v1"
+  },
+  "contradictions": [],
+  "occurrences": {
+    "INV-RUNTIME": [
+      "target_runtime=opencode-v1"
+    ],
+    "INV-BREAKGLASS": [
+      "breakglass=primary-human-only"
+    ],
+    "INV-BUDGET": [
+      "phase-r-recovery-budget=250-credits-non-reclaimable"
+    ],
+    "INV-FAILURE": [
+      "valid-controller-failure=remains-in-denominator"
+    ]
+  },
+  "runner_decides_gate_outcome": false,
+  "runner_repaired_output": false,
+  "scorer": "eval/scoring/compaction.sh::compaction_structured_gate"
+}

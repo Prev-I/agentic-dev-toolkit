@@ -1,0 +1,14 @@
+{
+  "findings": [
+    {
+      "file": "counter.sh",
+      "severity": "material",
+      "summary": "increment_counter performs a non-atomic read-modify-write with no locking, so concurrent invocations lose updates (50 parallel increments from 0 yielded 1) and the truncating redirect can expose an empty file to concurrent readers."
+    },
+    {
+      "file": "pagination.sh",
+      "severity": "suggestion",
+      "summary": "The digit regex admits leading zeros that the arithmetic context then treats as octal, so '08'/'09' raise an arithmetic error and '010' is read as 8; use 10#$1 to force base 10."
+    }
+  ]
+}

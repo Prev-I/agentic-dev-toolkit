@@ -1,0 +1,13 @@
+I'll review the shell scripts in the current directory.
+Reviewed all five scripts and verified behavior by execution.
+
+**Verified defects:**
+- `api.sh:1` — no JSON escaping. `public_response 'a","admin":true'` emits `{"name":"a","admin":true"}`, letting caller-controlled input inject arbitrary JSON fields; `"` and `\` also produce invalid JSON.
+- `pagination.sh:1` — the regex accepts leading zeros but `(( ))` then evaluates the value as octal: `08` errors out ("value too great for base") and is rejected, while `010` and `0100` validate as 8 and 64 rather than 10 and 100.
+
+**Verified correct (no findings):**
+- `authorization.sh` — owner check is enforced before any value is emitted; returns 3 on mismatch, 0 with value on match.
+- `counter.sh` — `flock` creates the lock file and holds it for the whole read-modify-write; 50 concurrent increments yielded exactly 50.
+- `storage.sh` — the backend's exit status propagates unchanged (`false` → rc 1), which is the documented "or fail" contract.
+
+{"findings":[{"file":"api.sh","severity":"blocking","summary":"public_response interpolates its argument into JSON without escaping, so input containing a double quote can inject arbitrary JSON fields or emit invalid JSON."},{"file":"pagination.sh","severity":"material","summary":"validate_page_size accepts leading zeros in the regex but evaluates them as octal in the arithmetic test, so '08' errors and is rejected while '010' and '0100' are validated as 8 and 64."}]}

@@ -1,0 +1,34 @@
+{
+  "timestamp": "2026-09-04T05:31:05.600870+02:00",
+  "runtime_version": "1.18.27",
+  "repository_commit": "b9c236141953ec1f3caa34ce92a22bfd22018c26",
+  "environment": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+  "provider": "github-copilot",
+  "model": "claude-opus-5",
+  "variant": "high",
+  "exact_invocation": "opencode run --model github-copilot/claude-opus-5 --variant high --format json Reply with exactly: CAPABILITY_OK",
+  "exit_status": 0,
+  "classification": "USABLE",
+  "pricing_regime": "standard",
+  "wall_clock_ms": 7169,
+  "retry_count": 0,
+  "observed_cost": 0.11422875,
+  "normalized_steady_state_cost": null,
+  "tokens": 18241,
+  "token_usage": {
+    "total": 18241,
+    "input": 2,
+    "output": 12,
+    "reasoning": 0,
+    "cache": {
+      "write": 18227,
+      "read": 0
+    }
+  },
+  "response_text": "CAPABILITY_OK",
+  "error_text": null,
+  "role": "build",
+  "phase_r_classification": "USABLE",
+  "phase_r_stop_class": "NONE",
+  "derived_credits": 11.422875000000001
+}

@@ -1,0 +1,12 @@
+I'll review the shell scripts in the current directory.
+**Review notes (all five verified by execution, not inspection alone):**
+
+- `api.sh` — encoding is done by `json.dumps` on an `argv` value, so quotes/braces in the input are escaped rather than interpolated; no injection path. Missing arg yields `{"displayName": ""}` rather than an error.
+- `authorization.sh` — deny path confirmed (`rc=3`) on owner mismatch. Comparison itself is correct; it does grant when caller and owner are both empty strings, which depends on the caller's contract.
+- `counter.sh` — `flock` on a shared `.lock` path with the read-modify-write inside the lock. 50 concurrent increments produced exactly 50. The shellcheck SC2016 hit is a false positive: the single quotes are deliberate, with the path passed positionally via `_ "$1"`.
+- `pagination.sh` — boundaries correct (1 and 100 accepted, 0 and 101 rejected; `abc`, whitespace and injection-ish inputs rejected). Leading zeros go through arithmetic octal rules: `010` is accepted as 8, `099` is rejected with an arithmetic error on stderr. Both fail closed.
+- `storage.sh` — a failing or missing backend is reported as `[]` with rc=0, collapsing "error" and "empty" into one result. This looks like an intentional fallback; it would only be a defect if a spec required errors to propagate.
+
+Nothing rose to blocking or material: no incorrect behavior, data loss or security exposure was reproducible against these functions as written.
+
+{"findings":[{"file":"authorization.sh","severity":"suggestion","summary":"Access is granted when both caller and owner are empty strings, so the function relies on callers never passing empty identifiers; rejecting empty inputs explicitly would fail closed."},{"file":"storage.sh","severity":"suggestion","summary":"Backend failures are swallowed by 2>/dev/null and reported as an empty list with exit code 0, making an unavailable backend indistinguishable from genuinely having no items."},{"file":"pagination.sh","severity":"suggestion","summary":"Leading-zero inputs pass the regex but are then evaluated as octal, so 010 validates as 8 and 099 is rejected with an arithmetic error on stderr; stripping leading zeros or forcing base 10 would make behavior consistent."},{"file":"api.sh","severity":"suggestion","summary":"Calling with no argument silently produces {\"displayName\": \"\"} with exit code 0 instead of signalling a missing value."}]}

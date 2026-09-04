@@ -1,0 +1,44 @@
+{
+  "fixture": "build-restoration-gate",
+  "target": {
+    "role": "build",
+    "model": "github-copilot/claude-opus-5",
+    "variant": "high"
+  },
+  "valid_runs": 3,
+  "successes": 3,
+  "individual_results": [
+    {
+      "attempt": 1,
+      "oracle_passed": true,
+      "dispatch_classification": "OK",
+      "derived_credits": 26.191575,
+      "wall_clock_ms": 337381,
+      "original_recorded_credits": 2.238925
+    },
+    {
+      "attempt": 2,
+      "oracle_passed": true,
+      "dispatch_classification": "OK",
+      "derived_credits": 23.1935,
+      "wall_clock_ms": null,
+      "original_recorded_credits": 1.657875
+    },
+    {
+      "attempt": 3,
+      "oracle_passed": true,
+      "dispatch_classification": "OK",
+      "derived_credits": 24.711275,
+      "wall_clock_ms": null,
+      "original_recorded_credits": 1.67235
+    }
+  ],
+  "classifications": [],
+  "escalated_to_n5": false,
+  "state_machine": "eval/decision-rules/build-gate.sh::build_gate",
+  "verdict": "pass",
+  "fixture_control_run": false,
+  "interpretation_note": "Passing establishes minimum operational viability, not a reliability estimate. Three to five valid runs cannot distinguish a 95% reliable controller from an 85% reliable one and must not be used as an SLO or success-rate claim.",
+  "phase_3_admissible": false,
+  "cost_correction_note": "I1 CORRECTION (2026-09-04, post-hoc): dispatch-fixture.sh's cost/credit figures cited throughout this record were undercounted by a step_finish cost-overwrite bug (fixed in commit 505d35a) that summed only the LAST turn's cost instead of every turn's cost for each multi-step dispatch. Corrected observed_cost/derived_credits for every dispatch with surviving raw.jsonl evidence are recorded in each dispatch.json's cost_correction block and in models/routing/opencode/eval/records/phase-r/budget-ledger.json's i1_correction block. canonical_cost_reference is corrected to false: this record's own inline cost figures predate the fix and are known-undercounted; do not cite them for budget accounting."
+}

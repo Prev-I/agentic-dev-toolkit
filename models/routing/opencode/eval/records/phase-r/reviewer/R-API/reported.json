@@ -1,0 +1,14 @@
+{
+  "findings": [
+    {
+      "file": "pagination.sh",
+      "severity": "material",
+      "summary": "Leading zeros pass the digit regex and are then evaluated as octal in the arithmetic test, so \"0144\" is wrongly accepted (decimal 144 > 100) and \"09\" is wrongly rejected with an arithmetic error on stderr."
+    },
+    {
+      "file": "authorization.sh",
+      "severity": "suggestion",
+      "summary": "An empty caller and empty owner compare equal and grant access, so the function should reject unpopulated identity arguments rather than rely on callers always supplying them."
+    }
+  ]
+}

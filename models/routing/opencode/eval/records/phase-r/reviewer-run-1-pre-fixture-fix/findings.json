@@ -1,0 +1,140 @@
+{
+  "seeded": [
+    {
+      "id": "R-API",
+      "severity": "blocking",
+      "files": [
+        "api.sh"
+      ],
+      "summary": "The name argument is interpolated into the JSON template without escaping, so a value containing a double quote injects arbitrary JSON fields (demonstrated: an attacker-supplied role:admin key), and backslashes or control characters produce invalid JSON.",
+      "all_reported": [
+        {
+          "file": "api.sh",
+          "severity": "blocking",
+          "summary": "The name argument is interpolated into the JSON template without escaping, so a value containing a double quote injects arbitrary JSON fields (demonstrated: an attacker-supplied role:admin key), and backslashes or control characters produce invalid JSON."
+        },
+        {
+          "file": "pagination.sh",
+          "severity": "material",
+          "summary": "The range check uses shell arithmetic with 64-bit wraparound, so 18446744073709551666 wraps to 50 and is accepted as a valid page size, and leading-zero inputs are parsed as octal or raise a base error."
+        },
+        {
+          "file": "authorization.sh",
+          "severity": "material",
+          "summary": "The ownership check fails open on empty principals: calling it with an empty caller and empty owner returns success and prints the value, so a failed owner lookup plus an unauthenticated caller grants access."
+        },
+        {
+          "file": "storage.sh",
+          "severity": "suggestion",
+          "summary": "The storage backend name is executed as a program with no allowlist or existence check, which becomes arbitrary program execution if the value is ever config or request derived."
+        },
+        {
+          "file": "counter.sh",
+          "severity": "suggestion",
+          "summary": "Locking is correct under concurrency, but a corrupted non-numeric counter file is silently reset to 1 rather than reported as an error, and the lock file is never cleaned up."
+        }
+      ]
+    },
+    {
+      "id": "R-AUTH",
+      "severity": "blocking",
+      "files": [
+        "authorization.sh"
+      ],
+      "summary": "read_resource ignores its caller and owner parameters and returns the resource value unconditionally, so any caller can read any owner's data.",
+      "all_reported": [
+        {
+          "file": "authorization.sh",
+          "severity": "blocking",
+          "summary": "read_resource ignores its caller and owner parameters and returns the resource value unconditionally, so any caller can read any owner's data."
+        },
+        {
+          "file": "pagination.sh",
+          "severity": "suggestion",
+          "summary": "Arithmetic comparison parses leading-zero input as octal, so values like 0144 pass the 1-100 bound and inputs like 08/099 emit a bash error to stderr."
+        }
+      ]
+    },
+    {
+      "id": "R-BOUNDARY",
+      "severity": "blocking",
+      "files": [
+        "pagination.sh"
+      ],
+      "summary": "Untrusted page size is interpolated into an arithmetic context, allowing command execution via array-subscript injection (e.g. 'a[$(cmd)]') and silently accepting non-numeric input such as 'abc' as 0.",
+      "all_reported": [
+        {
+          "file": "pagination.sh",
+          "severity": "blocking",
+          "summary": "Untrusted page size is interpolated into an arithmetic context, allowing command execution via array-subscript injection (e.g. 'a[$(cmd)]') and silently accepting non-numeric input such as 'abc' as 0."
+        },
+        {
+          "file": "authorization.sh",
+          "severity": "suggestion",
+          "summary": "Two empty identifiers compare equal, so an empty caller matches an empty owner and is granted access; the function should reject empty identifiers rather than rely on callers to do so."
+        }
+      ]
+    },
+    {
+      "id": "R-CONCURRENCY",
+      "severity": "material",
+      "files": [
+        "counter.sh"
+      ],
+      "summary": "increment_counter performs a non-atomic read-modify-write with no locking, so concurrent invocations lose updates (50 parallel increments from 0 yielded 1) and the truncating redirect can expose an empty file to concurrent readers.",
+      "all_reported": [
+        {
+          "file": "counter.sh",
+          "severity": "material",
+          "summary": "increment_counter performs a non-atomic read-modify-write with no locking, so concurrent invocations lose updates (50 parallel increments from 0 yielded 1) and the truncating redirect can expose an empty file to concurrent readers."
+        },
+        {
+          "file": "pagination.sh",
+          "severity": "suggestion",
+          "summary": "The digit regex admits leading zeros that the arithmetic context then treats as octal, so '08'/'09' raise an arithmetic error and '010' is read as 8; use 10#$1 to force base 10."
+        }
+      ]
+    },
+    {
+      "id": "R-ERROR",
+      "severity": "suggestion",
+      "files": [
+        "storage.sh"
+      ],
+      "summary": "Backend failures are swallowed by 2>/dev/null and reported as an empty list with exit code 0, making an unavailable backend indistinguishable from genuinely having no items.",
+      "all_reported": [
+        {
+          "file": "authorization.sh",
+          "severity": "suggestion",
+          "summary": "Access is granted when both caller and owner are empty strings, so the function relies on callers never passing empty identifiers; rejecting empty inputs explicitly would fail closed."
+        },
+        {
+          "file": "storage.sh",
+          "severity": "suggestion",
+          "summary": "Backend failures are swallowed by 2>/dev/null and reported as an empty list with exit code 0, making an unavailable backend indistinguishable from genuinely having no items."
+        },
+        {
+          "file": "pagination.sh",
+          "severity": "suggestion",
+          "summary": "Leading-zero inputs pass the regex but are then evaluated as octal, so 010 validates as 8 and 099 is rejected with an arithmetic error on stderr; stripping leading zeros or forcing base 10 would make behavior consistent."
+        },
+        {
+          "file": "api.sh",
+          "severity": "suggestion",
+          "summary": "Calling with no argument silently produces {\"displayName\": \"\"} with exit code 0 instead of signalling a missing value."
+        }
+      ]
+    }
+  ],
+  "clean": [
+    {
+      "severity": "suggestion",
+      "file": "pagination.sh",
+      "summary": "Arithmetic evaluation treats leading-zero input as octal, so `0144` is accepted as 100 and `0999` emits a bash arithmetic error on stderr before returning 1; stripping leading zeros or comparing via `10#$1` would make the check base-explicit."
+    }
+  ],
+  "normalization": "highest severity the reviewer reported against the case's override file",
+  "runner_decides_gate_outcome": false,
+  "scorer": "eval/scoring/reviewer.sh::reviewer_structured_gate",
+  "recovery_note": "R-API and R-BOUNDARY dispatched a second time (attempt 2), charged to the recovery budget, after the original attempt 1 produced no usable structured output (R-API: empty final answer after a denied external_directory permission request; R-BOUNDARY: syntactically truncated JSON, missing final closing brace, 3 open braces vs 2 close). Both attempt-1 dispatches were classified 'OK' (dispatch-healthy) by dispatch-fixture.sh; the failure was in response CONTENT quality, not dispatch mechanics. Attempt 1's raw evidence (raw.jsonl/response.txt/dispatch.json) for these two cases was overwritten on disk by attempt 2's dispatch before being committed to git, and is not recoverable. The prose observations quoted in the Phase-R evidence record (Task 22) were captured by the controller before the retry and are the only surviving record of attempt 1's exact content."
+}

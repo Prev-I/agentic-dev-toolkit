@@ -1,0 +1,9 @@
+{
+  "findings": [
+    {
+      "file": "pagination.sh",
+      "severity": "material",
+      "summary": "validate_page_size accepts out-of-range values because (( )) reinterprets digit strings, so leading-zero inputs are read as octal (0144 passes as 100) and values above INTMAX wrap around (18446744073709551617 passes), bypassing the 0-100 bound."
+    }
+  ]
+}

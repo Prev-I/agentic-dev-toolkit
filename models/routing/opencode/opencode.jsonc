@@ -1,43 +1,74 @@
 {
-  // OpenCode multi-model routing configuration
+  // OpenCode V1 multi-model routing configuration — restored profile.
+  //
+  // Merge this fragment into an existing project or global configuration.
+  // Do not replace unrelated configuration, and append to an existing
+  // instructions array rather than replacing it.
+  //
+  // Restored by Phase R of the approved routing decision at
+  // docs/decisions/2026-09-02-multi-model-routing-v3.4.3.md.
+  // The declared target is eval/manifests/phase-r-routing-targets.json.
+  //
+  // Capability-forced rows (Opus 4.6 was MODEL_UNRESOLVABLE):
+  //   plan, build, general
+  // Rows migrated by explicit risk decision (Codex still resolved):
+  //   explore, scout, reviewer, compaction, title, summary
+  //
+  // THIS FILE IS THE SINGLE AUTHORITY for role -> model/variant/mode.
+  // .opencode/agents/*.md carry prompts and non-routing metadata only.
   "$schema": "https://opencode.ai/config.json",
 
-  // Global instruction files loaded into every session
+  // Append this entry to any instructions already configured.
   "instructions": [
     ".opencode/model-routing.md"
   ],
 
-  // Baseline model applied when no agent override matches
-  "model": "github-copilot/claude-opus-4.6",
+  // Baseline model applied when no agent override matches.
+  "model": "github-copilot/claude-opus-5",
 
   "permission": {
-    // Web search via Exa AI — requires OPENCODE_ENABLE_EXA=true in the environment
-    "websearch": "allow"
+    // Web search via Exa AI — requires OPENCODE_ENABLE_EXA=true in the environment.
+    "websearch": "allow",
+
+    // Breakglass is never reachable through ordinary Task delegation.
+    // This deny rule is the security control; `hidden` is not one.
+    "task": {
+      "*": "allow",
+      "breakglass": "deny"
+    }
   },
 
   "agent": {
-    // ── Primary work agents (Opus family) ──────────────────────────
+    // ── Primary work agents ────────────────────────────────────────
 
     "plan": {
-      // Architectural planning and task decomposition
+      // Architectural planning and task decomposition.
+      // Variant `max` is the Phase-0 verified highest supported Opus effort
+      // (eval/records/claude-opus-5-max.json, classification USABLE).
       "mode": "primary",
-      "model": "github-copilot/claude-opus-4.6",
+      "model": "github-copilot/claude-opus-5",
       "variant": "max",
       "permission": {
         "edit": "deny",
-        "task": "allow",
+        "task": {
+          "*": "allow",
+          "breakglass": "deny"
+        },
         "bash": "ask"
       }
     },
 
     "build": {
-      // Hands-on code generation and modification
+      // Hands-on code generation and modification; the restoration controller.
       "mode": "primary",
-      "model": "github-copilot/claude-opus-4.6",
+      "model": "github-copilot/claude-opus-5",
       "variant": "high",
       "permission": {
         "edit": "allow",
-        "task": "allow",
+        "task": {
+          "*": "allow",
+          "breakglass": "deny"
+        },
         "bash": {
           "*": "allow",
           "git push*": "deny"
@@ -46,37 +77,104 @@
     },
 
     "general": {
-      // Catch-all for tasks that do not fit plan or build
-      "model": "github-copilot/claude-opus-4.6",
-      "variant": "xhigh"
+      // Catch-all delegated worker for bounded tasks.
+      "model": "github-copilot/gpt-5.6-terra",
+      "variant": "high",
+      "permission": {
+        "task": {
+          "*": "allow",
+          "breakglass": "deny"
+        }
+      }
     },
 
-    // ── Navigation and analysis agents (Codex family) ──────────────
+    // ── Navigation and analysis agents ─────────────────────────────
 
     "explore": {
-      // Codebase discovery, search, and context gathering
-      "model": "github-copilot/gpt-5.3-codex",
-      "variant": "high"
+      // Codebase discovery, search, and context gathering.
+      "model": "github-copilot/gpt-5.6-luna",
+      "variant": "medium"
     },
 
     "scout": {
-      // Targeted lookup and fact-finding across repositories
-      "model": "github-copilot/gpt-5.3-codex",
-      "variant": "high"
+      // Targeted lookup and fact-finding across repositories.
+      "model": "github-copilot/gpt-5.6-luna",
+      "variant": "low"
     },
 
-    // ── Lightweight utility agents (Codex family) ──────────────────
+    // ── Review and escalation ──────────────────────────────────────
+
+    "reviewer": {
+      // Independent read-only review. Copilot-hosted, deliberately a
+      // different family from the Opus implementers.
+      "mode": "subagent",
+      "model": "github-copilot/gpt-5.6-sol",
+      "variant": "high",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "deny",
+        "task": "deny",
+        "skill": "allow",
+        "bash": {
+          "*": "deny",
+          "git status*": "allow",
+          "git diff*": "allow",
+          "git log*": "allow",
+          "git show*": "allow"
+        }
+      }
+    },
+
+    "expert": {
+      // Escalation-only adviser on direct OpenAI, for provider, quota,
+      // policy, credential and governance-domain separation from Copilot.
+      // Effort is deliberately above Reviewer's; Reviewer Sol high together
+      // with Expert Sol high is a forbidden state.
+      "mode": "subagent",
+      "model": "openai/gpt-5.6-sol",
+      "variant": "xhigh",
+      "temperature": 0.1,
+      "steps": 6,
+      "hidden": true,
+      "permission": {
+        "edit": "deny",
+        "bash": "deny",
+        "task": "deny",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "external_directory": "deny",
+        "skill": "allow"
+      }
+    },
+
+    "breakglass": {
+      // Human-selected primary only. Never Task-routable; the deny rules
+      // above are the control. `hidden` is not a security property.
+      "mode": "primary",
+      "model": "openai/gpt-5.6-sol",
+      "variant": "max",
+      "permission": {
+        "edit": "deny",
+        "bash": "deny",
+        "task": "deny"
+      }
+    },
+
+    // ── Lightweight utility agents ─────────────────────────────────
 
     "compaction": {
-      "model": "github-copilot/gpt-5.3-codex"
+      "model": "github-copilot/gpt-5.6-terra",
+      "variant": "medium"
     },
 
     "title": {
-      "model": "github-copilot/gpt-5.3-codex"
+      "model": "github-copilot/gpt-5.6-luna",
+      "variant": "low"
     },
 
     "summary": {
-      "model": "github-copilot/gpt-5.3-codex"
+      "model": "github-copilot/gpt-5.6-luna",
+      "variant": "low"
     }
   }
 }

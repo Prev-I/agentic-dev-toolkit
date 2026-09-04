@@ -1,0 +1,9 @@
+{
+  "findings": [
+    {
+      "file": "pagination.sh",
+      "severity": "suggestion",
+      "summary": "Leading-zero input is evaluated as octal in the arithmetic context, so 007 is accepted as 7 while 08 is rejected with a stderr error; failing closed is safe but inconsistent, and prefixing with 10# would normalize it."
+    }
+  ]
+}

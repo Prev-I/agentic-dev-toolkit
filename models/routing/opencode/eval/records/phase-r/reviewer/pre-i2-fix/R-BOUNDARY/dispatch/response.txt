@@ -1,0 +1,13 @@
+I'll review the shell scripts in the current directory.
+Confirmed arbitrary command execution in `pagination.sh`. Let me stress-test the counter's locking and check the remaining scripts empirically.
+Review complete. I read all five scripts and empirically verified each behavior rather than reasoning by inspection alone:
+
+- **pagination.sh** — confirmed defect. Bash arithmetic context evaluates array subscripts, so `(( $1 >= 0 ... ))` with an unvalidated argument executes embedded command substitution. `validate_page_size 'x[$(touch PWNED)]'` created the file and returned status 0 (a *passing* validation). Page size is by definition attacker-controlled request input, so this is remote command execution in a validator.
+- **counter.sh** — sound. `flock` on the sidecar lock file serializes correctly; 60 concurrent increments yielded exactly 60.
+- **api.sh** — sound. `json.dumps` escapes quotes/markup, and the single-quoted `-c` program plus argv passing means `$(...)` and backticks are inert data.
+- **authorization.sh** — sound. The right-hand side of `[[ == ]]` is quoted, so a literal `*` owner does not glob-match an arbitrary caller; denial returns non-zero and withholds the value.
+- **storage.sh** — sound. The command's exit status propagates unchanged (1 and 127 observed), so failure is distinguishable from an empty list.
+
+I found no defect in the other four and am deliberately not reporting stylistic nits on them.
+
+{"findings":[{"file":"pagination.sh","severity":"blocking","summary":"Passing untrusted input to bash arithmetic evaluation allows arbitrary command execution via an array-subscript command substitution such as 'x[$(cmd)]', which both runs the command and makes validation succeed."}]}

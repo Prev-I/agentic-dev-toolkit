@@ -1,0 +1,14 @@
+{
+  "findings": [
+    {
+      "file": "pagination.sh",
+      "severity": "blocking",
+      "summary": "Untrusted page size is interpolated into an arithmetic context, allowing command execution via array-subscript injection (e.g. 'a[$(cmd)]') and silently accepting non-numeric input such as 'abc' as 0."
+    },
+    {
+      "file": "authorization.sh",
+      "severity": "suggestion",
+      "summary": "Two empty identifiers compare equal, so an empty caller matches an empty owner and is granted access; the function should reject empty identifiers rather than rely on callers to do so."
+    }
+  ]
+}

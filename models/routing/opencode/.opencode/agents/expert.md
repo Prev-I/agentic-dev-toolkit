@@ -1,8 +1,6 @@
 ---
-description: Escalation-only principal engineer adviser — provides structured guidance on hard design and architecture problems without writing code
+description: Escalation-only principal engineer adviser — provides structured guidance on hard design and architecture problems without writing code. Model and variant are assigned by opencode.jsonc.
 mode: subagent
-model: openai/gpt-5.6
-variant: high
 temperature: 0.1
 steps: 6
 hidden: true
@@ -21,8 +19,9 @@ packet and return a structured recommendation.
 
 ## Availability
 
-This agent requires an active OpenAI subscription. If the model is unavailable, the calling
-agent should proceed with its own best judgment and document the uncertainty.
+This agent runs on direct OpenAI and requires an active OpenAI subscription. If
+the model is unavailable, the calling agent should proceed with its own best
+judgment and document the uncertainty.
 
 ## Input
 

@@ -1,0 +1,13 @@
+{
+  "timestamp": "2026-09-04T10:54:34.234460+02:00",
+  "profile": "v1-restored-2026-09 (activated user-global)",
+  "evidence_mechanism": "resolved_permission_and_inventory",
+  "task_schema_directly_exposed": false,
+  "normal_agent_breakglass_task_action": "deny",
+  "breakglass_mode": "primary",
+  "breakglass_model": "openai/gpt-5.6-sol",
+  "breakglass_variant": "max",
+  "normal_agent_non_exposure": true,
+  "hidden_used_as_security_control": false,
+  "prompt_behavior_used_as_oracle": false
+}

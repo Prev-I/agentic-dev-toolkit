@@ -1,0 +1,10 @@
+I'll review the shell scripts in the current directory.
+I reviewed all five scripts.
+
+- **authorization.sh** — `read_resource` accepts `caller` and `owner` but never compares them; the resource value is returned unconditionally, so any caller can read any owner's resource. Both parameters are assigned and unused, which confirms the check was omitted rather than intentionally absent.
+- **api.sh** — user input is passed as `argv` to Python, not interpolated into source; JSON encoding is done by `json.dumps`. No injection path.
+- **counter.sh** — read-modify-write is fully enclosed in the `flock` critical section, and the `bash -c` argument passing (`_ "$1"`) is correct.
+- **pagination.sh** — regex anchors reject non-numeric and signed input before the arithmetic range check, so `(( ))` never evaluates untrusted text.
+- **storage.sh** — the command's exit status propagates as the function's return value, matching the "or fail" contract.
+
+{"findings":[{"file":"authorization.sh","severity":"blocking","summary":"read_resource takes caller and owner but never compares them, returning the resource value to any caller regardless of ownership."}]}

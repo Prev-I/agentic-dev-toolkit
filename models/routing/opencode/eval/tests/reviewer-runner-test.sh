@@ -122,4 +122,24 @@ for forbidden in 'required_seeded_detections' 'allowed_clean_material_findings' 
   fi
 done
 
+# Admission gate (docs/evidence/2026-09-04-reviewer-fixture-integrity-remediation.md):
+# a fixture that fails its own integrity check must never reach a live
+# dispatch. Temporarily break the real committed clean/pagination.sh (with a
+# trap-guaranteed restore) and confirm run_reviewer_gate refuses before
+# creating any sandbox or spending anything -- this is the control that
+# would have caught the real incident before it cost a single credit.
+pagination_sh="$root/fixtures/reviewer-seeded-defects/clean/pagination.sh"
+pagination_backup=$(<"$pagination_sh")
+restore_pagination() { printf '%s\n' "$pagination_backup" >"$pagination_sh"; }
+trap 'restore_pagination; rm -rf "$workspace"' EXIT
+printf 'validate_page_size() { [[ "$1" =~ ^[0-9]+$ ]] || return 1; (( $1 >= 1 && $1 <= 100 )); }\n' >"$pagination_sh"
+refused="$workspace/refused"
+if OPENCODE_BIN="$workspace/opencode-detects" run_reviewer_gate --outdir "$refused" --ledger "$ledger" 2>"$workspace/refused.err"; then
+  fail "run_reviewer_gate dispatched against a fixture that fails its own integrity check"
+fi
+assert_contains "$(<"$workspace/refused.err")" 'FIXTURE INTEGRITY'
+[[ ! -e "$refused" ]] || fail "run_reviewer_gate created output before refusing -- no spend should occur"
+restore_pagination
+trap 'rm -rf "$workspace"' EXIT
+
 printf 'PASS: reviewer gate runner\n'

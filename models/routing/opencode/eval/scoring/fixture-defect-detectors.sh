@@ -252,8 +252,15 @@ fixture_integrity_check() {
     case_id=$(basename "${case_dir2%/}")
     gt_file="$case_dir2/ground-truth.json"
     [[ -f "$gt_file" ]] || continue
+    if ! python3 -c 'import json,sys; sys.exit(0 if "witness" in json.load(open(sys.argv[1])) else 1)' "$gt_file"; then
+      continue
+    fi
     witness=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("witness") or "")' "$gt_file")
-    [[ -n "$witness" ]] || continue
+    if [[ -z "$witness" ]]; then
+      printf 'FIXTURE INTEGRITY: %s witness is present but empty -- an empty substring matches anything, invalid\n' "$case_id" >&2
+      ok=1
+      continue
+    fi
     override_rel=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["overrides"][0])' "$gt_file")
     clean_file="$fixture/clean/$override_rel"
     override_file="$case_dir2$override_rel"

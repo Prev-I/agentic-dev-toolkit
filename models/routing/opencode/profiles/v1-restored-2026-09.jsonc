@@ -15,6 +15,16 @@
 // This is a separation-of-concerns correction, not a threshold relaxation
 // -- see the amendment doc for the full evidence table and rationale.
 //
+// CORRECTED 2026-09-04: `build`'s `bash` permission for `git push*` is
+// `ask`, not `deny`. This snapshot originally recorded `deny`, but the
+// actually-installed, user-global configuration has run with `ask` since
+// shortly after activation (see the live config's own
+// `pre-git-push-ask-*` backup, which still shows `deny` immediately
+// before that change) -- this file is corrected to match the real,
+// human-confirmed operational policy, not to encode a new decision.
+// `opencode.jsonc` in this bundle already specified `ask`; only this
+// historical snapshot was out of sync with it.
+//
 // profile_id:     v1-restored-2026-09
 // source_commit:  ee7092d9e94ea6cfc30c570c75dd7a8d21fc8e41
 // opencode:       1.18.27
@@ -117,7 +127,7 @@
         },
         "bash": {
           "*": "allow",
-          "git push*": "deny"
+          "git push*": "ask"
         }
       }
     },

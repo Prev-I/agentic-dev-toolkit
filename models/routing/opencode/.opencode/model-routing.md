@@ -54,7 +54,8 @@ and defines acceptance criteria. Never writes production code directly — deleg
 
 ### build
 The primary coding agent. Receives tasks from plan or the user and produces working, tested
-implementations. Has full file-edit and shell access but cannot force-push.
+implementations. Has full file-edit and shell access; any `git push` requires
+confirmation (`ask`, not a blanket deny).
 
 ### general
 Handles requests that span multiple concerns or do not clearly belong to plan or build. Also serves

@@ -54,15 +54,18 @@ build-bugfix             -- Phase-3 realistic scenario
 build-refactor           -- Phase-3 realistic scenario, CONDITIONAL
 ```
 
-**Deviation from a default 3-pair design, reported explicitly**: this
-preflight uses 2 initial pairs (build-feature, build-bugfix), not 3, for
-two independent reasons:
-
-1. The governing decision document's own pre-registered design (section
-   24, "Sequential scenario stopping") already specifies this: *"Run
-   feature and bugfix first. Run `build-refactor` only if the first two
-   scenarios do not produce a decision."* Repository evidence is
-   authoritative; this preflight does not recreate a different rule.
+**Deviation from the task brief's own suggested 3-pair shape, reported
+explicitly — not a deviation from the repository's design.** This
+preflight uses 2 initial pairs (build-feature, build-bugfix), not 3.
+Independent review confirmed this is not corner-cutting: the governing
+decision document has no 3-pair default to deviate from in the first
+place. Its own pre-registered design (section 24, "Sequential scenario
+stopping", and section 20.2, which lists `build-feature`/`build-bugfix` as
+**Required** and `build-refactor` as **Conditional**) already specifies
+exactly this: *"Run feature and bugfix first. Run `build-refactor` only if
+the first two scenarios do not produce a decision."* Repository evidence
+is authoritative; this preflight follows that existing rule rather than
+the task brief's own generic 3-pair framing.
 2. `build-feature` and `build-bugfix` previously existed only as bare
    `fixture.json` manifests — no snapshot, oracle, task, or regression
    content, despite declaring properties like
@@ -155,11 +158,31 @@ already-frozen self-variance threshold
 difference counts as real, not harness noise. This preflight does not
 retune that threshold.
 
+**Material caveat, found by independent review, disclosed rather than
+resolved**: that threshold was derived from a *different* fixture family
+(`github-copilot/gpt-5.6-luna`, 18.9443% observed relative range) — it has
+never been validated against Build's own wall-clock behavior. Build's own
+3 historical `build-restoration-gate` dispatches show wall-clock times of
+337381, 25884, and 28801 ms: a **1081.5%** relative range including the
+cold-cache first call, or **10.7%** excluding it
+(`eval/records/phase-r/build/attempt-{1,2,3}/dispatch/dispatch.json`). The
+frozen threshold's own evidence doc explicitly warns that "the first
+uncached call was materially more expensive than the two cache-read
+calls" — a caution that document applies to cost, not wall-clock. With
+only one dispatch per arm per pair, a single cold-cache outlier could
+dominate the primary criterion for an entire pair. The counterbalanced
+execution order (Opus→Sonnet then Sonnet→Opus) partially mitigates this
+by not always disadvantaging the same arm, but does not neutralize it
+across only 2 pairs. This preflight does not retune the frozen threshold
+or invent a Build-specific one; it records the gap for the human to weigh
+before approving.
+
 **Cost is secondary/observational only, not primary.** The frozen
 comparable-credits threshold is **2194.8831%** relative range — a
-practically undischargeable bar given historical Build cost variance
-(23.19-26.19 credits across 3 real Opus runs is nowhere near a
-~22x-relative-range separation). Cost is recorded and reported in full,
+practically undischargeable bar. Even a full arm-to-arm cost gap (Opus
+mean 24.699 vs. estimated Sonnet mean 9.786, a real difference if the
+estimate holds) is only an **86.5%** relative range — nowhere near a
+~22x-relative-range separation. Cost is recorded and reported in full,
 never used to declare a winner.
 
 **What Sonnet must demonstrate to justify adoption**: non-inferior
@@ -266,18 +289,36 @@ implicated by this proposal).
   proven by `build-restoration-gate`, but a real dispatch may reveal
   task-complexity effects this preflight cannot predict from fixture
   content alone.
+- **Precisely stated, per independent review**: this same task-simplicity
+  makes it likely both arms will pass criteria 1-5 (correctness, invariant
+  preservation, scope adherence, human correction, convergence) cleanly,
+  pushing the decision down to criterion 6 (wall-clock) by default. That
+  cannot cause a *wrong* adoption decision (the tie/inconclusive policy
+  still resolves to KEEP OPUS), but it is a real **information-value**
+  risk distinct from a correctness risk: the experiment could spend its
+  full budget and, if wall-clock also fails to separate cleanly (see the
+  build-specific wall-clock variance caveat above), learn nothing
+  decisive. This is stated as its own risk, not folded into the blanket
+  claim below.
+- The Build-family wall-clock variance caveat above (1081.5% including
+  the cold-cache outlier, 10.7% excluding it, against a threshold derived
+  from a different fixture family) is itself a limitation, tracked here
+  for visibility alongside the others even though it is discussed in full
+  in the primary-criterion section.
 
-None of these can change the Opus-vs-Sonnet decision itself (they affect
-estimation precision and a documented interpretive gap, not correctness),
-so none block this preflight per its own governing rule: *"Can this issue
-materially change the decision? If no, record and continue; if yes,
-report the exact blocker."*
+None of these can cause a *wrong* Opus-vs-Sonnet adoption decision (the
+tie/inconclusive policy holds regardless), so none block this preflight
+per its own governing rule: *"Can this issue materially change the
+decision? If no, record and continue; if yes, report the exact
+blocker."* The information-value risk noted above is a real cost/benefit
+consideration for the human approving the budget, not a correctness
+blocker for this preflight.
 
 ## Verification
 
 ```text
 $ bash models/routing/opencode/eval/run-tests.sh
-37/37 PASS
+38/38 PASS
 
 $ bash tests/install.sh
 PASS: installer compatibility tests

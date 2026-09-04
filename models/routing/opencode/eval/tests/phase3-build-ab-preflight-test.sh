@@ -62,7 +62,7 @@ assert opus["min"] <= opus["mean"] <= opus["max"]
 # ceiling; verify the arithmetic actually reflects that, not just prose.
 no_savings_floor = 4 * opus["max"]
 replacement_floor = 2 * opus["max"]
-required_floor = no_savings_floor + replacement_floor - 1
+required_floor = no_savings_floor + replacement_floor
 msg = "ceiling too low for 4 dispatches + 1 replacement pair at Opus ceiling"
 assert b["conservative_ceiling_credits"] >= required_floor, msg
 

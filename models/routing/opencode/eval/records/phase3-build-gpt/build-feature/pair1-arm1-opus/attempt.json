@@ -1,0 +1,50 @@
+{
+  "fixture": "build-feature",
+  "phase": "3-comparative",
+  "label": "phase3-build-gpt-pair1-feature-opus",
+  "attempt": 1,
+  "acceptance_initially_failing": true,
+  "dispatch": {
+    "timestamp": "2026-09-04T22:26:57.852874+02:00",
+    "label": "phase3-build-gpt-pair1-feature-opus",
+    "attempt": 1,
+    "routing_profile_id": "v1-restored-2026-09",
+    "routing_profile_commit": "4a8e87e2f3df6d2898bd03cca6d7e9c68d48e0a1",
+    "runtime_version": "1.18.27",
+    "eval_runner_version": "phase-r-dispatch-v1",
+    "environment": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+    "dispatch_target": "github-copilot/claude-opus-5",
+    "variant": "high",
+    "timeout_seconds": 480,
+    "exit_status": 0,
+    "classification": "OK",
+    "failure_class": null,
+    "provider_error_text": null,
+    "provider_status_code": null,
+    "observed_cost": 0.29515900000000006,
+    "derived_credits": 29.515900000000006,
+    "normalized_steady_state_cost": null,
+    "tokens": {
+      "total": 24044,
+      "input": 2,
+      "output": 645,
+      "reasoning": 61,
+      "cache": {
+        "write": 131,
+        "read": 23205
+      }
+    },
+    "wall_clock_ms": 51838,
+    "retry_count": 0,
+    "raw_evidence": "raw.jsonl",
+    "decides_gate_outcome": false
+  },
+  "dispatch_healthy": true,
+  "dispatch_classification": "OK",
+  "oracle": "eval/fixtures/build-workloads/build-feature/oracle.sh",
+  "oracle_exit_status": 0,
+  "oracle_passed": true,
+  "regression_passed": true,
+  "human_or_llm_judgment_in_oracle": false,
+  "runner_decides_gate_outcome": false
+}

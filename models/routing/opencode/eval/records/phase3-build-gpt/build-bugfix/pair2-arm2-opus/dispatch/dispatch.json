@@ -1,0 +1,35 @@
+{
+  "timestamp": "2026-09-04T22:31:48.042825+02:00",
+  "label": "phase3-build-gpt-pair2-bugfix-opus",
+  "attempt": 1,
+  "routing_profile_id": "v1-restored-2026-09",
+  "routing_profile_commit": "4a8e87e2f3df6d2898bd03cca6d7e9c68d48e0a1",
+  "runtime_version": "1.18.27",
+  "eval_runner_version": "phase-r-dispatch-v1",
+  "environment": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+  "dispatch_target": "github-copilot/claude-opus-5",
+  "variant": "high",
+  "timeout_seconds": 480,
+  "exit_status": 0,
+  "classification": "OK",
+  "failure_class": null,
+  "provider_error_text": null,
+  "provider_status_code": null,
+  "observed_cost": 0.278814,
+  "derived_credits": 27.8814,
+  "normalized_steady_state_cost": null,
+  "tokens": {
+    "total": 23974,
+    "input": 2,
+    "output": 324,
+    "reasoning": 0,
+    "cache": {
+      "write": 438,
+      "read": 23210
+    }
+  },
+  "wall_clock_ms": 44779,
+  "retry_count": 0,
+  "raw_evidence": "raw.jsonl",
+  "decides_gate_outcome": false
+}

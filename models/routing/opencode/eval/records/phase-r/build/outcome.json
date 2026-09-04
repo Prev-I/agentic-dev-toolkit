@@ -1,0 +1,18 @@
+{
+  "fixture": "build-restoration-gate",
+  "target": {"role": "build", "model": "github-copilot/claude-opus-5", "variant": "high"},
+  "valid_runs": 3,
+  "successes": 3,
+  "individual_results": [
+    {"attempt": 1, "oracle_passed": true, "dispatch_classification": "OK", "derived_credits": 2.238925, "wall_clock_ms": 337381},
+    {"attempt": 2, "oracle_passed": true, "dispatch_classification": "OK", "derived_credits": 1.657875, "wall_clock_ms": null},
+    {"attempt": 3, "oracle_passed": true, "dispatch_classification": "OK", "derived_credits": 1.67235, "wall_clock_ms": null}
+  ],
+  "classifications": [],
+  "escalated_to_n5": false,
+  "state_machine": "eval/decision-rules/build-gate.sh::build_gate",
+  "verdict": "pass",
+  "fixture_control_run": false,
+  "interpretation_note": "Passing establishes minimum operational viability, not a reliability estimate. Three to five valid runs cannot distinguish a 95% reliable controller from an 85% reliable one and must not be used as an SLO or success-rate claim.",
+  "phase_3_admissible": false
+}

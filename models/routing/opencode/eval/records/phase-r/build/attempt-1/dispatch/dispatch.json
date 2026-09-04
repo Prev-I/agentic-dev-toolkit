@@ -1,0 +1,35 @@
+{
+  "timestamp": "2026-09-04T11:02:20.671497+02:00",
+  "label": "build-restoration-gate",
+  "attempt": 1,
+  "routing_profile_id": "v1-restored-2026-09",
+  "routing_profile_commit": "70ef697278d1d0fcc7c4421798af07a53441e2f4",
+  "runtime_version": "1.18.27",
+  "eval_runner_version": "phase-r-dispatch-v1",
+  "environment": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+  "dispatch_target": "agent:build",
+  "variant": "resolved",
+  "timeout_seconds": 1800,
+  "exit_status": 0,
+  "classification": "OK",
+  "failure_class": null,
+  "provider_error_text": null,
+  "provider_status_code": null,
+  "observed_cost": 0.02238925,
+  "derived_credits": 2.238925,
+  "normalized_steady_state_cost": null,
+  "tokens": {
+    "total": 24193,
+    "input": 2,
+    "output": 366,
+    "reasoning": 0,
+    "cache": {
+      "write": 229,
+      "read": 23596
+    }
+  },
+  "wall_clock_ms": 337381,
+  "retry_count": 0,
+  "raw_evidence": "raw.jsonl",
+  "decides_gate_outcome": false
+}

@@ -1,19 +1,37 @@
-// RESTORED REFERENCE PROFILE — the exact production routing that passed Phase R.
+// RESTORED REFERENCE PROFILE — the exact routing that was ACTIVELY INSTALLED
+// during Phase R. Its own activation is not in question; the QUALITY CLAIM
+// below it (originally "passed... 5/5") is.
+//
+// CORRECTED 2026-09-04, post-hoc, without rewriting this snapshot's routing
+// content: Phase R is BLOCKED_REVIEWER, not PASS. The Reviewer seeded-defect
+// gate's original "5/5" result is invalidated (see I1/I2 in
+// docs/evidence/2026-09-04-phase-r-execution.md and the Reviewer
+// fixture-integrity remediation record for the full trace). This file is
+// retained as a snapshot of what was active, NOT as canonical_quality_reference
+// or as a Phase-3 starting baseline, until the Reviewer gate is re-run clean
+// against an integrity-proven fixture.
 //
 // profile_id:     v1-restored-2026-09
 // source_commit:  ee7092d9e94ea6cfc30c570c75dd7a8d21fc8e41
 // opencode:       1.18.27
-// passed:         routing resolution, Reviewer/Expert permission boundaries,
-//                 Breakglass boundary, Build restoration gate (3/3), Reviewer
-//                 seeded-defect and clean-control gate (5/5, at production
-//                 effort github-copilot/gpt-5.6-sol high — no effort change
-//                 was needed), Explore four-hop dependency gate, Compaction
-//                 4/4 invariant gate
+// passed (still valid): routing resolution, Reviewer/Expert permission
+//                 boundaries, Breakglass boundary, Build restoration gate
+//                 (3/3), Explore four-hop dependency gate, Compaction 4/4
+//                 invariant gate
+// NOT passed / corrected: Reviewer seeded-defect and clean-control gate —
+//                 originally reported 5/5, corrected to BLOCK (4/5, then
+//                 further findings on rerun). See the Reviewer
+//                 fixture-integrity remediation record for full detail.
 //
-// This is the forward quality reference, the forward operational reference,
-// the rollback target for FUTURE optimization changes, and the Phase-3
-// starting baseline. It is NOT retroactively a Phase-R rollback target:
-// Phase R had no supported rollback.
+// operational_state: active-provisional (still installed on the real,
+// user-global OpenCode configuration; that activation stands)
+// canonical_quality_reference: false (pending a clean Reviewer gate rerun
+// against an integrity-proven fixture)
+//
+// This is NOT currently the forward quality reference, NOT the Phase-3
+// starting baseline, and NOT a Phase-R rollback target (Phase R had no
+// supported rollback; the prior "forward reference" framing below described
+// the ORIGINAL, now-corrected PASS status, not the current one).
 //
 // profiles/baseline-2026-08.jsonc remains the untouched historical record.
 {

@@ -2,18 +2,30 @@
 
 ## Status
 
-**Phase R: PASS on Build/Explore/Compaction. Reviewer gate: BLOCK (4/5) as
-of the I2-repair rerun. Budget: both caps corrected and found exceeded.**
-The restored routing profile is active on the real, user-global OpenCode
-configuration; that activation stands — the routing-resolution and security
-boundary gates are unaffected by everything below and remain PASS. Two
-post-hoc corrections were made to this record on 2026-09-04, after the
-original "PASS" status below was first written — see
+**Phase R status: `BLOCKED_REVIEWER`.** Build, Explore, Compaction, routing
+resolution, and security/permission boundaries (including Breakglass) all
+PASS and are not re-run by anything in this correction. The Reviewer
+seeded-defect gate is BLOCKED — originally reported "PASS — 5/5", corrected
+first to BLOCK (4/5) via the I2 rerun below, and as of the Reviewer
+fixture-integrity remediation (see that record) still not cleared for a
+valid rerun. Budget: both the evaluation and recovery caps are corrected and
+confirmed exceeded — see [Budget](#budget).
+
+`operational_state: active-provisional` — the restored routing profile is
+installed and active on the real, user-global OpenCode configuration; that
+activation is independent of the Reviewer gate's status and is not reversed
+by this correction. `canonical_quality_reference: false` — this profile is
+not currently the quality-verified reference for Phase 3 or any other
+purpose, pending a clean Reviewer gate rerun.
+
+Two post-hoc corrections were made to this record on 2026-09-04, after the
+original "PASS" status above was first written — see
 [Post-hoc corrections (I1, I2)](#post-hoc-corrections-i1-i2) before relying
 on any cost figure or the Reviewer gate's original "5/5 PASS" claim
 elsewhere in this document. The I2 repair itself surfaced further findings
-during its rerun — see [I2 rerun result](#i2-rerun-result-block-45) — that
-are open and unresolved as of this document.
+during its rerun — see [I2 rerun result](#i2-rerun-result-block-45) — which
+are traced to root cause and classified in the Reviewer fixture-integrity
+remediation record (`docs/evidence/2026-09-04-reviewer-fixture-integrity-remediation.md`).
 
 ## Runtime
 

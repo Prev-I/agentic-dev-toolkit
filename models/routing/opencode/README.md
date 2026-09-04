@@ -53,18 +53,26 @@ adds the approved exact Scout `low` and Compaction `medium` variants, executable
 Reviewer/Explore/Compaction fixture ground truth, and the user-global activation
 contract. It does not change or activate the published routing profile.
 
-Phase R has since executed and passed every committed gate — see the
-[Phase-R execution evidence](docs/evidence/2026-09-04-phase-r-execution.md) for
-the full record (routing resolution, security boundaries, Build, Reviewer,
-Explore, Compaction). The routing profile is now restored and active.
+Phase R executed against every committed gate; **status: `BLOCKED_REVIEWER`**,
+not PASS — see the
+[Phase-R execution evidence](docs/evidence/2026-09-04-phase-r-execution.md)
+for the full record. Build, Explore, Compaction, routing resolution and
+security boundaries passed and are not re-run by this correction; the
+Reviewer seeded-defect gate is blocked (see I1/I2 and the Reviewer
+fixture-integrity remediation record it points to). The routing profile is
+restored and active on the real, user-global OpenCode configuration
+(`operational_state: active-provisional`) — that activation stands
+independent of the Reviewer gate's status — but is **not** currently a
+`canonical_quality_reference`.
 
 ## Restored reference profile
 
 [`profiles/v1-restored-2026-09.jsonc`](profiles/v1-restored-2026-09.jsonc) is
-the exact production routing that passed Phase R. It is the forward quality
-reference, the forward operational reference, and the rollback target for
-**future** optimization changes (Phase 3 onward) — it is not itself a Phase-R
-rollback target, since Phase R had no supported rollback.
+a snapshot of the exact routing that was actively installed during Phase R.
+It is **not currently** the forward quality reference, the Phase-3 starting
+baseline, or a rollback target — see the corrected header comment in that
+file — pending a clean Reviewer gate rerun against an integrity-proven
+fixture.
 
 [`profiles/baseline-2026-08.jsonc`](profiles/baseline-2026-08.jsonc) remains
 the preserved, untouched historical record of the pre-Phase-R profile.

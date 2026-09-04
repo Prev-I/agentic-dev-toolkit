@@ -1,0 +1,9 @@
+{
+  "findings": [
+    {
+      "file": "pagination.sh",
+      "severity": "blocking",
+      "summary": "Passing untrusted input to bash arithmetic evaluation allows arbitrary command execution via an array-subscript command substitution such as 'x[$(cmd)]', which both runs the command and makes validation succeed."
+    }
+  ]
+}

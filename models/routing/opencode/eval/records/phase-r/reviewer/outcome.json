@@ -1,0 +1,23 @@
+{
+  "fixture": "reviewer-seeded-defects",
+  "target": {"role": "reviewer", "model": "github-copilot/gpt-5.6-sol", "variant": "high"},
+  "per_id_detections": {
+    "R-API": "blocking",
+    "R-AUTH": "blocking",
+    "R-BOUNDARY": "blocking",
+    "R-CONCURRENCY": "blocking",
+    "R-ERROR": "material"
+  },
+  "clean_control_result": {"material_findings": 0, "all_findings": [{"file": "pagination.sh", "severity": "suggestion"}]},
+  "verdict": "pass",
+  "pricing_regime": "standard",
+  "canonical_cost_reference": true,
+  "run_notes": "Complete re-run of all 5 seeded cases plus the clean control, in one uninterrupted session, against the repaired reviewer-seeded-defects fixture (commit f4026c9: load_items -> load_items_or_fail in clean/storage.sh and cases/R-ERROR/storage.sh, resolving the R_ERROR_FIXTURE_AMBIGUITY root cause identified by a structured H1/H2 investigation). Production Reviewer target unchanged (github-copilot/gpt-5.6-sol, high) -- no effort bump was needed or used. All 6 dispatches were healthy on the first attempt, no retries required. Charged to the Phase-R recovery budget per explicit human authorization (evaluation budget was exhausted from the prior diagnostic work). Superseded a prior 4/5 result (models/routing/opencode/eval/records/phase-r/reviewer-run-1-pre-fixture-fix/) that was produced against the pre-repair fixture and is preserved historically, marked superseded, not used as adjudication evidence.",
+  "detected_count": 5,
+  "required_count": 5,
+  "gate_verdict_source": "eval/scoring/reviewer.sh::reviewer_structured_gate (unmodified)",
+  "reviewer_effort_change_permitted": false,
+  "xhigh_diagnostic_used": false,
+  "xhigh_diagnostic_note": "Not needed: the repaired fixture passed at high effort on the first complete rerun, so the H3/VALID_CONTROLLER_FAILURE branch (which would have required an xhigh diagnostic run) was never reached.",
+  "phase_3_note": "Per decision doc, Reviewer effort experiments (high vs xhigh) belong to Phase 3 under approved conditions only; not evaluated or changed in Phase R."
+}

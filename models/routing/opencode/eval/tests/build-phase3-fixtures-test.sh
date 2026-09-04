@@ -83,12 +83,18 @@ text = text.replace("(( $1 >= 0 ))", "(( $1 > 0 ))")
 open(path, "w", encoding="utf-8").write(text)
 ' "$1/lib/validate.sh"
 }
+# Behavior-PRESERVING rewrite: `[[ "${1// }" == "" ]]` accepts exactly the
+# same inputs as the original `[[ -z "${1// }" ]]` (both strip spaces, then
+# test emptiness) -- verified directly. This isolates what this check
+# claims to prove: the oracle's forbidden-scope TEXT comparison must catch
+# a semantically-equivalent rewrite of is_blank, not merely a behavior
+# change regression.sh would have caught anyway for an unrelated reason.
 touch_forbidden_bugfix() {
   python3 -c '
 import re, sys
 path = sys.argv[1]
 text = open(path, encoding="utf-8").read()
-text = re.sub(r"is_blank\(\)\s*\{.*?\n\}", "is_blank() {\n  [[ -z \"$1\" ]]\n}", text, flags=re.S)
+text = re.sub(r"is_blank\(\)\s*\{.*?\n\}", "is_blank() {\n  [[ \"${1// }\" == \"\" ]]\n}", text, flags=re.S)
 open(path, "w", encoding="utf-8").write(text)
 ' "$1/lib/validate.sh"
 }

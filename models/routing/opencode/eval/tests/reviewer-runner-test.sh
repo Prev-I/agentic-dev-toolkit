@@ -35,7 +35,11 @@ if [[ -z "$file" ]]; then
 fi
 python3 -c '
 import json, sys
-inner = json.dumps({"findings": [{"file": sys.argv[1], "severity": "material", "summary": "seeded defect"}]})
+witnesses = {"api.sh": "{\"name\"", "pagination.sh": "10#$1 >= 0", "storage.sh": "2>/dev/null"}
+finding = {"file": sys.argv[1], "severity": "material", "summary": "seeded defect"}
+if sys.argv[1] in witnesses:
+    finding["evidence"] = witnesses[sys.argv[1]]
+inner = json.dumps({"findings": [finding]})
 print(json.dumps({"type": "text", "part": {"text": inner}}))
 ' "$file"
 FAKE
@@ -84,7 +88,11 @@ if [[ -z "$file" || "$file" == authorization.sh ]]; then
 fi
 python3 -c '
 import json, sys
-inner = json.dumps({"findings": [{"file": sys.argv[1], "severity": "blocking", "summary": "seeded defect"}]})
+witnesses = {"api.sh": "{\"name\"", "pagination.sh": "10#$1 >= 0", "storage.sh": "2>/dev/null"}
+finding = {"file": sys.argv[1], "severity": "blocking", "summary": "seeded defect"}
+if sys.argv[1] in witnesses:
+    finding["evidence"] = witnesses[sys.argv[1]]
+inner = json.dumps({"findings": [finding]})
 print(json.dumps({"type": "text", "part": {"text": inner}}))
 ' "$file"
 FAKE

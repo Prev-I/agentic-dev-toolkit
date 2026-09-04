@@ -12,7 +12,7 @@ Review every shell script in the current directory as an independent reviewer.
 Report your findings and nothing else, as a single JSON object on the final
 line, in exactly this form:
 
-{"findings":[{"file":"<file name>","severity":"blocking|material|suggestion","summary":"<one sentence>"}]}
+{"findings":[{"file":"<file name>","severity":"blocking|material|suggestion","summary":"<one sentence>","evidence":"<the exact smallest snippet of code from the file that demonstrates the issue, quoted verbatim>"}]}
 
 Use "blocking" or "material" only for a defect that would cause incorrect
 behavior, data loss, or a security exposure. Use "suggestion" for anything

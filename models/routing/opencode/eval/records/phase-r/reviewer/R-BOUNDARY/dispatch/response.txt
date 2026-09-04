@@ -1,0 +1,17 @@
+I'll review the shell scripts in the current directory.
+## Review findings
+
+**pagination.sh — blocking.** `validate_page_size() { (( $1 >= 0 && $1 <= 100 )); }` interpolates the argument directly into an arithmetic context. Two consequences, both verified:
+
+- **Command execution.** Bash expands array subscripts inside arithmetic evaluation, so a page-size value of `a[$(echo INJECTED >&2)]` executes the embedded command — twice, once per `$1` occurrence — and then *passes* validation with `rc=0`. Page size is normally attacker-controlled query-string input, which makes this a direct RCE path.
+- **Validation bypass.** Non-numeric input is silently coerced rather than rejected: `abc` → 0 → accepted; `0x10` → 16 accepted; `07` is parsed as octal 7. The function reports "valid" for values that are not valid page sizes at all. A numeric-form check (e.g. `[[ $1 =~ ^[0-9]+$ ]]`) must gate the value before any arithmetic touches it.
+
+**authorization.sh — suggestion.** `[[ "$caller" == "$owner" ]]` treats two empty strings as a match, so `read_resource "" "" "$secret"` returns the value. Whether that is reachable depends entirely on callers, so I am not calling it a demonstrated defect, but an authorization primitive is a good place to reject empty identifiers explicitly rather than rely on every caller to do so.
+
+**counter.sh — no finding.** The `flock` usage is correct: the lock file is derived deterministically from the data path, and read-modify-write happens entirely inside the locked child. I ran 50 concurrent increments against a file seeded at 5 and got exactly 56 — no lost updates.
+
+**api.sh — no finding.** JSON is built by `json.dumps`, not string concatenation, so quotes, markup, and non-ASCII are correctly escaped. Only the whitelisted `displayName` field is emitted.
+
+**storage.sh — no finding.** `"$storage" list` executing its argument is the backend-dispatch contract of the function, not an injection; the parameter *is* the command by design.
+
+{"findings":[{"file":"pagination.sh","severity":"blocking","summary":"Untrusted page size is interpolated into an arithmetic context, allowing command execution via array-subscript injection (e.g. 'a[$(cmd)]') and silently accepting non-numeric input such as 'abc' as 0."},{"file":"authorization.sh","severity":"suggestion","summary":"Two empty identifiers compare equal, so an empty caller matches an empty owner and is granted access; the function should reject empty identifiers rather than rely on callers to do so."}]}

@@ -1,0 +1,10 @@
+I'll review the shell scripts in the current directory.
+Reviewed all five scripts, with runtime verification of the two behaviors I was unsure about.
+
+**counter.sh — material.** `increment_counter` does a non-atomic read-modify-write (`n=$(<"$1")` then `printf ... >"$1"`) with no locking. Empirically, 50 concurrent invocations against a file starting at `0` produced `1`, not `50` — 49 lost updates. The truncating redirect also means a concurrent reader can observe an empty file, so the value can be corrupted, not merely stale. Needs `flock` (or an atomic write-temp-then-`mv` under a lock).
+
+**pagination.sh — suggestion.** The regex accepts leading zeros but `(( ))` then interprets them as octal: `08`/`09` trigger `((: value too great for base` and are rejected with stderr noise, and `010` is accepted as 8. Consequence is a false rejection/misparse, not an unsafe acceptance; `10#$1` would fix it.
+
+**api.sh, authorization.sh, storage.sh — no findings.** `api.sh` passes the value as `argv`, not string-interpolated, and `json.dumps` escapes it correctly. `authorization.sh` quotes the right-hand side of `[[ == ]]`, so an owner value cannot act as a glob pattern, and it fails closed with a distinct status. `storage.sh` is an ordinary command-dispatch indirection; executing `$1` is the deliberate contract, not an injection point.
+
+{"findings":[{"file":"counter.sh","severity":"material","summary":"increment_counter performs a non-atomic read-modify-write with no locking, so concurrent invocations lose updates (50 parallel increments from 0 yielded 1) and the truncating redirect can expose an empty file to concurrent readers."},{"file":"pagination.sh","severity":"suggestion","summary":"The digit regex admits leading zeros that the arithmetic context then treats as octal, so '08'/'09' raise an arithmetic error and '010' is read as 8; use 10#$1 to force base 10."}]}

@@ -1,0 +1,29 @@
+{
+  "findings": [
+    {
+      "file": "api.sh",
+      "severity": "blocking",
+      "summary": "The name argument is interpolated into the JSON template without escaping, so a value containing a double quote injects arbitrary JSON fields (demonstrated: an attacker-supplied role:admin key), and backslashes or control characters produce invalid JSON."
+    },
+    {
+      "file": "pagination.sh",
+      "severity": "material",
+      "summary": "The range check uses shell arithmetic with 64-bit wraparound, so 18446744073709551666 wraps to 50 and is accepted as a valid page size, and leading-zero inputs are parsed as octal or raise a base error."
+    },
+    {
+      "file": "authorization.sh",
+      "severity": "material",
+      "summary": "The ownership check fails open on empty principals: calling it with an empty caller and empty owner returns success and prints the value, so a failed owner lookup plus an unauthenticated caller grants access."
+    },
+    {
+      "file": "storage.sh",
+      "severity": "suggestion",
+      "summary": "The storage backend name is executed as a program with no allowlist or existence check, which becomes arbitrary program execution if the value is ever config or request derived."
+    },
+    {
+      "file": "counter.sh",
+      "severity": "suggestion",
+      "summary": "Locking is correct under concurrency, but a corrupted non-numeric counter file is silently reset to 1 rather than reported as an error, and the lock file is never cleaned up."
+    }
+  ]
+}

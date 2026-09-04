@@ -14,21 +14,25 @@ ledger="$workspace/ledger.json"
 ledger_init "$ledger" "$root/manifests/phase-0-budgets.json"
 
 # A fake reviewer that flags the overridden file in every seeded sandbox and
-# stays silent on the clean control. It infers the case from the files present.
+# stays silent on the clean control. It has no identity marker to read — it
+# infers which file (if any) was overridden the same way a real reviewer
+# would: by inspecting the content actually present in its own sandbox.
 cat >"$workspace/opencode-detects" <<'FAKE'
 #!/usr/bin/env bash
 if [[ "${1:-}" == --version ]]; then printf '1.18.27\n'; exit 0; fi
 printf '%s\n' "$*" >>"${REVIEWER_ARGS_SINK:-/dev/null}"
-marker=$(cat .case 2>/dev/null || printf clean)
 printf '{"type":"step_finish","part":{"cost":0.02,"tokens":{"total":300}}}\n'
-case "$marker" in
-  R-CONCURRENCY) file=counter.sh ;;
-  R-AUTH) file=authorization.sh ;;
-  R-API) file=api.sh ;;
-  R-BOUNDARY) file=pagination.sh ;;
-  R-ERROR) file=storage.sh ;;
-  *) printf '%s\n' '{"type":"text","part":{"text":"{\"findings\":[]}"}}'; exit 0 ;;
-esac
+file=""
+if [[ -f counter.sh ]] && ! grep -q flock counter.sh; then file=counter.sh
+elif [[ -f authorization.sh ]] && ! grep -q 'return 3' authorization.sh; then file=authorization.sh
+elif [[ -f api.sh ]] && ! grep -q displayName api.sh; then file=api.sh
+elif [[ -f pagination.sh ]] && ! grep -q '>= 1' pagination.sh; then file=pagination.sh
+elif [[ -f storage.sh ]] && grep -q '2>/dev/null' storage.sh; then file=storage.sh
+fi
+if [[ -z "$file" ]]; then
+  printf '%s\n' '{"type":"text","part":{"text":"{\"findings\":[]}"}}'
+  exit 0
+fi
 python3 -c '
 import json, sys
 inner = json.dumps({"findings": [{"file": sys.argv[1], "severity": "material", "summary": "seeded defect"}]})
@@ -61,19 +65,23 @@ PY
 # The committed scorer — not the adapter — decides the outcome.
 assert_eq 'pass' "$(reviewer_structured_gate "$root/fixtures/reviewer-seeded-defects/oracle.json" "$out/findings.json")"
 
-# A reviewer that misses one defect still yields a healthy run; the scorer blocks it.
+# A reviewer that misses one defect (authorization.sh) still yields a healthy
+# run; the scorer blocks it. Same content-inspection approach, no marker file.
 cat >"$workspace/opencode-misses" <<'FAKE'
 #!/usr/bin/env bash
 if [[ "${1:-}" == --version ]]; then printf '1.18.27\n'; exit 0; fi
-marker=$(cat .case 2>/dev/null || printf clean)
 printf '{"type":"step_finish","part":{"cost":0.02,"tokens":{"total":300}}}\n'
-if [[ "$marker" == R-AUTH || "$marker" == clean ]]; then
-  printf '%s\n' '{"type":"text","part":{"text":"{\"findings\":[]}"}}'; exit 0
+file=""
+if [[ -f counter.sh ]] && ! grep -q flock counter.sh; then file=counter.sh
+elif [[ -f authorization.sh ]] && ! grep -q 'return 3' authorization.sh; then file=authorization.sh
+elif [[ -f api.sh ]] && ! grep -q displayName api.sh; then file=api.sh
+elif [[ -f pagination.sh ]] && ! grep -q '>= 1' pagination.sh; then file=pagination.sh
+elif [[ -f storage.sh ]] && grep -q '2>/dev/null' storage.sh; then file=storage.sh
 fi
-case "$marker" in
-  R-CONCURRENCY) file=counter.sh ;; R-API) file=api.sh ;;
-  R-BOUNDARY) file=pagination.sh ;; R-ERROR) file=storage.sh ;;
-esac
+if [[ -z "$file" || "$file" == authorization.sh ]]; then
+  printf '%s\n' '{"type":"text","part":{"text":"{\"findings\":[]}"}}'
+  exit 0
+fi
 python3 -c '
 import json, sys
 inner = json.dumps({"findings": [{"file": sys.argv[1], "severity": "blocking", "summary": "seeded defect"}]})
@@ -98,6 +106,13 @@ chmod +x "$workspace/opencode-noisy"
 noisy="$workspace/noisy"
 OPENCODE_BIN="$workspace/opencode-noisy" run_reviewer_gate --outdir "$noisy" --ledger "$ledger" || true
 assert_eq 'block' "$(reviewer_structured_gate "$root/fixtures/reviewer-seeded-defects/oracle.json" "$noisy/findings.json")"
+
+# The adapter must never write an identity marker into a sandbox that a real
+# reviewer dispatch would see — it must look exactly like the fixture content.
+for run_dir in "$out" "$miss" "$noisy"; do
+  leaked=$(find "$run_dir" -name '.case' 2>/dev/null || true)
+  [[ -z "$leaked" ]] || fail "adapter leaked a sandbox identity marker: $leaked"
+done
 
 # The adapter must not embed the gate thresholds or the expected id list.
 runner="$root/runtime/opencode-v1-adapter/run-reviewer-gate.sh"

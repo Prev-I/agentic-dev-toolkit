@@ -1,7 +1,13 @@
 {
-  "profile_id": "published-v1-pre-restoration",
-  "source_commit": "19bdcff37f8714e5531ab96448ec094e4f3b439a",
-  "installed_at": null,
-  "opencode_version": "1.18.26",
-  "provenance_ceiling": "Ordinary sessions are attributable only to the profile known to be installed at the time."
+  "profile_id": "v1-restored-2026-09",
+  "source_commit": "0fd2d942dd6d71a7f9fcb5545edc6d815272b6cb",
+  "installed_at": "2026-09-04T10:48:49.505314+02:00",
+  "opencode_version": "1.18.27",
+  "activation_target": "~/.config/opencode/opencode.jsonc",
+  "activation_scope": "user-global",
+  "effective_resolved_routing": null,
+  "effective_routing_evidence": "eval/records/phase-r/effective-routing.json",
+  "canonical": false,
+  "provenance_ceiling": "Ordinary sessions are attributable only to the profile known to be installed at the time.",
+  "global_configuration_contents_committed": false
 }

@@ -89,6 +89,25 @@ if dispatch_extract_json "$prose" >/dev/null 2>&1; then
   fail "accepted unparseable structured output"
 fi
 
+# --- regression: an unpaired double-quote in surrounding prose must not
+# desync extraction and hide the real, well-formed final JSON object.
+# (A real reviewer agent commonly writes English prose like: a value
+# containing a double quote character.) ---
+unpaired="$workspace/unpaired-quote"
+mkdir -p "$unpaired"
+printf 'The field holds a " character mid-sentence, which is not JSON.\n{"findings": ["missing auth check"], "verdict": "issues_found"}\n' \
+  >"$unpaired/response.txt"
+assert_eq 'issues_found' "$(dispatch_extract_json "$unpaired" | python3 -c 'import json,sys; print(json.load(sys.stdin)["verdict"])')"
+
+# --- regression: an earlier, JSON-looking-but-unrelated substring in prose
+# (e.g. an inline code example illustrating a vulnerability) must not be
+# picked up instead of the real final JSON object. ---
+decoy="$workspace/decoy-json"
+mkdir -p "$decoy"
+printf 'Example vulnerable payload: `{"displayName":"%%s"}` is unescaped.\n{"findings": ["xss"], "verdict": "issues_found"}\n' \
+  >"$decoy/response.txt"
+assert_eq 'xss' "$(dispatch_extract_json "$decoy" | python3 -c 'import json,sys; print(json.load(sys.stdin)["findings"][0])')"
+
 # --- error path: transient/external maps to INVALID_ENVIRONMENT ---
 err="$workspace/err"
 if OPENCODE_BIN="$workspace/opencode-error" dispatch_fixture --outdir "$err" --label e \

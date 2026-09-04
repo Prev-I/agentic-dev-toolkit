@@ -175,38 +175,30 @@ import json
 import sys
 
 text = open(sys.argv[1], encoding="utf-8").read()
-candidates = []
-depth = 0
-start = None
-in_string = False
-escaped = False
-for index, char in enumerate(text):
-    if in_string:
-        if escaped:
-            escaped = False
-        elif char == "\\":
-            escaped = True
-        elif char == '"':
-            in_string = False
-        continue
-    if char == '"':
-        in_string = True
-    elif char == "{":
-        if depth == 0:
-            start = index
-        depth += 1
-    elif char == "}":
-        if depth:
-            depth -= 1
-            if depth == 0 and start is not None:
-                candidates.append(text[start:index + 1])
-for candidate in reversed(candidates):
+
+# A hand-rolled string/escape scanner desyncs permanently on a single
+# unpaired double-quote in surrounding prose (common in real model output:
+# an English sentence quoting a term, or an inline malformed-JSON example).
+# json.JSONDecoder().raw_decode implements real JSON string/escape/nesting
+# semantics via the stdlib parser itself, so it cannot be fooled by prose.
+# Try decoding at every "{" position; keep the LAST one that succeeds.
+decoder = json.JSONDecoder()
+best = None
+idx = 0
+while True:
+    brace = text.find("{", idx)
+    if brace == -1:
+        break
     try:
-        json.dump(json.loads(candidate), sys.stdout, indent=2)
+        obj, end = decoder.raw_decode(text, brace)
+        best = obj
+        idx = end
     except json.JSONDecodeError:
-        continue
-    sys.stdout.write("\n")
-    raise SystemExit(0)
-raise SystemExit("no parseable JSON object in response")
+        idx = brace + 1
+
+if best is None:
+    raise SystemExit("no parseable JSON object in response")
+json.dump(best, sys.stdout, indent=2)
+sys.stdout.write("\n")
 PY
 }

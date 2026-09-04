@@ -24,7 +24,7 @@
     "opus_dispatches": 2,
     "sonnet_dispatches": 2,
     "total_dispatches": 4,
-    "deviation_from_3_pair_default": "Repository decision doc section 24 (sequential scenario stopping) runs build-feature and build-bugfix first and treats build-refactor as conditional, not initial. build-refactor also has no fixture content. Both reasons independently justify a 2-pair initial freeze rather than 3."
+    "deviation_from_3_pair_default": "Deviates from the task brief's own suggested 3-pair shape, not from the repository's design: the governing decision doc has no 3-pair default. Its own sections 20.2 and 24 already list build-feature/build-bugfix as Required and build-refactor as Conditional, run only if the first two do not produce a decision. build-refactor also has no fixture content yet."
   },
   "invalid_attempt_replacement_rule": "pair-level: if either arm of a pair is classified INVALID_ENVIRONMENT, the entire pair is discarded and replaced with a fresh pair (both arms redispatched) to preserve paired comparability, not just the affected arm.",
   "failure_taxonomy": ["INVALID_ENVIRONMENT", "VALID_CONTROLLER_FAILURE", "FIXTURE_DEFECT"],

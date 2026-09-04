@@ -1,0 +1,35 @@
+{
+  "timestamp": "2026-09-04T11:49:08.446079+02:00",
+  "label": "compaction-invariants",
+  "attempt": 1,
+  "routing_profile_id": "v1-restored-2026-09",
+  "routing_profile_commit": "4b0af8dd001363b16ec1854ccfcdb732f6ac3a9b",
+  "runtime_version": "1.18.27",
+  "eval_runner_version": "phase-r-dispatch-v1",
+  "environment": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+  "dispatch_target": "agent:compaction",
+  "variant": "resolved",
+  "timeout_seconds": 900,
+  "exit_status": 0,
+  "classification": "OK",
+  "failure_class": null,
+  "provider_error_text": null,
+  "provider_status_code": null,
+  "observed_cost": 0.011198,
+  "derived_credits": 1.1198,
+  "normalized_steady_state_cost": null,
+  "tokens": {
+    "total": 3792,
+    "input": 3611,
+    "output": 74,
+    "reasoning": 107,
+    "cache": {
+      "write": 0,
+      "read": 0
+    }
+  },
+  "wall_clock_ms": 17588,
+  "retry_count": 0,
+  "raw_evidence": "raw.jsonl",
+  "decides_gate_outcome": false
+}

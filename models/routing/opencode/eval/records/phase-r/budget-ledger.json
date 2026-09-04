@@ -202,6 +202,13 @@
       "label": "explore-dependency-chain",
       "provider": "",
       "credits": 1.6219750000000002
+    },
+    {
+      "timestamp": "2026-09-04T11:49:08.298986+02:00",
+      "account": "evaluation",
+      "label": "compaction-invariants",
+      "provider": "",
+      "credits": 1.1198
     }
   ]
 }

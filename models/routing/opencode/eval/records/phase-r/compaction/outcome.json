@@ -1,0 +1,17 @@
+{
+  "fixture": "compaction-invariants",
+  "target": {"role": "compaction", "model": "github-copilot/gpt-5.6-terra", "variant": "medium"},
+  "invariants_preserved": {
+    "INV-RUNTIME": true,
+    "INV-BREAKGLASS": true,
+    "INV-BUDGET": true,
+    "INV-FAILURE": true
+  },
+  "preserved_count": 4,
+  "required_count": 4,
+  "contradictions": [],
+  "allowed_contradictions": 0,
+  "verdict": "pass",
+  "gate_weakened_for_cost_or_latency": false,
+  "gate_verdict_source": "eval/scoring/compaction.sh::compaction_structured_gate (unmodified)"
+}

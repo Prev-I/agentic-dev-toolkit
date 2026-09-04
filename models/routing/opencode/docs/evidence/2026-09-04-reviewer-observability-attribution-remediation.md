@@ -155,11 +155,16 @@ own instruction to say so rather than hide it.
    No `evidence` field at all: treated as non-matching, fails closed.
 
 4. **Non-witness cases (R-AUTH, R-CONCURRENCY)** keep file+severity
-   attribution — justified specifically because `fixture-integrity-test.sh`
-   mechanically proves each of these files carries exactly one known
-   material defect and none of the other 9 detector classes apply. This
-   does **not** protect against a hallucinated, unrelated finding; that
-   residual risk is real and explicitly not claimed to be closed.
+   attribution. Stated precisely (corrected after independent review, see
+   [Independent review findings](#independent-review-findings)):
+   `fixture-integrity-test.sh` proves these files trigger none of the 8
+   detectors in `FIXTURE_KNOWN_CHECKS` — but only ONE detector each is
+   currently defined for `authorization.sh`/`counter.sh`, so this means
+   "no other KNOWN defect class has a detector here yet", not "nothing
+   else could possibly be wrong". This does **not** protect against a
+   hallucinated, unrelated finding; that residual risk is real, weaker
+   than for the witness-bearing files, and explicitly not claimed to be
+   closed.
 
 ### Adversarial test matrix (per Section 10's exact requirement list)
 
@@ -183,14 +188,21 @@ requirement), reconstructed from the real dispatch's
 quoting the regex/arithmetic guard, zero mention of the `>= 0` boundary —
 is asserted **NOT DETECTED**. Confirmed.
 
-**Known, accepted, explicitly-asserted residual limitation**: a finding
-whose evidence quotes the *entire* line rather than a targeted snippet
-legitimately contains the witness too, since it's a genuine substring of
-that line in the vulnerable sandbox. A dedicated test asserts this exact
-scenario is currently `detected` — not hidden, not silently tolerated.
-Closing it fully would require restructuring the fixture files so each
-concern occupies a separately-quotable region (e.g. multi-line functions),
-which is out of scope for this task.
+**Known, accepted, explicitly-asserted residual limitation**, widened
+after independent review (see
+[Independent review findings](#independent-review-findings)): a finding
+whose evidence quotes the *entire* line legitimately contains the witness
+too — but so can a **sub-line** quote about a genuinely different concern
+that happens to overlap the witness's position, since every fixture file
+is a single line packing multiple concerns closely together. Two dedicated
+tests assert this: the whole-line case (R-BOUNDARY), and a reconstructed
+sub-line coincidental match (R-API: a hallucinated JSON-injection finding
+whose natural targeted quote, `json.dumps({"name": ...})`, happens to
+contain the witness `{"name"`). Both are currently `detected` — not
+hidden, not silently tolerated. Closing this fully would require
+restructuring the fixture files so each concern occupies a
+separately-quotable region (e.g. multi-line functions), out of scope for
+this task.
 
 ## Admission gate: scorer soundness added
 
@@ -213,13 +225,95 @@ never pass. Adversarially verified: a witness no longer present in its
 override, and a witness that leaked into `clean/`, both correctly refuse
 admission, with zero sandbox created and zero credits spent.
 
+## Independent review findings
+
+Before finalizing, the full branch was sent to an adversarial independent
+review (a fresh agent with no access to earlier drafts). It reproduced the
+contract check, the witness derivation, and the admission gate itself
+(mutating scratch copies, not the real fixture), and probed the scorer
+with hand-built findings rather than trusting the tests. It found six real
+issues, all fixed before this document was finalized:
+
+```text
+Moderate -- clean/api_contract.sh used Python's `assert`, stripped
+    entirely under PYTHONOPTIMIZE=1/-O, silently defeating the contract
+    check (and a plausible lint finding in its own right, risking a false
+    positive in the zero-tolerance clean control). Fixed: explicit
+    sys.exit(0/1), verified PYTHONOPTIMIZE=1 still detects the violation.
+
+Moderate -- R-ERROR's witness ("2>/dev/null") anchored the non-causal half
+    of its mutation. storage.sh's actual seeded defect is the RETURN-CODE
+    masking ("|| printf '[]'"); a finding purely about stderr suppression,
+    explicitly disclaiming the return-code issue, was wrongly credited.
+    Fixed: witness re-anchored to "|| printf '[]", the causal substring.
+    (This fix also exposed and fixed a real bash quoting bug in
+    reviewer-runner-test.sh's fake dispatch scripts, unrelated to the
+    scorer itself.)
+
+Moderate -- the R-AUTH/R-CONCURRENCY file+severity justification was
+    overstated ("none of the other 9 detector classes apply" -- both the
+    count and the framing were wrong: only ONE detector is defined for
+    each of these files, so integrity proves "no other KNOWN class has a
+    detector yet", not "nothing else could be wrong"). Corrected wording
+    throughout; no behavior change, since the actual scoring rule was
+    already file+severity for these two.
+
+Moderate -- reviewer.sh's load_witness silently returned None on any read
+    failure (missing/malformed ground-truth.json), identical to "this case
+    has no witness" -- so witness enforcement silently vanished for EVERY
+    case whenever oracle.json was used detached from its fixture tree
+    (reproduced: 5 fully hallucinated findings scored "pass" against a
+    detached oracle.json copy, "block" against the real one, same
+    findings, no diagnostic). Fixed: an UNREADABLE sentinel distinguishes
+    "genuinely no witness" from "could not determine", and the latter now
+    fails closed with a loud stderr warning.
+
+Low -- evidence that is present but not a string (e.g. a list) could match
+    a witness via Python's implicit str() containing the substring. Fixed:
+    requires isinstance(evidence, str).
+
+Low -- an empty-string witness ("witness": "") is a substring of every
+    string in Python, so it would match any evidence at all; the admission
+    gate silently skipped validating it instead of rejecting it. Fixed:
+    routed through the same UNREADABLE/fail-closed path in the scorer, and
+    treated as an integrity violation (refuses admission) in the gate.
+```
+
+The review's broader framing correction, also incorporated: the original
+"3/5 sound, 2/5 open" scorecard understated how the 3 witness-bearing
+cases actually differ. After the fixes above, the honest scorecard is:
+
+```text
+R-BOUNDARY: solid -- witness-anchored, no coincidental-match failure mode
+            found (the guard and the boundary comparison are adjacent but
+            distinguishable substrings)
+R-ERROR:    solid, as of the witness re-anchoring fix above -- was
+            previously anchored to the wrong half of its own mutation
+R-API:      witness-anchored and causally correct, but demonstrably
+            defeated by the most natural targeted quote for a plausible
+            unrelated concern (JSON-injection) in the same line -- a real,
+            disclosed, unresolved gap, not claimed to be solid
+R-AUTH, R-CONCURRENCY: open, unchanged -- file+severity only, weaker
+            justification than originally stated (see above)
+```
+
+Still not `REVIEWER_SCORING_ARCHITECTURE_BLOCKED`: two cases are now
+genuinely solid, one is a real, disclosed, narrower gap rather than an
+unsolved problem, and two are honestly reported as open. Every issue the
+review found was a bug in this task's own implementation or documentation,
+not evidence that the underlying design is unsound.
+
 ## Reviewer fixture/scorer revision
 
 ```text
-R-API observability fix:       913e337
-Admission-gate wiring (R-API): 913e337
-Witness attribution fix:       befaa26
-Admission-gate wiring (witness): 59bcacf
+R-API observability fix:            913e337
+Admission-gate wiring (R-API):      913e337
+Witness attribution fix:            befaa26
+Admission-gate wiring (witness):    59bcacf
+R-ERROR witness correction:         9922d3e
+api_contract.sh assert->exit fix:   74feae6
+Scorer/admission fail-open fixes:   bbe9af2
+Documentation accuracy corrections: d85756b
 ```
 
 ## Historical Reviewer evidence
@@ -295,22 +389,36 @@ scorer:
                                now also: evidence)
     deterministic attribution design: witness-substring containment for
                                addition/substitution mutations
-    per-seed result:
-        R-API:         WITNESS-ANCHORED, sound (verified adversarially)
-        R-BOUNDARY:    WITNESS-ANCHORED, sound (verified adversarially,
-                        including the exact historical regression)
-        R-ERROR:       WITNESS-ANCHORED, sound (verified adversarially)
+    per-seed result (corrected after independent review -- see
+                     "Independent review findings"):
+        R-BOUNDARY:    SOLID -- witness-anchored, verified adversarially
+                        including the exact historical regression, no
+                        coincidental-match failure mode found
+        R-ERROR:       SOLID, as of the witness re-anchoring fix -- was
+                        initially anchored to the non-causal half of its
+                        own mutation (independent review finding, fixed)
+        R-API:         WITNESS-ANCHORED but DEMONSTRABLY DEFEATABLE -- a
+                        plausible unrelated finding's natural targeted
+                        quote coincidentally overlaps the witness (verified
+                        adversarially, disclosed explicitly, not claimed
+                        solid)
         R-AUTH:        file+severity only -- no witness exists (pure
                         removal); residual hallucination risk explicit,
-                        not closed
+                        not closed; justification narrower than originally
+                        stated (only 1 detector defined for this file)
         R-CONCURRENCY: file+severity only -- no witness exists (pure
                         removal + one non-meaningful incidental token);
-                        residual hallucination risk explicit, not closed
-    single-wrong-finding regression result: FIXED for 3/5 seeds, OPEN
-                        (documented, not hidden) for 2/5
-    adversarial tests: PASS (full required matrix, all 5 seeds covered)
-    architecture-blocked: NO (partial, principled soundness achieved;
-                        not a weak universal approximation)
+                        same narrower justification as R-AUTH
+    single-wrong-finding regression result: FIXED and SOLID for 2/5 seeds
+                        (R-BOUNDARY, R-ERROR), a real but narrower gap for
+                        1/5 (R-API), OPEN (documented, not hidden) for 2/5
+                        (R-AUTH, R-CONCURRENCY)
+    adversarial tests: PASS (full required matrix, all 5 seeds covered,
+                        plus the coincidental-match case independent review
+                        surfaced)
+    architecture-blocked: NO (2 cases genuinely solid, 1 case a disclosed
+                        narrower gap rather than unsolved, 2 cases honestly
+                        reported open; not a weak universal approximation)
 
 admission gate:
     fixture integrity: PASS

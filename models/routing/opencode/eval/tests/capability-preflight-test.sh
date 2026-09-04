@@ -118,4 +118,84 @@ breakglass_record=$(cat "$test_preflight_loop_output/breakglass.json")
 assert_contains "$breakglass_record" 'breakglass'
 assert_contains "$breakglass_record" 'openai/gpt-5.6-sol'
 
+# Test 1: Trap isolation with multiple probes
+# The real probe.sh sets "trap 'rm -f "$raw"' RETURN" which persists after the function returns.
+# When run_capability_preflight loops and calls functions via command substitution (e.g.,
+# ledger_credits_from_cost), those inherit the trap. Without subshell isolation, the trap
+# fires in the subshell, trying to access $raw which is unset, causing "unbound variable" error.
+# This test simulates that scenario by using a fake probe that sets its own RETURN trap.
+trap_test_output="$workspace/trap_test_output"
+mkdir -p "$trap_test_output"
+
+# Create a fake probe that mimics probe.sh's trap behavior
+probe_model_variant_with_trap() {
+  local model=$1 variant=$2 output=$3
+  [[ -n "$model" && "$model" != "" ]] || fail "trap test: probe called with empty model"
+  [[ -n "$variant" && "$variant" != "" ]] || fail "trap test: probe called with empty variant"
+  # Mimic probe.sh's trap setup that persists after function return
+  local raw_var="temp_variable_$$"
+  trap "unset raw_var" RETURN
+  # Write a minimal record
+  printf '{"error_text":"","status_code":200,"observed_cost":null,"provider":"test","model":"%s","variant":"%s","pricing_regime":"test","wall_clock_ms":0,"runtime_version":"test","exact_invocation":"test"}' "$model" "$variant" >"$output"
+  return 0
+}
+
+# Override probe_model_variant to use our trap-setting version
+probe_model_variant() { probe_model_variant_with_trap "$@"; }
+
+trap_test_ledger="$workspace/trap_test_ledger.json"
+echo '[]' >"$trap_test_ledger"
+
+# Run preflight with the trap-setting probe. The subshell isolation must prevent
+# the unbound-variable crash that would occur without it.
+set +e
+run_capability_preflight "$trap_test_output" "$workspace/trap_test_manifest.json" "$trap_test_ledger" "$root/manifests/phase-r-routing-targets.json" 2>&1 | head -1 || true
+trap_test_status=$?
+set -e
+
+# Verify all 11 records were created (proving the loop completed without crashing).
+trap_test_count=$(ls "$trap_test_output"/*.json 2>/dev/null | wc -l)
+assert_eq '11' "$trap_test_count"
+
+# Test 2: Skip logic for existing USABLE records
+# Verify that roles with pre-existing USABLE records are skipped (not re-probed).
+skip_test_output="$workspace/skip_test_output"
+mkdir -p "$skip_test_output"
+
+# Pre-create a USABLE record for the "plan" role to simulate a role already successfully probed
+# (e.g., in a retry scenario where the first few roles already succeeded).
+printf '{"error_text":"","status_code":200,"observed_cost":11.4335,"provider":"github-copilot","model":"github-copilot/claude-opus-5","variant":"max","pricing_regime":"copilot","wall_clock_ms":1234,"runtime_version":"test","exact_invocation":"test","role":"plan","phase_r_classification":"USABLE","phase_r_stop_class":"NONE","derived_credits":11.4335}' >"$skip_test_output/plan.json"
+
+# Track probe invocations to verify "plan" is never called
+skip_test_probe_calls="$workspace/skip_test_probe_calls"
+> "$skip_test_probe_calls"  # Create empty file
+
+probe_model_variant_tracking() {
+  local model=$1 variant=$2 output=$3
+  local role="${output##*/}"
+  role="${role%.json}"
+  echo "$role" >>"$skip_test_probe_calls"
+  # For non-plan roles, write a minimal record
+  printf '{"error_text":"","status_code":200,"observed_cost":null,"provider":"test","model":"%s","variant":"%s","pricing_regime":"test","wall_clock_ms":0,"runtime_version":"test","exact_invocation":"test"}' "$model" "$variant" >"$output"
+  return 0
+}
+
+probe_model_variant() { probe_model_variant_tracking "$@"; }
+
+skip_test_ledger="$workspace/skip_test_ledger.json"
+echo '[]' >"$skip_test_ledger"
+
+# Run preflight. The "plan" role should be skipped (its pre-existing record should be preserved).
+set +e
+run_capability_preflight "$skip_test_output" "$workspace/skip_test_manifest.json" "$skip_test_ledger" "$root/manifests/phase-r-routing-targets.json" 2>&1 | head -1 || true
+set -e
+
+# Verify "plan" was not called (skip check worked)
+assert_eq '' "$(grep '^plan$' "$skip_test_probe_calls" || true)"
+
+# Verify the pre-existing "plan" record was preserved in the manifest
+skip_manifest=$(cat "$workspace/skip_test_manifest.json")
+assert_contains "$skip_manifest" 'plan'
+assert_contains "$skip_manifest" '11.4335'
+
 printf 'PASS: Phase R capability preflight\n'

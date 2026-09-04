@@ -28,8 +28,21 @@ run_capability_preflight() {
     IFS=' ' read -r role model variant <<<"$line"
     [[ -n "${role:-}" ]] || continue
     record="$output_dir/${role}.json"
+    # Skip re-probing roles that already have USABLE records to avoid double-charging.
+    if [[ -f "$record" ]] && python3 -c '
+import json, sys
+try:
+    data = json.load(open(sys.argv[1], encoding="utf-8"))
+except (OSError, json.JSONDecodeError):
+    raise SystemExit(1)
+raise SystemExit(0 if data.get("phase_r_classification") == "USABLE" else 1)
+' "$record"; then
+      continue
+    fi
+    # Run probe in a subshell to isolate the probe.sh RETURN trap, preventing it from
+    # leaking into subsequent command substitutions in this loop (e.g., ledger_credits_from_cost).
     set +e
-    probe_model_variant "$model" "$variant" "$record"
+    ( probe_model_variant "$model" "$variant" "$record" )
     status=$?
     set -e
     if (( status == 0 )); then

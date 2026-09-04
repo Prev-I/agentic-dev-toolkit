@@ -70,7 +70,13 @@ for line in open(os.environ["RAW"], encoding="utf-8", errors="replace"):
     if event.get("type") == "text":
         texts.append(part.get("text", ""))
     elif event.get("type") == "step_finish":
-        cost = part.get("cost")
+        # cost is per-step and must be summed across every step_finish event
+        # in a multi-turn dispatch; tokens.total/cache are already a
+        # cumulative running snapshot for the session, so the last event's
+        # value is the correct total — do not sum tokens.
+        step_cost = part.get("cost")
+        if step_cost is not None:
+            cost = (cost or 0) + step_cost
         tokens = part.get("tokens")
     elif event.get("type") == "error":
         data = event.get("error", {}).get("data", {})

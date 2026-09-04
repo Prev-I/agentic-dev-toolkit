@@ -60,6 +60,18 @@ if [[ "${1:-}" == --version ]]; then printf '1.18.27\n'; exit 0; fi
 printf '{"type":"step_finish","part":{"cost":0.1,"tokens":{"total":10}}}\n'
 FAKE
 
+# a real multi-turn dispatch emits one step_finish per turn: cost is a
+# per-step increment (must be summed), tokens.total/cache is already a
+# cumulative running snapshot (the last event's value is the true total).
+make_fake opencode-multistep <<'FAKE'
+#!/usr/bin/env bash
+if [[ "${1:-}" == --version ]]; then printf '1.18.27\n'; exit 0; fi
+printf '{"type":"step_finish","part":{"cost":0.1,"tokens":{"total":100}}}\n'
+printf '{"type":"step_finish","part":{"cost":0.2,"tokens":{"total":250}}}\n'
+printf '{"type":"step_finish","part":{"cost":0.15,"tokens":{"total":420}}}\n'
+printf '%s\n' '{"type":"text","part":{"text":"{\"ordered_path\":[\"entry\"],\"reported_hops\":1}"}}'
+FAKE
+
 # --- success path, provenance, raw evidence preservation ---
 out="$workspace/ok"
 DISPATCH_ARGS_SINK="$workspace/args.txt" OPENCODE_BIN="$workspace/opencode-ok" \
@@ -78,6 +90,21 @@ for field in routing_profile_commit runtime_version eval_runner_version label at
   assert_contains "$(<"$out/dispatch.json")" "\"$field\""
 done
 assert_eq '25' "$(ledger_spent "$ledger" evaluation)"
+
+# --- regression: cost sums across step_finish events, tokens takes the
+# last (cumulative) snapshot rather than summing ---
+multistep="$workspace/multistep"
+OPENCODE_BIN="$workspace/opencode-multistep" dispatch_fixture --outdir "$multistep" \
+  --label multistep --prompt-file "$workspace/prompt.txt" --agent explore \
+  --ledger "$ledger" --account evaluation \
+  || fail "multi-step dispatch reported failure"
+assert_eq 'OK' "$(dispatch_classification "$multistep")"
+observed_cost=$(python3 -c 'import json; print(json.load(open("'"$multistep"'/dispatch.json"))["observed_cost"])')
+derived_credits=$(python3 -c 'import json; print(json.load(open("'"$multistep"'/dispatch.json"))["derived_credits"])')
+tokens_total=$(python3 -c 'import json; print(json.load(open("'"$multistep"'/dispatch.json"))["tokens"]["total"])')
+assert_eq '0.45000000000000007' "$observed_cost"
+assert_eq '45.00000000000001' "$derived_credits"
+assert_eq '420' "$tokens_total"
 
 # --- structured extraction and parsing failure ---
 assert_eq '1' "$(dispatch_extract_json "$out" | python3 -c 'import json,sys; print(json.load(sys.stdin)["reported_hops"])')"

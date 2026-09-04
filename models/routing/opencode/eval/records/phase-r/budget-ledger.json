@@ -195,6 +195,13 @@
       "label": "reviewer-R-BOUNDARY-retry",
       "provider": "",
       "credits": 6.391774999999999
+    },
+    {
+      "timestamp": "2026-09-04T11:47:49.530044+02:00",
+      "account": "evaluation",
+      "label": "explore-dependency-chain",
+      "provider": "",
+      "credits": 1.6219750000000002
     }
   ]
 }

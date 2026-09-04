@@ -198,4 +198,48 @@ skip_manifest=$(cat "$workspace/skip_test_manifest.json")
 assert_contains "$skip_manifest" 'plan'
 assert_contains "$skip_manifest" '11.4335'
 
+# Test 3: stdin-consumption / process-substitution hazard.
+# The original loop fed "while read" directly from "< <(preflight_targets ...)",
+# sharing fd 0 with every command the loop body invokes. probe_model_variant
+# execs the real opencode CLI without redirecting its stdin; if that CLI reads
+# or peeks at stdin at all, it silently steals bytes from the SAME pipe the
+# loop is reading its "role model variant" lines from, causing the loop to see
+# EOF early and stop -- cleanly, with no error and no crash. This is exactly
+# the symptom observed against the live CLI (2 of 11 roles processed, then a
+# silent stop). The fix drains preflight_targets into an array with mapfile
+# before the loop begins, so no loop-body command can ever share its pipe.
+# This test simulates a stdin-peeking CLI with a fake probe that reads one
+# line from stdin (mimicking a real CLI's stdin check) before writing its record.
+stdin_test_output="$workspace/stdin_test_output"
+mkdir -p "$stdin_test_output"
+
+probe_model_variant_stdin_reader() {
+  local model=$1 variant=$2 output=$3
+  # Simulate a CLI that peeks at / consumes stdin without redirecting it away,
+  # exactly like a real "opencode run" invocation that does not redirect its
+  # child's stdin. If run_capability_preflight's loop still shares fd 0 with
+  # this call (i.e. the mapfile fix regressed), this read steals a line meant
+  # for the loop's own "role model variant" parsing.
+  read -r _ <&0 || true
+  printf '{"error_text":"","status_code":200,"observed_cost":null,"provider":"test","model":"%s","variant":"%s","pricing_regime":"test","wall_clock_ms":0,"runtime_version":"test","exact_invocation":"test"}' "$model" "$variant" >"$output"
+  return 0
+}
+
+probe_model_variant() { probe_model_variant_stdin_reader "$@"; }
+
+stdin_test_ledger="$workspace/stdin_test_ledger.json"
+echo '[]' >"$stdin_test_ledger"
+
+set +e
+run_capability_preflight "$stdin_test_output" "$workspace/stdin_test_manifest.json" "$stdin_test_ledger" "$root/manifests/phase-r-routing-targets.json" 2>&1 | head -1 || true
+set -e
+
+# All 11 records must exist -- none silently skipped because a probe call
+# stole lines from the loop's own input pipe.
+stdin_test_count=$(ls "$stdin_test_output"/*.json 2>/dev/null | wc -l)
+assert_eq '11' "$stdin_test_count"
+
+stdin_manifest=$(cat "$workspace/stdin_test_manifest.json")
+assert_contains "$stdin_manifest" '"missing_roles": []'
+
 printf 'PASS: Phase R capability preflight\n'

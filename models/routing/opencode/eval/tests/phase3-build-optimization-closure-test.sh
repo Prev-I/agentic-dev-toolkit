@@ -53,10 +53,18 @@ assert abs(sol_spent - 94.038) < 1e-6
 
 # --- the closure document actually cites these same figures (not merely
 # consistent with them by coincidence) ---
-grep -q "289.01" "$doc" || fail "closure doc missing Phase-R evaluation figure"
-grep -q "349.94" "$doc" || fail "closure doc missing Phase-R recovery figure"
-grep -q "76.83485" "$doc" || fail "closure doc missing Opus-vs-Sonnet spend figure"
+grep -q "289.01 / 100" "$doc" || fail "closure doc missing Phase-R evaluation cap+spend"
+grep -q "349.94 / 250" "$doc" || fail "closure doc missing Phase-R recovery cap+spend"
+grep -q "76.83485 / 158" "$doc" || fail "closure doc missing Opus-vs-Sonnet cap+spend"
 grep -q "94.038" "$doc" || fail "closure doc missing Opus-vs-Sol spend figure"
+grep -q "264" "$doc" || fail "closure doc missing Opus-vs-Sol cap figure"
+breached_count=$(grep -c "BREACHED" "$doc" || true)
+[[ "$breached_count" -ge 2 ]] || fail "closure doc must record BOTH historical budgets as BREACHED"
+keep_opus_count=$(grep -c "COMPLETE, KEEP_OPUS" "$doc" || true)
+[[ "$keep_opus_count" -ge 2 ]] || fail "closure doc must record BOTH Build experiments as COMPLETE, KEEP_OPUS"
+grep -q "claude-opus-5" "$doc" || fail "closure doc missing the Build model ID"
+grep -q "gpt-5.6-sol" "$doc" || fail "closure doc missing the Reviewer model ID"
+grep -q "STOPPED" "$doc" || fail "closure doc must record proactive optimization as STOPPED"
 
 # --- effective production routing really is what the closure claims is
 # unchanged -- Build Opus high, Reviewer Sol high ---
@@ -80,13 +88,15 @@ grep -q "NOT_TRIGGERED" "$doc" || fail "closure doc must record Reviewer inversi
 
 # --- no production routing or evaluation-infrastructure file was touched by
 # this closure (documentation/status only) ---
+# git diff --name-only always prints repo-root-relative paths regardless of
+# -C or cwd -- these patterns must match that, not the eval/ subtree.
 changed=$(git -C "$root/.." diff --name-only main)
 for path in \
-  'profiles/' \
-  'opencode.jsonc' \
-  'eval/fixtures/' \
-  'eval/scoring/' \
-  'eval/runtime/' \
+  'models/routing/opencode/profiles/' \
+  'models/routing/opencode/opencode.jsonc' \
+  'models/routing/opencode/eval/fixtures/' \
+  'models/routing/opencode/eval/scoring/' \
+  'models/routing/opencode/eval/runtime/' \
   '.opencode/agents/'; do
   echo "$changed" | grep -q "^$path" && fail "closure touched non-documentation path: $path"
 done

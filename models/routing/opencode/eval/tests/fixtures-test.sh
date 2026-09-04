@@ -56,4 +56,46 @@ print(text.replace(" 2>/dev/null || printf \x27[]\\n\x27;", ";"), end="")
 ' "$error_storage")
 assert_eq "$(<"$clean_storage")" "$error_without_defect"
 
+# I2 fixture repair: cases/R-API/api.sh and cases/R-BOUNDARY/pagination.sh were
+# found still carrying the OLD pre-repair vulnerable patterns that
+# clean/{api.sh,pagination.sh} had already been fixed away from (commit
+# a96c0ce fixed clean/ only; the case override files, being self-contained,
+# were never repaired). Each override must differ from its repaired clean/
+# counterpart by nothing except its own seeded defect (field rename for
+# R-API, zero-boundary for R-BOUNDARY) — otherwise the case is testing a
+# reintroduced generic vulnerability instead of the seeded ground truth.
+clean_api="$root/fixtures/reviewer-seeded-defects/clean/api.sh"
+case_api="$root/fixtures/reviewer-seeded-defects/cases/R-API/api.sh"
+assert_file "$clean_api"
+assert_file "$case_api"
+bash -n "$clean_api"
+bash -n "$case_api"
+assert_contains "$(<"$clean_api")" 'json.dumps'
+assert_contains "$(<"$case_api")" 'json.dumps'
+api_diff=$(diff "$clean_api" "$case_api" || true)
+assert_contains "$api_diff" '"name"'
+api_without_defect=$(python3 -c '
+import sys
+text = open(sys.argv[1], encoding="utf-8").read()
+print(text.replace("\"name\"", "\"displayName\""), end="")
+' "$case_api")
+assert_eq "$(<"$clean_api")" "$api_without_defect"
+
+clean_pagination="$root/fixtures/reviewer-seeded-defects/clean/pagination.sh"
+case_pagination="$root/fixtures/reviewer-seeded-defects/cases/R-BOUNDARY/pagination.sh"
+assert_file "$clean_pagination"
+assert_file "$case_pagination"
+bash -n "$clean_pagination"
+bash -n "$case_pagination"
+assert_contains "$(<"$clean_pagination")" '=~ ^[0-9]+$'
+assert_contains "$(<"$case_pagination")" '=~ ^[0-9]+$'
+pagination_diff=$(diff "$clean_pagination" "$case_pagination" || true)
+assert_contains "$pagination_diff" '>= 0'
+pagination_without_defect=$(python3 -c '
+import sys
+text = open(sys.argv[1], encoding="utf-8").read()
+print(text.replace(">= 0 &&", ">= 1 &&"), end="")
+' "$case_pagination")
+assert_eq "$(<"$clean_pagination")" "$pagination_without_defect"
+
 printf 'PASS: quality fixtures\n'

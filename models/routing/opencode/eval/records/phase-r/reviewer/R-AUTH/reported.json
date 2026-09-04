@@ -1,0 +1,9 @@
+{
+  "findings": [
+    {
+      "file": "authorization.sh",
+      "severity": "blocking",
+      "summary": "read_resource takes caller and owner but never compares them, returning the resource value to any caller regardless of ownership."
+    }
+  ]
+}

@@ -10,9 +10,10 @@ records that the explicit `github-copilot/claude-opus-4.6` and
 `github-copilot/claude-sonnet-4.6` IDs were not resolvable in the audited
 OpenCode V1 runtime. This is runtime capability evidence, not a routing change.
 
-`github-copilot/gpt-5.3-codex` resolves in discovery at the recorded capability
-check. Moving away from Codex is an explicit migration-risk decision, not a
-claim that Codex is retired or unavailable.
+`github-copilot/gpt-5.3-codex` resolved in discovery at the recorded capability
+check. Moving away from Codex — including the reviewer role, previously part
+of the Codex family and now routed to GPT-5.6 Sol on Copilot — was an explicit
+migration-risk decision, not a claim that Codex was retired or unavailable.
 
 Evidence has a strict hierarchy: documentation and policy provide candidate
 information; `opencode models` provides a discovery/resolution signal; a
@@ -22,18 +23,28 @@ state, not runtime capability state.
 
 ## Model Family Assignments
 
-Two model families divide the workload by cognitive profile:
+Four model families divide the workload by cognitive profile:
 
 | Family | Strengths | Assigned Roles |
 |--------|-----------|----------------|
-| **Opus** (claude-opus-4.6) | Deep reasoning, nuanced code generation, architectural judgment | plan, build, general |
-| **Codex** (gpt-5.3-codex) | Fast retrieval, broad pattern matching, efficient summarization | explore, scout, reviewer |
+| **Claude Opus 5** | Deep reasoning, nuanced code generation, architectural judgment | plan, build |
+| **GPT-5.6 Terra** | Efficient bounded execution and summarization | general, compaction |
+| **GPT-5.6 Luna** | Fast retrieval and broad pattern matching | explore, scout, title, summary |
+| **GPT-5.6 Sol** | Deep analytical review and escalation | reviewer (Copilot), expert and breakglass (direct OpenAI) |
+
+Role-to-model assignment lives in `opencode.jsonc`. This document assigns work
+to roles; it never assigns a model.
 
 ### Why different families for different jobs
 
 Placing the reviewer on a separate model family from the implementers (build, general) is a design
 heuristic intended to introduce a more independent analytical perspective. It may reduce the risk of
 shared blind spots, but it does not guarantee better review quality.
+
+Reviewer and Expert both run GPT-5.6 Sol, on different providers and at
+different reasoning efforts. Provider diversity is operational diversity, not
+cognitive independence; this correlated-reasoning risk is tracked as
+`R-EXPERT-CORRELATED-REASONING`.
 
 ## Role Descriptions
 
@@ -60,12 +71,19 @@ a dependency, or confirming a fact across repositories.
 ### reviewer
 An independent quality gate. Reviews diffs and implementation artifacts for correctness, spec
 compliance, architectural fit, security, and maintainability. Operates read-only on a different
-model family than the implementers to introduce an independent analytical perspective. Defined in
-`.opencode/agents/reviewer.md`.
+model family than the implementers to introduce an independent analytical perspective. Prompt and
+permissions are defined in `.opencode/agents/reviewer.md`; model and variant are assigned by
+`opencode.jsonc`.
 
 ### expert
 A heavyweight advisory agent invoked only through explicit escalation. Provides structured
-guidance on hard problems but never writes code. Defined in `.opencode/agents/expert.md`.
+guidance on hard problems but never writes code. Prompt and permissions are defined in
+`.opencode/agents/expert.md`; model and variant are assigned by `opencode.jsonc`.
+
+### breakglass
+Human-selected primary agent, never reachable through Task delegation. The `task` permission
+denies it explicitly, at the top level and on every agent that can delegate. `hidden` is not
+treated as a security property.
 
 ## Superpowers Integration
 
@@ -74,8 +92,8 @@ When Superpowers skills dispatch sub-agents, the following mapping applies:
 | Skill context | Dispatched role |
 |---------------|-----------------|
 | Implementation work (brainstorming, TDD, parallel agents) | **general** |
-| Code review (requesting-code-review, receiving-code-review) | **reviewer** |
-| Escalation beyond reviewer confidence | **expert** |
+| Code review (requesting-code-review, receiving-code-review) | **reviewer** (Copilot Sol high) |
+| Escalation beyond reviewer confidence | **expert** (direct OpenAI Sol xhigh) |
 
 ## Escalation to Expert
 

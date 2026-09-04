@@ -1,0 +1,20 @@
+I'll start by looking at the existing file.
+Tests already exist for this. Adding the `double` function, leaving `identity` and `README.md` untouched.
+Done. Added `double` to `lib/math.sh:9`:
+
+```bash
+double() {
+  printf '%s\n' "$(( $1 * 2 ))"
+}
+```
+
+Verification:
+- `bash -n lib/math.sh` — syntax OK
+- `tests/acceptance.sh` — PASS (`double 3` → `6`)
+- `tests/regression.sh` — PASS (`identity` unchanged)
+- `shellcheck lib/math.sh` — clean
+- Spot checks: `0` → `0`, `-4` → `-8`, `21` → `42`
+
+Scope: only `lib/math.sh` modified; `README.md` and `identity` untouched.
+
+One caveat worth flagging: `$(( $1 * 2 ))` inherits bash arithmetic semantics, so a non-integer argument either evaluates as a variable name (e.g. `double foo` → `0`) or is an arithmetic-expression injection vector. The task specified integer input and the fixture's `identity` does no validation either, so I matched the existing style rather than adding unrequested guards. Say the word if you want input validation.

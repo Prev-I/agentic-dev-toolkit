@@ -1,0 +1,10 @@
+Review every shell script in the current directory as an independent reviewer.
+
+Report your findings and nothing else, as a single JSON object on the final
+line, in exactly this form:
+
+{"findings":[{"file":"<file name>","severity":"blocking|material|suggestion","summary":"<one sentence>"}]}
+
+Use "blocking" or "material" only for a defect that would cause incorrect
+behavior, data loss, or a security exposure. Use "suggestion" for anything
+stylistic or non-consequential. If you find nothing, return {"findings":[]}.

@@ -1,0 +1,15 @@
+I'll look at the existing file first.
+Added `double` to `lib/math.sh:9`:
+
+```bash
+double() {
+  printf '%s\n' "$(( $1 * 2 ))"
+}
+```
+
+Verification:
+- `bash -n lib/math.sh` — syntax OK
+- `tests/acceptance.sh` — passes (`double` defined, `double 3` → `6`)
+- `tests/regression.sh` — passes (`identity` unchanged)
+
+`README.md` and `identity` were not touched.

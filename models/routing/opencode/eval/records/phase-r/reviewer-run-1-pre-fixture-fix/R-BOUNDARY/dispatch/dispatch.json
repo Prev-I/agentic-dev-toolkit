@@ -1,0 +1,42 @@
+{
+  "timestamp": "2026-09-04T11:41:12.956024+02:00",
+  "label": "reviewer-R-BOUNDARY-retry",
+  "attempt": 2,
+  "routing_profile_id": "v1-restored-2026-09",
+  "routing_profile_commit": "a96c0ce7302188eef89db1361e0335461e8c2eeb",
+  "runtime_version": "1.18.27",
+  "eval_runner_version": "phase-r-dispatch-v1",
+  "environment": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+  "dispatch_target": "agent:reviewer",
+  "variant": "resolved",
+  "timeout_seconds": 900,
+  "exit_status": 0,
+  "classification": "OK",
+  "failure_class": null,
+  "provider_error_text": null,
+  "provider_status_code": null,
+  "observed_cost": 0.34721925,
+  "derived_credits": 34.721925,
+  "normalized_steady_state_cost": null,
+  "tokens": {
+    "total": 27935,
+    "input": 2,
+    "output": 906,
+    "reasoning": 928,
+    "cache": {
+      "write": 871,
+      "read": 25228
+    }
+  },
+  "wall_clock_ms": 89865,
+  "retry_count": 0,
+  "raw_evidence": "raw.jsonl",
+  "decides_gate_outcome": false,
+  "cost_correction": {
+    "corrected_for": "I1 dispatch-fixture.sh step_finish cost overwrite bug (fixed 2026-09-04)",
+    "originally_recorded_observed_cost": 0.06391775,
+    "originally_recorded_derived_credits": 6.391774999999999,
+    "recomputed_from": "raw.jsonl (sum of every step_finish part.cost)",
+    "step_finish_events": 5
+  }
+}

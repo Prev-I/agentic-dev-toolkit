@@ -1,0 +1,216 @@
+// RESTORED REFERENCE PROFILE — the exact routing that was ACTIVELY INSTALLED
+// during Phase R. Its own activation is not in question; the QUALITY CLAIM
+// below it (originally "passed... 5/5") is.
+//
+// CORRECTED 2026-09-04, post-hoc, without rewriting this snapshot's routing
+// content: Phase R is BLOCKED_REVIEWER, not PASS. The Reviewer seeded-defect
+// gate's original "5/5" result is invalidated (see I1/I2 in
+// docs/evidence/2026-09-04-phase-r-execution.md and the Reviewer
+// fixture-integrity remediation record for the full trace). This file is
+// retained as a snapshot of what was active, NOT as canonical_quality_reference
+// or as a Phase-3 starting baseline, until the Reviewer gate is re-run clean
+// against an integrity-proven fixture.
+//
+// profile_id:     v1-restored-2026-09
+// source_commit:  ee7092d9e94ea6cfc30c570c75dd7a8d21fc8e41
+// opencode:       1.18.27
+// passed (still valid): routing resolution, Reviewer/Expert permission
+//                 boundaries, Breakglass boundary, Build restoration gate
+//                 (3/3), Explore four-hop dependency gate, Compaction 4/4
+//                 invariant gate
+// NOT passed / corrected: Reviewer seeded-defect and clean-control gate —
+//                 originally reported 5/5, corrected to BLOCK (4/5, then
+//                 further findings on rerun). See the Reviewer
+//                 fixture-integrity remediation record for full detail.
+//
+// operational_state: active-provisional (still installed on the real,
+// user-global OpenCode configuration; that activation stands)
+// canonical_quality_reference: false (pending a clean Reviewer gate rerun
+// against an integrity-proven fixture)
+//
+// This is NOT currently the forward quality reference, NOT the Phase-3
+// starting baseline, and NOT a Phase-R rollback target (Phase R had no
+// supported rollback; the prior "forward reference" framing below described
+// the ORIGINAL, now-corrected PASS status, not the current one).
+//
+// profiles/baseline-2026-08.jsonc remains the untouched historical record.
+{
+  // OpenCode V1 multi-model routing configuration — restored profile.
+  //
+  // Merge this fragment into an existing project or global configuration.
+  // Do not replace unrelated configuration, and append to an existing
+  // instructions array rather than replacing it.
+  //
+  // Restored by Phase R of the approved routing decision at
+  // docs/decisions/2026-09-02-multi-model-routing-v3.4.3.md.
+  // The declared target is eval/manifests/phase-r-routing-targets.json.
+  //
+  // Capability-forced rows (Opus 4.6 was MODEL_UNRESOLVABLE):
+  //   plan, build, general
+  // Rows migrated by explicit risk decision (Codex still resolved):
+  //   explore, scout, reviewer, compaction, title, summary
+  //
+  // THIS FILE IS THE SINGLE AUTHORITY for role -> model/variant/mode.
+  // .opencode/agents/*.md carry prompts and non-routing metadata only.
+  "$schema": "https://opencode.ai/config.json",
+
+  // Append this entry to any instructions already configured.
+  "instructions": [
+    ".opencode/model-routing.md"
+  ],
+
+  // Baseline model applied when no agent override matches.
+  "model": "github-copilot/claude-opus-5",
+
+  "permission": {
+    // Web search via Exa AI — requires OPENCODE_ENABLE_EXA=true in the environment.
+    "websearch": "allow",
+
+    // Breakglass is never reachable through ordinary Task delegation.
+    // This deny rule is the security control; `hidden` is not one.
+    "task": {
+      "*": "allow",
+      "breakglass": "deny"
+    }
+  },
+
+  "agent": {
+    // ── Primary work agents ────────────────────────────────────────
+
+    "plan": {
+      // Architectural planning and task decomposition.
+      // Variant `max` is the Phase-0 verified highest supported Opus effort
+      // (eval/records/claude-opus-5-max.json, classification USABLE).
+      "mode": "primary",
+      "model": "github-copilot/claude-opus-5",
+      "variant": "max",
+      "permission": {
+        "edit": "deny",
+        "task": {
+          "*": "allow",
+          "breakglass": "deny"
+        },
+        "bash": "ask"
+      }
+    },
+
+    "build": {
+      // Hands-on code generation and modification; the restoration controller.
+      "mode": "primary",
+      "model": "github-copilot/claude-opus-5",
+      "variant": "high",
+      "permission": {
+        "edit": "allow",
+        "task": {
+          "*": "allow",
+          "breakglass": "deny"
+        },
+        "bash": {
+          "*": "allow",
+          "git push*": "deny"
+        }
+      }
+    },
+
+    "general": {
+      // Catch-all delegated worker for bounded tasks.
+      "model": "github-copilot/gpt-5.6-terra",
+      "variant": "high",
+      "permission": {
+        "task": {
+          "*": "allow",
+          "breakglass": "deny"
+        }
+      }
+    },
+
+    // ── Navigation and analysis agents ─────────────────────────────
+
+    "explore": {
+      // Codebase discovery, search, and context gathering.
+      "model": "github-copilot/gpt-5.6-luna",
+      "variant": "medium"
+    },
+
+    "scout": {
+      // Targeted lookup and fact-finding across repositories.
+      "model": "github-copilot/gpt-5.6-luna",
+      "variant": "low"
+    },
+
+    // ── Review and escalation ──────────────────────────────────────
+
+    "reviewer": {
+      // Independent read-only review. Copilot-hosted, deliberately a
+      // different family from the Opus implementers.
+      "mode": "subagent",
+      "model": "github-copilot/gpt-5.6-sol",
+      "variant": "high",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "deny",
+        "task": "deny",
+        "skill": "allow",
+        "bash": {
+          "*": "deny",
+          "git status*": "allow",
+          "git diff*": "allow",
+          "git log*": "allow",
+          "git show*": "allow"
+        }
+      }
+    },
+
+    "expert": {
+      // Escalation-only adviser on direct OpenAI, for provider, quota,
+      // policy, credential and governance-domain separation from Copilot.
+      // Effort is deliberately above Reviewer's; Reviewer Sol high together
+      // with Expert Sol high is a forbidden state.
+      "mode": "subagent",
+      "model": "openai/gpt-5.6-sol",
+      "variant": "xhigh",
+      "temperature": 0.1,
+      "steps": 6,
+      "hidden": true,
+      "permission": {
+        "edit": "deny",
+        "bash": "deny",
+        "task": "deny",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "external_directory": "deny",
+        "skill": "allow"
+      }
+    },
+
+    "breakglass": {
+      // Human-selected primary only. Never Task-routable; the deny rules
+      // above are the control. `hidden` is not a security property.
+      "mode": "primary",
+      "model": "openai/gpt-5.6-sol",
+      "variant": "max",
+      "permission": {
+        "edit": "deny",
+        "bash": "deny",
+        "task": "deny"
+      }
+    },
+
+    // ── Lightweight utility agents ─────────────────────────────────
+
+    "compaction": {
+      "model": "github-copilot/gpt-5.6-terra",
+      "variant": "medium"
+    },
+
+    "title": {
+      "model": "github-copilot/gpt-5.6-luna",
+      "variant": "low"
+    },
+
+    "summary": {
+      "model": "github-copilot/gpt-5.6-luna",
+      "variant": "low"
+    }
+  }
+}

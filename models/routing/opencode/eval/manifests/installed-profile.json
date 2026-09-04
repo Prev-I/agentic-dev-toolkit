@@ -1,7 +1,30 @@
 {
-  "profile_id": "published-v1-pre-restoration",
-  "source_commit": "19bdcff37f8714e5531ab96448ec094e4f3b439a",
-  "installed_at": null,
-  "opencode_version": "1.18.26",
-  "provenance_ceiling": "Ordinary sessions are attributable only to the profile known to be installed at the time."
+  "profile_id": "v1-restored-2026-09",
+  "source_commit": "0fd2d942dd6d71a7f9fcb5545edc6d815272b6cb",
+  "installed_at": "2026-09-04T10:48:49.505314+02:00",
+  "opencode_version": "1.18.27",
+  "activation_target": "~/.config/opencode/opencode.jsonc",
+  "activation_scope": "user-global",
+  "effective_resolved_routing": {
+    "plan": {"model": "github-copilot/claude-opus-5", "variant": "max", "mode": "primary"},
+    "build": {"model": "github-copilot/claude-opus-5", "variant": "high", "mode": "primary"},
+    "general": {"model": "github-copilot/gpt-5.6-terra", "variant": "high", "mode": "subagent"},
+    "explore": {"model": "github-copilot/gpt-5.6-luna", "variant": "medium", "mode": "subagent"},
+    "scout": {"model": "github-copilot/gpt-5.6-luna", "variant": "low", "mode": "all"},
+    "reviewer": {"model": "github-copilot/gpt-5.6-sol", "variant": "high", "mode": "subagent"},
+    "compaction": {"model": "github-copilot/gpt-5.6-terra", "variant": "medium", "mode": "primary"},
+    "title": {"model": "github-copilot/gpt-5.6-luna", "variant": "low", "mode": "primary"},
+    "summary": {"model": "github-copilot/gpt-5.6-luna", "variant": "low", "mode": "primary"},
+    "expert": {"model": "openai/gpt-5.6-sol", "variant": "xhigh", "mode": "subagent"},
+    "breakglass": {"model": "openai/gpt-5.6-sol", "variant": "max", "mode": "primary"}
+  },
+  "effective_routing_evidence": "eval/records/phase-r/effective-routing.json",
+  "canonical": false,
+  "phase_r_status": "BLOCKED_REVIEWER",
+  "operational_state": "active-provisional",
+  "canonical_quality_reference": false,
+  "status_note": "This routing is actively installed on the real, user-global OpenCode configuration and remains in effect -- that activation is not reversed by this status. 'canonical' and 'canonical_quality_reference' were flipped back to false because the Reviewer gate is BLOCKED (see docs/evidence/2026-09-04-phase-r-execution.md), not because the activation itself is in question. Build/Explore/Compaction/routing-resolution/security gates remain valid and are not re-run by this correction.",
+  "restored_profile": "profiles/v1-restored-2026-09.jsonc",
+  "provenance_ceiling": "Ordinary sessions are attributable only to the profile known to be installed at the time.",
+  "global_configuration_contents_committed": false
 }

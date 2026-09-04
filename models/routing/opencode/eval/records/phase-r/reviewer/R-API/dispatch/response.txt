@@ -1,0 +1,19 @@
+I'll review the shell scripts in the current directory.
+Let me verify behavior empirically rather than reasoning alone.
+Confirmed the pagination defect. Now testing the counter under real concurrency.
+Review complete. I verified each script empirically rather than by inspection alone.
+
+**Verified correct (no findings):**
+- `api.sh` — `json.dumps` correctly escapes quotes and control chars; the value is passed as `argv`, not interpolated into the Python source, so no injection. Confirmed with `","admin":true` and tab payloads.
+- `counter.sh` — locking a sibling `.lock` file while mutating the data file is a correct pattern; `flock` creates the lock file if absent. 200 concurrent increments produced exactly 200, no lost updates.
+- `storage.sh` — the backend's exit status is the function's return status, so failure propagates (rc=7, rc=127) with no output emitted on failure. The implicit propagation is correct, not a missing check.
+
+**Findings:**
+
+`pagination.sh` — the regex `^[0-9]+$` permits leading zeros, and bash arithmetic then reads those as octal:
+- `0144` → evaluated as octal 100 → **accepted**, but the decimal value 144 exceeds the documented max of 100.
+- `09` → **rejected** with `((: 09: value too great for base` on stderr, though 9 is a valid page size.
+
+`authorization.sh` — the comparison itself is sound (RHS is quoted, so `*` does not glob-match and is correctly denied). The only note is that an empty caller and empty owner compare equal and grant access; this only matters if a caller passes unpopulated identities.
+
+{"findings":[{"file":"pagination.sh","severity":"material","summary":"Leading zeros pass the digit regex and are then evaluated as octal in the arithmetic test, so \"0144\" is wrongly accepted (decimal 144 > 100) and \"09\" is wrongly rejected with an arithmetic error on stderr."},{"file":"authorization.sh","severity":"suggestion","summary":"An empty caller and empty owner compare equal and grant access, so the function should reject unpopulated identity arguments rather than rely on callers always supplying them."}]}

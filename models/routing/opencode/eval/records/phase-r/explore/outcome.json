@@ -1,0 +1,11 @@
+{
+  "fixture": "explore-dependency-chain",
+  "target": {"role": "explore", "model": "github-copilot/gpt-5.6-luna", "variant": "medium"},
+  "reported_ordered_path": ["entry", "facade", "service", "adapter", "protocol"],
+  "reported_hops": 4,
+  "terminal_symbol": "PROTOCOL_VERSION",
+  "terminal_value": "v3",
+  "verdict": "pass",
+  "prose_quality_scored": false,
+  "gate_verdict_source": "eval/scoring/explore.sh::explore_gate (unmodified)"
+}

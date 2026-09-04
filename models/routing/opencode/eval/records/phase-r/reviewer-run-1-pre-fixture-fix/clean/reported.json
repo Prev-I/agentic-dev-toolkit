@@ -1,0 +1,9 @@
+{
+  "findings": [
+    {
+      "file": "pagination.sh",
+      "severity": "suggestion",
+      "summary": "Arithmetic evaluation treats leading-zero input as octal, so `0144` is accepted as 100 and `0999` emits a bash arithmetic error on stderr before returning 1; stripping leading zeros or comparing via `10#$1` would make the check base-explicit."
+    }
+  ]
+}

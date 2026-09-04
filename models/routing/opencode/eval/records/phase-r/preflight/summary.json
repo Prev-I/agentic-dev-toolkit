@@ -1,0 +1,34 @@
+{
+  "timestamp": "2026-09-04T05:43:16.779824+02:00",
+  "runtime_version": "1.18.27",
+  "repository_commit": "cea86ef4c5169fe1bca9e109492abe114727b0f4",
+  "environment": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+  "provider": "github-copilot",
+  "model": "gpt-5.6-luna",
+  "variant": "low",
+  "exact_invocation": "opencode run --model github-copilot/gpt-5.6-luna --variant low --format json Reply with exactly: CAPABILITY_OK",
+  "exit_status": 0,
+  "classification": "USABLE",
+  "pricing_regime": "standard",
+  "wall_clock_ms": 6380,
+  "retry_count": 0,
+  "observed_cost": 0.00022256,
+  "normalized_steady_state_cost": null,
+  "tokens": 10688,
+  "token_usage": {
+    "total": 10688,
+    "input": 3,
+    "output": 7,
+    "reasoning": 0,
+    "cache": {
+      "write": 0,
+      "read": 10678
+    }
+  },
+  "response_text": "CAPABILITY_OK",
+  "error_text": null,
+  "role": "summary",
+  "phase_r_classification": "USABLE",
+  "phase_r_stop_class": "NONE",
+  "derived_credits": 0.022256
+}

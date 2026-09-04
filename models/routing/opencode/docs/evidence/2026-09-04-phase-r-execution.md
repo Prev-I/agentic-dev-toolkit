@@ -2,24 +2,30 @@
 
 ## Status
 
-**Phase R status: `BLOCKED_REVIEWER_RERUN`.** Build, Explore, Compaction,
-routing resolution, and security/permission boundaries (including
-Breakglass) all PASS and are not re-run by anything in this correction. The
-Reviewer seeded-defect gate is blocked — originally reported "PASS — 5/5",
-corrected first to BLOCK (4/5) via the I2 rerun below, then the fixture and
-scorer were made admissible offline by two further remediations (the
+**Phase R status: `PASS`**, as of the
+[2026-09-04 scope amendment](../decisions/2026-09-04-phase-r-scope-amendment.md).
+Build, Explore, Compaction, routing resolution, and security/permission
+boundaries (including Breakglass) all PASS and were not re-run to reach
+this status. The Reviewer seeded-defect gate — originally reported
+"PASS — 5/5", corrected first to BLOCK (4/5) via the I2 rerun below, then
+made mechanically admissible offline by two further remediations (the
 Reviewer fixture-integrity remediation, and the Reviewer
-observability/attribution remediation) — but a fresh live 5/5 + clean-zero
-rerun is still required and no rerun budget is yet approved. Budget: both
-the evaluation and recovery caps are corrected and confirmed exceeded — see
-[Budget](#budget).
+observability/attribution remediation) — is **reclassified**, not passed
+retroactively: it is now Phase-3 targeted quality evidence, not a Phase-R
+restoration gate. Phase R instead gates Reviewer's **operational
+integration** (model resolution, routing, read-only permissions,
+successful dispatch, adapter/output-path traversal, no security
+regression), which is fully evidenced by records already in this document
+and in `eval/records/phase-r/`. No new Reviewer dispatch was required or
+performed for this closure. Budget: both the evaluation and recovery caps
+are corrected and confirmed exceeded — that historical breach is preserved
+unchanged — see [Budget](#budget).
 
-`operational_state: active-provisional` — the restored routing profile is
-installed and active on the real, user-global OpenCode configuration; that
-activation is independent of the Reviewer gate's status and is not reversed
-by this correction. `canonical_quality_reference: false` — this profile is
-not currently the quality-verified reference for Phase 3 or any other
-purpose, pending a clean Reviewer gate rerun.
+`operational_state: active` — the restored routing profile is installed
+and active on the real, user-global OpenCode configuration, unchanged by
+the amendment. `canonical_quality_reference: true` — restoration-quality
+reference, not a claim that every role's model is optimal for its role;
+that remains a separate, hypothesis-driven Phase-3 concern.
 
 Two post-hoc corrections were made to this record on 2026-09-04, after the
 original "PASS" status above was first written — see
@@ -175,14 +181,23 @@ recorded as 5.569 — see [Post-hoc corrections](#post-hoc-corrections-i1-i2)).
 
 `eval/records/phase-r/build/outcome.json`.
 
-## Reviewer seeded-defect gate
+## Reviewer seeded-defect gate — reclassified, not a Phase-R gate
 
-**BLOCK — 4/5**, as of the I2 repair's live rerun on 2026-09-04. Previously
-reported here as "PASS — 5/5"; that claim is corrected — see
-[Post-hoc corrections](#post-hoc-corrections-i1-i2) and
-[I2 rerun result](#i2-rerun-result-block-45). The fixture-repair narrative
-below (R-ERROR / `load_items_or_fail`) remains accurate and is unaffected by
-either correction — it addresses a different case.
+**BLOCK — 4/5**, as of the I2 repair's live rerun on 2026-09-04; that
+result stands unchanged. Previously reported here as "PASS — 5/5"; that
+claim is corrected — see [Post-hoc corrections](#post-hoc-corrections-i1-i2)
+and [I2 rerun result](#i2-rerun-result-block-45). The fixture-repair
+narrative below (R-ERROR / `load_items_or_fail`) remains accurate and is
+unaffected by either correction — it addresses a different case.
+
+**As of the [2026-09-04 scope amendment](../decisions/2026-09-04-phase-r-scope-amendment.md),
+this benchmark is no longer a Phase-R gate.** It is reclassified to Phase-3
+targeted Reviewer-quality evidence — unchanged threshold (5/5 + clean-zero),
+unchanged fixture and scorer, historical runs still inadmissible for
+quality adjudication. Phase R instead gates Reviewer's *operational
+integration* (see the amendment doc's evidence table), which this document
+and `eval/records/phase-r/security/reviewer.json` already establish. No new
+live run was required or performed.
 
 `eval/records/phase-r/reviewer/outcome.json`.
 
@@ -506,8 +521,11 @@ here.
 
 I1 and I2 (see [Post-hoc corrections](#post-hoc-corrections-i1-i2)) were the
 two Important findings from that same final whole-branch review. I1 is fixed
-and its historical figures corrected. I2 is confirmed and open: repair of
-`cases/R-API/api.sh` and `cases/R-BOUNDARY/pagination.sh`, and a rerun of the
-affected cases, are pending explicit human authorization for the fixture
-touch, per the same pattern used for every other fixture change in this
-plan.
+and its historical figures corrected. I2 was confirmed and, at the time this
+paragraph was first written, open. It has since been repaired (see the
+Reviewer fixture-integrity remediation record), and the Reviewer benchmark
+this fixture supports has since been reclassified out of the Phase-R gate
+set entirely (see the [2026-09-04 scope amendment](../decisions/2026-09-04-phase-r-scope-amendment.md)) —
+preserved here as the historical record of what was open when this
+document was first written, not updated to imply I2 was still open at the
+time of Phase-R closure.

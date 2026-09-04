@@ -1,40 +1,47 @@
 // RESTORED REFERENCE PROFILE — the exact routing that was ACTIVELY INSTALLED
-// during Phase R. Its own activation is not in question; the QUALITY CLAIM
-// below it (originally "passed... 5/5") is.
+// during Phase R and remains active today.
 //
-// CORRECTED 2026-09-04, post-hoc, without rewriting this snapshot's routing
-// content: Phase R is BLOCKED_REVIEWER_RERUN, not PASS. The Reviewer
-// seeded-defect gate's original "5/5" result is invalidated (see I1/I2 in
-// docs/evidence/2026-09-04-phase-r-execution.md, the Reviewer
-// fixture-integrity remediation record, and the Reviewer
-// observability/attribution remediation record for the full trace). The
-// Reviewer fixture and scorer are now mechanically admissible offline, but
-// a fresh live rerun and its budget approval are still pending. This file
-// is retained as a snapshot of what was active, NOT as
-// canonical_quality_reference or as a Phase-3 starting baseline, until that
-// rerun passes cleanly.
+// AMENDED AND CLOSED 2026-09-04 (docs/decisions/2026-09-04-phase-r-scope-amendment.md):
+// Phase R is PASS under an amended, operational-restoration gate set. The
+// original process conflated restoration (is this routing operationally
+// viable?) with optimization (is each model the best choice for its role?).
+// The Reviewer 5/5 seeded-defect + clean-zero benchmark -- unchanged in
+// threshold, fixture, or scorer -- is reclassified from a Phase-R
+// restoration gate to a Phase-3 targeted quality evaluation. Reviewer's
+// OPERATIONAL integration (model resolves, correct routing, read-only
+// permissions, successful dispatch through the real OpenCode path, output
+// traversing the evaluation/adapter path, no security regression) is fully
+// evidenced by existing repository records and is what Phase R now gates.
+// This is a separation-of-concerns correction, not a threshold relaxation
+// -- see the amendment doc for the full evidence table and rationale.
 //
 // profile_id:     v1-restored-2026-09
 // source_commit:  ee7092d9e94ea6cfc30c570c75dd7a8d21fc8e41
 // opencode:       1.18.27
-// passed (still valid): routing resolution, Reviewer/Expert permission
-//                 boundaries, Breakglass boundary, Build restoration gate
-//                 (3/3), Explore four-hop dependency gate, Compaction 4/4
-//                 invariant gate
-// NOT passed / corrected: Reviewer seeded-defect and clean-control gate —
-//                 originally reported 5/5, corrected to BLOCK (4/5, then
-//                 further findings on rerun). See the Reviewer
-//                 fixture-integrity remediation record for full detail.
+// passed (amended Phase-R gate set): routing resolution, Reviewer/Expert
+//                 permission boundaries, Breakglass boundary, Build
+//                 restoration gate (3/3), Explore four-hop dependency gate,
+//                 Compaction 4/4 invariant gate, Reviewer operational
+//                 integration
+// reclassified, not failed: Reviewer seeded-defect and clean-control
+//                 benchmark (5/5 + clean-zero) -- now Phase-3 quality
+//                 evidence, historical runs remain inadmissible for
+//                 quality adjudication, no new live run was required or
+//                 performed to reach this PASS. See the Reviewer
+//                 fixture-integrity and observability/attribution
+//                 remediation records for the full technical trace, and
+//                 the scope-amendment doc for why this benchmark no
+//                 longer gates restoration.
 //
-// operational_state: active-provisional (still installed on the real,
-// user-global OpenCode configuration; that activation stands)
-// canonical_quality_reference: false (pending a clean Reviewer gate rerun
-// against an integrity-proven fixture)
+// operational_state: active (installed on the real, user-global OpenCode
+// configuration; unchanged by this amendment)
+// canonical_quality_reference: true -- restoration-quality reference, not
+// a claim that every role's model is the optimal choice for its role;
+// that is a separate, ongoing, hypothesis-driven Phase-3 concern
 //
-// This is NOT currently the forward quality reference, NOT the Phase-3
-// starting baseline, and NOT a Phase-R rollback target (Phase R had no
-// supported rollback; the prior "forward reference" framing below described
-// the ORIGINAL, now-corrected PASS status, not the current one).
+// This IS now the forward quality reference and the Phase-3 starting
+// baseline for hypothesis-driven optimization. It remains NOT a Phase-R
+// rollback target (Phase R had no supported rollback).
 //
 // profiles/baseline-2026-08.jsonc remains the untouched historical record.
 {

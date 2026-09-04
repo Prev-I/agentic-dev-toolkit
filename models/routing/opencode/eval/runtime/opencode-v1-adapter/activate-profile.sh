@@ -29,7 +29,7 @@ activate_profile() {
   stamp=$(date +%Y%m%dT%H%M%S%z)
   backup_dir="$backup_root/phase-r-$stamp"
   before_hash=$(sha256sum "$target" | cut -d' ' -f1)
-  commit=$(git rev-parse HEAD 2>/dev/null || printf unknown)
+  commit=$(git -C "$(dirname "$repo_profile")" rev-parse HEAD 2>/dev/null || printf unknown)
 
   if (( dry_run )); then
     printf 'dry_run=1\ntarget=%s\nbefore_sha256=%s\n' "$target" "$before_hash"
@@ -41,8 +41,8 @@ activate_profile() {
   printf '%s  %s\n' "$before_hash" "$(basename "$target")" >"$backup_dir/SHA256SUMS"
 
   local merged
-  merged=$(mktemp)
-  REPO_JSON=$(load_routing_profile "$repo_profile") \
+  merged=$(mktemp "$(dirname "$target")/.activate-profile.XXXXXX")
+  if ! REPO_JSON=$(load_routing_profile "$repo_profile") \
   GLOBAL_JSON=$(load_routing_profile "$target") \
   TARGETS="$targets" COMMIT="$commit" STAMP="$stamp" \
     python3 - "$merged" <<'PY'
@@ -85,6 +85,11 @@ with open(sys.argv[1], "w", encoding="utf-8") as handle:
     json.dump(document, handle, indent=2)
     handle.write("\n")
 PY
+  then
+    rm -f "$merged"
+    printf 'activate_profile: merge failed; %s left unchanged\n' "$target" >&2
+    return 1
+  fi
 
   mv "$merged" "$target"
   after_hash=$(sha256sum "$target" | cut -d' ' -f1)

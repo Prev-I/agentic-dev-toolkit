@@ -1,0 +1,27 @@
+I'll start by looking at the existing code.
+Tests already exist and define the contract. Let me confirm the acceptance test fails first.
+Red confirmed: acceptance fails, regression passes. Now the implementation.
+Done. Added `reverse` to `lib/strings.sh:9`:
+
+```bash
+reverse() {
+  local s=$1 out='' i
+  for (( i = ${#s} - 1; i >= 0; i-- )); do
+    out+=${s:i:1}
+  done
+  printf '%s\n' "$out"
+}
+```
+
+**Verification (run, not assumed):**
+- `tests/acceptance.sh` — failed before (exit 1), passes now
+- `tests/regression.sh` — passes (`upper` intact)
+- `bash -n` and `shellcheck` — clean
+
+**Edge cases checked:** empty string, single char, embedded spaces/tabs (preserved — the loop avoids word splitting, which matters since `IFS=$'\n\t'` is set), glob metacharacters, multibyte UTF-8.
+
+**Scope:** only `lib/strings.sh` touched; `README.md` and `upper` untouched.
+
+Two honest caveats on the implementation:
+- It's pure-bash rather than piping to `rev`, avoiding a coreutils dependency and a subshell. Cost is O(n²) string concatenation — irrelevant for typical inputs, but not the choice I'd make for megabyte strings.
+- Character reversal is per-codepoint, so it's correct for plain UTF-8 but will mangle combining marks and emoji ZWJ sequences (grapheme clusters). The tests don't cover that, and handling it properly needs more than bash. Flagging rather than silently claiming full Unicode correctness.

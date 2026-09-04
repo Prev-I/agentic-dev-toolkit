@@ -1,0 +1,35 @@
+{
+  "caps": {
+    "phase3_build_ab": 158
+  },
+  "entries": [
+    {
+      "timestamp": "2026-09-04T21:07:23.482292+02:00",
+      "account": "phase3_build_ab",
+      "label": "phase3-build-ab-pair1-feature-opus",
+      "provider": "github-copilot",
+      "credits": 28.62365
+    },
+    {
+      "timestamp": "2026-09-04T21:08:04.129387+02:00",
+      "account": "phase3_build_ab",
+      "label": "phase3-build-ab-pair1-feature-sonnet",
+      "provider": "github-copilot",
+      "credits": 8.32915
+    },
+    {
+      "timestamp": "2026-09-04T21:09:21.303220+02:00",
+      "account": "phase3_build_ab",
+      "label": "phase3-build-ab-pair2-bugfix-sonnet",
+      "provider": "github-copilot",
+      "credits": 12.923149999999998
+    },
+    {
+      "timestamp": "2026-09-04T21:10:20.452520+02:00",
+      "account": "phase3_build_ab",
+      "label": "phase3-build-ab-pair2-bugfix-opus",
+      "provider": "github-copilot",
+      "credits": 26.958899999999996
+    }
+  ]
+}

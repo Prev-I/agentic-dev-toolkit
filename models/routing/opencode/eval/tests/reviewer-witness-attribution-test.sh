@@ -23,7 +23,10 @@ source "$root/scoring/reviewer.sh"
 # R-API, R-BOUNDARY, R-ERROR are ADDITION/SUBSTITUTION mutations: the
 # vulnerable version contains a literal token absent from the safe version
 # (R-API: `{"name"` vs `{"displayName"`; R-BOUNDARY: `10#$1 >= 0` vs
-# `>= 1`; R-ERROR: `2>/dev/null` addition). A mechanically-computed,
+# `>= 1`; R-ERROR: `|| printf '[]` addition, the causal return-code-masking
+# half of the mutation -- see the R-ERROR witness regression test below for
+# why the causal half, not the incidental stderr-suppression half, matters).
+# A mechanically-computed,
 # diff-derived "witness" substring exists for each (see each case's
 # ground-truth.json), verified present-in-override/absent-from-clean by
 # this suite itself. This makes deterministic, exact-substring evidence
@@ -154,5 +157,44 @@ assert_eq missed "$(attr)"
 # witness substring too. Asserted explicitly, not hidden. ---
 write_findings '[{"file": "pagination.sh", "severity": "material", "summary": "octal reinterpretation", "evidence": "validate_page_size() { [[ \"$1\" =~ ^[0-9]+$ ]] || return 1; (( ${#1} <= 18 )) || return 1; (( 10#$1 >= 0 && 10#$1 <= 100 )); }"}]'
 assert_eq detected "$(attr)"
+
+# --- R-ERROR witness regression: caught by independent review of the
+# witness design itself. The FIRST witness chosen, "2>/dev/null", anchored
+# the non-causal half of the mutation -- storage.sh's actual seeded defect
+# (per storage_swallows_failure) is the RETURN-CODE masking, "|| printf
+# '[]'", which makes a failed load look like a successful empty result;
+# stderr suppression alone is a separate, much lesser concern. A finding
+# that explicitly discusses ONLY stderr suppression, and explicitly
+# disclaims the return-code issue, was wrongly credited under the original
+# witness. Fixed by anchoring the witness to "|| printf '[]" instead --
+# the literal substring that IS the causal defect, present in the override,
+# absent from clean. ---
+error_attr() {
+  python3 - "$root/fixtures/reviewer-seeded-defects/.witness-test-findings.json" "$1" <<'PY'
+import json, sys
+path, evidence = sys.argv[1:]
+seeded = [
+    {"id": "R-API", "files": ["api.sh"], "all_reported": [], "severity": "none"},
+    {"id": "R-AUTH", "files": ["authorization.sh"], "all_reported": [{"file": "authorization.sh", "severity": "blocking", "summary": "s"}], "severity": "blocking"},
+    {"id": "R-BOUNDARY", "files": ["pagination.sh"], "all_reported": [], "severity": "none"},
+    {"id": "R-CONCURRENCY", "files": ["counter.sh"], "all_reported": [{"file": "counter.sh", "severity": "material", "summary": "s"}], "severity": "material"},
+    {"id": "R-ERROR", "files": ["storage.sh"],
+     "all_reported": [{"file": "storage.sh", "severity": "material",
+                        "summary": "stderr output is suppressed, hiding diagnostic info; the caller cannot tell why the underlying command failed",
+                        "evidence": evidence}],
+     "severity": "material"},
+]
+json.dump({"seeded": seeded, "clean": []}, open(path, "w"))
+PY
+  reviewer_structured_attribution "$fixture/oracle.json" "$root/fixtures/reviewer-seeded-defects/.witness-test-findings.json" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["R-ERROR"])'
+}
+
+# the exact regression: stderr-only finding, explicitly not about the
+# return-code masking -> must NOT be credited
+assert_eq missed "$(error_attr '2>/dev/null')"
+
+# a finding whose evidence names the actual causal fallback -> credited
+assert_eq detected "$(error_attr "\"\$storage\" list 2>/dev/null || printf '[]\\n'")"
 
 printf 'PASS: witness-based scorer attribution\n'

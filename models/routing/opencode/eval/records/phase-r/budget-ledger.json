@@ -69,6 +69,13 @@
       "label": "preflight-summary",
       "provider": "github-copilot",
       "credits": 0.022256
+    },
+    {
+      "timestamp": "2026-09-04T10:55:02.217179+02:00",
+      "account": "evaluation",
+      "label": "breakglass-primary",
+      "provider": "",
+      "credits": 0.0
     }
   ]
 }

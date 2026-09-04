@@ -1,0 +1,100 @@
+{
+  "experiment_id": "phase3-build-opus5-vs-gpt5.6-sol-high",
+  "preflight_reference": "docs/decisions/2026-09-04-phase3-build-gpt-preflight.md",
+  "executed": "2026-09-04",
+  "incumbent": {
+    "model": "github-copilot/claude-opus-5",
+    "variant": "high"
+  },
+  "challenger": {
+    "model": "github-copilot/gpt-5.6-sol",
+    "variant": "high"
+  },
+  "budget": {
+    "approved_cap_credits": 264,
+    "consumed_credits": 94.038,
+    "replacement_pairs_used": 0
+  },
+  "pairs": [
+    {
+      "pair": 1,
+      "workload": "build-feature",
+      "frozen_sequence": [
+        "opus",
+        "sol"
+      ],
+      "opus": {
+        "record": "eval/records/phase3-build-gpt/build-feature/pair1-arm1-opus/attempt.json",
+        "classification": "OK",
+        "oracle_passed": true,
+        "regression_passed": true,
+        "wall_clock_ms": 51838,
+        "derived_credits": 29.515900000000006
+      },
+      "sol": {
+        "record": "eval/records/phase3-build-gpt/build-feature/pair1-arm2-sol/attempt.json",
+        "classification": "OK",
+        "oracle_passed": false,
+        "regression_passed": true,
+        "wall_clock_ms": 40976,
+        "derived_credits": 16.1865,
+        "failure_taxonomy": "VALID_CONTROLLER_FAILURE",
+        "failure_note": "Dispatch was healthy (exit 0, classification OK) -- this is not an environment/harness failure. Sol invoked a design-confirmation skill (brainstorming) and stopped, asking 'Approve this design so I can implement it.' No human is present in a non-interactive single-shot opencode run dispatch, so the session ended without ever implementing reverse(). Regression suite still passed (upper() untouched) because no file was edited at all. Retained as permanent evidence per the frozen invalid-attempt policy; not replaced."
+      },
+      "functional_comparison": "Sol REGRESSED on criterion 1 (correctness/task success): Opus passed, Sol did not complete the task."
+    },
+    {
+      "pair": 2,
+      "workload": "build-bugfix",
+      "frozen_sequence": [
+        "sol",
+        "opus"
+      ],
+      "sol": {
+        "record": "eval/records/phase3-build-gpt/build-bugfix/pair2-arm1-sol/attempt.json",
+        "classification": "OK",
+        "oracle_passed": true,
+        "regression_passed": true,
+        "wall_clock_ms": 63987,
+        "derived_credits": 20.4542
+      },
+      "opus": {
+        "record": "eval/records/phase3-build-gpt/build-bugfix/pair2-arm2-opus/attempt.json",
+        "classification": "OK",
+        "oracle_passed": true,
+        "regression_passed": true,
+        "wall_clock_ms": 44779,
+        "derived_credits": 27.8814
+      },
+      "functional_comparison": "tied -- both pass correctness/invariant/scope (oracle+regression), no human correction, 0 retries"
+    }
+  ],
+  "replacement_pairs": [],
+  "functional_adjudication": {
+    "criterion_1_correctness": "Sol REGRESSED on build-feature (oracle_passed=False, a genuine VALID_CONTROLLER_FAILURE, not an environment failure); tied on build-bugfix (both oracle_passed=True).",
+    "result": "functional_regression_by_sol",
+    "adjudication_stops_here": true,
+    "note": "Per the frozen final_adoption_rule.functional_regression branch: 'If Sol is worse than Opus on any earlier-priority functional criterion (1-5) on either workload: KEEP_OPUS. Operational advantages cannot compensate. Adjudication stops here.' Criteria 2-7 (invariant preservation, scope adherence, human correction, convergence, wall-clock, cost) are not evaluated as decision inputs -- the regression on criterion 1 is dispositive. Wall-clock and cost are still recorded below for completeness/observational value only."
+  },
+  "wall_clock_observational_only": {
+    "note": "Not used for the decision (functional regression is dispositive), recorded for completeness.",
+    "build_feature": {
+      "opus_ms": 51838,
+      "sol_ms": 40976
+    },
+    "build_bugfix": {
+      "sol_ms": 63987,
+      "opus_ms": 44779
+    }
+  },
+  "cost_observation": {
+    "status": "observational_only_not_used_for_decision",
+    "opus_total_credits": 57.3973,
+    "sol_total_credits": 36.6407,
+    "note": "Sol was cheaper on both workloads, but cost cannot trigger adoption under the frozen rule regardless, and is moot here since a functional regression already decides the outcome."
+  },
+  "final_decision": "KEEP_OPUS",
+  "final_decision_basis": "Sol regressed on criterion 1 (correctness/task success) on build-feature: a genuine, valid dispatch that did not complete the task (stopped to request human design approval that a non-interactive single-shot dispatch cannot provide). Per the frozen final_adoption_rule's functional_regression branch, this alone determines the outcome -- operational criteria (wall-clock, cost) are not evaluated as decision inputs. FINAL DECISION: KEEP_OPUS.",
+  "routing_impact": "none -- Build routing remains github-copilot/claude-opus-5 high; production routing was never modified during measurement (dispatches used direct --model overrides against fresh isolated sandboxes, not the routed build agent or the user-global profile)",
+  "activation_policy_applied": "gpt_loses_ties_or_inconclusive -- KEEP_OPUS. Optimization line may stop unless a new material hypothesis exists."
+}

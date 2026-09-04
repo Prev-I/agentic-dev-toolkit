@@ -1,0 +1,18 @@
+I'll start by looking at the file.
+Reproduced the source of the bug: line 7 uses `>= 0`. Let me confirm the test fails first.
+Fixed with a one-character-class change in `lib/validate.sh:7`:
+
+```bash
+-  (( $1 >= 0 ))
++  (( $1 > 0 ))
+```
+
+Verification:
+- `tests/acceptance.sh` — was failing (`is_positive(0) must be false`), now exits 0
+- `tests/regression.sh` — exits 0 (`is_blank` untouched)
+- `bash -n lib/validate.sh` — clean
+- Manual boundary sweep: `0`→false, `1`→true, `-1`/`-3`→false, `42`→true, `abc`/`""`→false
+
+`README.md` and `is_blank` were not modified.
+
+One pre-existing issue I did **not** touch, since it's outside the stated scope: zero-padded input like `08` passes the regex guard and then aborts inside `(( ))` with "value too great for base" (octal parsing). It behaved that way before this fix too. Say the word if you want `10#` normalization added.

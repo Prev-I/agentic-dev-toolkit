@@ -14,13 +14,22 @@ IFS=$'\n\t'
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 bundle=$(cd "$root/.." && pwd)
 source "$root/runtime/opencode-v1-adapter/check-alignment.sh"
+source "$root/runtime/opencode-v1-adapter/select-activation-target.sh"
 
 # The installed configuration lives wherever OpenCode reads its user-global
 # config. Honour XDG_CONFIG_HOME so this works on a non-default setup.
 config_home=${XDG_CONFIG_HOME:-$HOME/.config}
 live_root="$config_home/opencode"
-live_config="$live_root/opencode.jsonc"
-[[ -f "$live_config" ]] || live_config="$live_root/opencode.json"
+
+# Resolve exactly the way activation does. select_activation_target refuses
+# (exit 1) when both opencode.json and opencode.jsonc exist, because there is
+# no safe way to know which one OpenCode will read. Picking one silently
+# would let this report ALIGNED against a file the runtime may ignore.
+if ! live_config=$(select_activation_target "$live_root"); then
+  printf 'check-alignment: %s contains both opencode.json and opencode.jsonc.\n' "$live_root" >&2
+  printf 'check-alignment: ambiguous -- cannot tell which one OpenCode reads. Remove one.\n' >&2
+  exit 2
+fi
 
 check_alignment \
   --profile "$bundle/profiles/v1-restored-2026-09.jsonc" \

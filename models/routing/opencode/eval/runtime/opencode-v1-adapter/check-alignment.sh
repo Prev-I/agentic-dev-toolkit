@@ -148,8 +148,12 @@ for role in roles:
 # reporting.
 
 def read(path):
+    # utf-8-sig: a UTF-8 BOM is common on a Windows/WSL workstation and would
+    # otherwise defeat the `startswith("---")` frontmatter probe, producing a
+    # loud "permission frontmatter differs" alarm on a file that is byte-for-
+    # byte equivalent. Leading blank lines are stripped for the same reason.
     try:
-        return open(path, encoding="utf-8").read()
+        return open(path, encoding="utf-8-sig").read().lstrip("\n")
     except OSError:
         return None
 
@@ -193,8 +197,22 @@ def permission_block(front):
 def digest(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest() if text is not None else None
 
-# reviewer.md / expert.md: permissions are DRIFT, prose is STALE.
-for name in ("reviewer", "expert"):
+# Agent markdown: permissions are DRIFT, prose is STALE. Derived from the
+# bundle rather than hardcoded, so a third agent file added later is checked
+# automatically instead of being silently skipped forever.
+bundle_agents = os.path.join(bundle_root, "agents")
+try:
+    agent_names = sorted(
+        entry[:-3] for entry in os.listdir(bundle_agents) if entry.endswith(".md")
+    )
+except OSError:
+    agent_names = []
+if not agent_names:
+    drift.append({"kind": "support", "file": "agents/",
+                  "detail": "no agent markdown found in the repository bundle",
+                  "expected": bundle_agents, "actual": "<none>"})
+
+for name in agent_names:
     repo_path = os.path.join(bundle_root, "agents", f"{name}.md")
     live_path = os.path.join(live_support, "agents", f"{name}.md")
     repo_text, live_text = read(repo_path), read(live_path)
@@ -219,6 +237,30 @@ for name in ("reviewer", "expert"):
             "kind": "support", "file": f"agents/{name}.md",
             "detail": "permissions match; prose/description differs",
             "expected_sha256": digest(repo_text), "actual_sha256": digest(live_text),
+        })
+
+# An agent markdown present ONLY in the install, naming a role this bundle
+# routes, can carry permission frontmatter that shadows a routing-owned role
+# while the JSON row still matches perfectly -- the one place where "user-owned
+# files are never reported" and the security goal genuinely conflict. Report
+# it; a file the bundle does not ship cannot be verified against anything.
+try:
+    live_agent_files = sorted(
+        entry[:-3] for entry in os.listdir(os.path.join(live_support, "agents"))
+        if entry.endswith(".md")
+    )
+except OSError:
+    live_agent_files = []
+for name in live_agent_files:
+    if name in agent_names or name not in roles:
+        continue
+    if permission_block(frontmatter(read(os.path.join(live_support, "agents", f"{name}.md")))):
+        drift.append({
+            "kind": "support", "file": f"agents/{name}.md",
+            "detail": f"installed-only agent file carries permission frontmatter for '{name}', "
+                      "a role this bundle routes -- it can override the routing-owned row "
+                      "and the bundle ships nothing to verify it against",
+            "expected": "<not shipped by this bundle>", "actual": "<installed, with permissions>",
         })
 
 # model-routing.md: prose throughout, but a stale copy misdescribes routing.

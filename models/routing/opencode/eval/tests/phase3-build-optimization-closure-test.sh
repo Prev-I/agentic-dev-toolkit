@@ -88,18 +88,37 @@ grep -q "NOT_TRIGGERED" "$doc" || fail "closure doc must record Reviewer inversi
 
 # --- no production routing or evaluation-infrastructure file was touched by
 # this closure (documentation/status only) ---
+#
+# Pinned to the closure's OWN commits, not to whatever `main` currently is.
+# The original form compared against `main`, which made this a time bomb: it
+# fired on any later branch that legitimately touched a guarded path (it did,
+# on the alignment-check work) even though the closure itself was clean. This
+# is a historical assertion about two specific commits, so it must name them.
+#
 # git diff --name-only always prints repo-root-relative paths regardless of
-# -C or cwd -- these patterns must match that, not the eval/ subtree.
-changed=$(git -C "$root/.." diff --name-only main)
-for path in \
-  'models/routing/opencode/profiles/' \
-  'models/routing/opencode/opencode.jsonc' \
-  'models/routing/opencode/eval/fixtures/' \
-  'models/routing/opencode/eval/scoring/' \
-  'models/routing/opencode/eval/runtime/' \
-  '.opencode/agents/'; do
-  echo "$changed" | grep -q "^$path" && fail "closure touched non-documentation path: $path"
-done
+# -C or cwd -- these patterns must match that, not the eval/ subtree. The
+# last entry previously read '.opencode/agents/', which could never match the
+# real repo-root-relative 'models/routing/opencode/.opencode/agents/...'.
+closure_first=2a7b839
+closure_last=0ba111e
+if git -C "$root/.." cat-file -e "${closure_first}^{commit}" 2>/dev/null &&
+   git -C "$root/.." cat-file -e "${closure_last}^{commit}" 2>/dev/null; then
+  changed=$(git -C "$root/.." diff --name-only "${closure_first}^" "$closure_last")
+  for path in \
+    'models/routing/opencode/profiles/' \
+    'models/routing/opencode/opencode.jsonc' \
+    'models/routing/opencode/eval/fixtures/' \
+    'models/routing/opencode/eval/scoring/' \
+    'models/routing/opencode/eval/runtime/' \
+    'models/routing/opencode/.opencode/'; do
+    echo "$changed" | grep -q "^$path" && fail "closure touched non-documentation path: $path"
+  done
+else
+  # A shallow clone or rewritten history cannot answer the question. Say so
+  # rather than passing silently, which would look like a verified claim.
+  printf 'NOTE: closure commits %s..%s unavailable; scope assertion not evaluated\n' \
+    "$closure_first" "$closure_last" >&2
+fi
 true
 
 printf 'PASS: Phase-3 Build optimization cycle closure is factually grounded\n'

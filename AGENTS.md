@@ -54,7 +54,7 @@ Targets Debian/Ubuntu. Ubuntu under WSL2 is the reference and tested platform.
 Key flags: `--dry-run`, `--upgrade`, `--verify-only`, `--project PATH`,
 `--repair-codex`, and `--skip-*` for each component
 (`runtimes`, `opencode`, `claude`, `codex`, `openspec`, `superpowers`,
-`quality-tools`).
+`karpathy`, `quality-tools`).
 
 Pinned defaults, each overridable by a CLI flag or an `ADT_*` environment
 variable of the same name:
@@ -68,6 +68,19 @@ variable of the same name:
 | uv, shellcheck, gitleaks, PyYAML | `latest` |
 | OpenSpec | `1.9.0` |
 | Superpowers | `v6.3.0` |
+| Karpathy guidelines skill | `multica-ai/andrej-karpathy-skills` at a pinned commit |
+
+`install_karpathy_skill` downloads one `SKILL.md` and verifies it against a
+SHA-256 digest before writing. Two destinations cover three harnesses:
+`~/.claude/skills/` serves Claude Code *and* OpenCode, `$CODEX_HOME/skills/`
+serves Codex. **The missing `~/.config/opencode/skills/` copy is deliberate** —
+OpenCode reads the Claude Code directory.
+
+The pin is authoritative: on the default ref the built-in digest always applies
+and a contradicting `--karpathy-sha256` is refused; any other `--karpathy-ref`
+requires its own `--karpathy-sha256`. **No input installs this file unverified** —
+it is standing instruction to every agent on the machine. Bump the ref and the
+digest together.
 
 ## Conventions
 

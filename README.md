@@ -17,8 +17,8 @@ A collection of reusable components for teams using AI coding agents:
 
 - **Linux workstation installer** — a single script that provisions a Debian/Ubuntu machine
   with mise-managed language runtimes, three agent CLIs (OpenCode, Claude Code, Codex), OpenSpec,
-  Superpowers, and the quality tools (shellcheck, gitleaks, PyYAML) whose absence otherwise fails
-  silently. Ubuntu under WSL2 is the reference and tested environment.
+  Superpowers, the Karpathy guidelines skill, and the quality tools (shellcheck, gitleaks, PyYAML)
+  whose absence otherwise fails silently. Ubuntu under WSL2 is the reference and tested environment.
 - **Shared `AGENTS.md` pattern** — a template and adapter set that lets one canonical instructions
   file serve Claude Code, Codex, and OpenCode simultaneously.
 - **OpenCode model-routing bundle** — a starter configuration that assigns models to OpenCode's
@@ -98,6 +98,7 @@ Key flags:
 | `--skip-codex` | Skip Codex CLI installation |
 | `--skip-openspec` | Skip OpenSpec installation |
 | `--skip-superpowers` | Skip Superpowers configuration |
+| `--skip-karpathy` | Skip the Karpathy guidelines skill |
 | `--skip-quality-tools` | Skip shellcheck, gitleaks, and PyYAML |
 | `--repair-codex` | Remove conflicting Codex installs and reinstall standalone |
 
@@ -146,6 +147,46 @@ runs `mise activate`. A non-interactive shell — a script, a CI step, an agent
 invoking `bash script.sh` — does not source `.bashrc`, so reach them as
 `mise exec -- shellcheck …` there. This is how every mise-managed tool behaves
 here, not something specific to these two.
+
+### Karpathy guidelines skill
+
+A single Agent Skill carrying [Andrej Karpathy's observations][karpathy] on where
+LLM coding goes wrong: state assumptions instead of guessing, prefer the smallest
+thing that works, keep edits surgical, and define success criteria you can
+actually check. It is installed for all three harnesses by default and skipped
+with `--skip-karpathy`.
+
+[karpathy]: https://x.com/karpathy/status/2015883857489522876
+
+Two files cover three harnesses:
+
+| Destination | Read by |
+|---|---|
+| `~/.claude/skills/karpathy-guidelines/SKILL.md` | Claude Code **and** OpenCode |
+| `$CODEX_HOME/skills/karpathy-guidelines/SKILL.md` | Codex |
+
+There is deliberately no third copy under `~/.config/opencode/skills/`. OpenCode
+discovers skills in the Claude Code and `.agents` directories as well as its own,
+so a dedicated copy would only be another thing to keep in sync.
+
+Only the skill is installed. Upstream also ships `AGENTS.md`, `CLAUDE.md` and
+editor rule-file variants of the same text; those would overwrite instruction
+files a project already owns, and a skill loads on demand instead of occupying
+every prompt.
+
+The source is pinned to a commit of
+[`multica-ai/andrej-karpathy-skills`](https://github.com/multica-ai/andrej-karpathy-skills)
+and verified against a SHA-256 digest before anything is written. The pin wins:
+on the default ref the built-in digest always applies, and a `--karpathy-sha256`
+that contradicts it is refused rather than honoured. `--karpathy-ref` selects a
+different commit, and because the built-in digest cannot describe that content
+you must supply `--karpathy-sha256` with it — an unverifiable ref is refused, not
+warned about. The file becomes standing instructions for every agent on the
+machine, so there is no path that installs it unverified.
+
+`--verify-only` re-checks the installed files against the same digest, so a skill
+that was edited or replaced after installation is reported rather than passing on
+the strength of its filename.
 
 ## Shared `AGENTS.md` pattern
 

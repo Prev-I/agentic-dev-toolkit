@@ -1,1 +1,1 @@
-{"base": "../../clean", "overrides": ["storage.sh"], "expected_material_defect": {"id": "R-ERROR", "description": "material storage failure converted to successful empty result"}, "witness": "2>/dev/null"}
+{"base": "../../clean", "overrides": ["storage.sh"], "expected_material_defect": {"id": "R-ERROR", "description": "material storage failure converted to successful empty result"}, "witness": "|| printf '[]"}

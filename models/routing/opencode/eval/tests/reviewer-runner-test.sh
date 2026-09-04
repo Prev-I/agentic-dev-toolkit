@@ -35,7 +35,7 @@ if [[ -z "$file" ]]; then
 fi
 python3 -c '
 import json, sys
-witnesses = {"api.sh": "{\"name\"", "pagination.sh": "10#$1 >= 0", "storage.sh": "2>/dev/null"}
+witnesses = {"api.sh": "{\"name\"", "pagination.sh": "10#$1 >= 0", "storage.sh": "|| printf '\''[]"}
 finding = {"file": sys.argv[1], "severity": "material", "summary": "seeded defect"}
 if sys.argv[1] in witnesses:
     finding["evidence"] = witnesses[sys.argv[1]]
@@ -88,7 +88,7 @@ if [[ -z "$file" || "$file" == authorization.sh ]]; then
 fi
 python3 -c '
 import json, sys
-witnesses = {"api.sh": "{\"name\"", "pagination.sh": "10#$1 >= 0", "storage.sh": "2>/dev/null"}
+witnesses = {"api.sh": "{\"name\"", "pagination.sh": "10#$1 >= 0", "storage.sh": "|| printf '\''[]"}
 finding = {"file": sys.argv[1], "severity": "blocking", "summary": "seeded defect"}
 if sys.argv[1] in witnesses:
     finding["evidence"] = witnesses[sys.argv[1]]

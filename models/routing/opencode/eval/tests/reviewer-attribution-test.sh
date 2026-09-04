@@ -59,7 +59,7 @@ seeded = [
     {"id": "R-API", "severity": "material", "files": ["api.sh"],
      "all_reported": [{"file": "api.sh", "severity": "material", "summary": "s", "evidence": '{"name"'}]},
     {"id": "R-ERROR", "severity": "material", "files": ["storage.sh"],
-     "all_reported": [{"file": "storage.sh", "severity": "material", "summary": "s", "evidence": "2>/dev/null"}]},
+     "all_reported": [{"file": "storage.sh", "severity": "material", "summary": "s", "evidence": "|| printf '[]"}]},
     {"id": "R-BOUNDARY", "severity": "material", "files": ["pagination.sh"],
      "all_reported": [{"file": "pagination.sh", "severity": "material", "summary": "s", "evidence": "10#$1 >= 0"}]},
 ]

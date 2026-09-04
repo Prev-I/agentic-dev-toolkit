@@ -1,0 +1,14 @@
+{
+  "findings": [
+    {
+      "file": "authorization.sh",
+      "severity": "blocking",
+      "summary": "read_resource ignores its caller and owner parameters and returns the resource value unconditionally, so any caller can read any owner's data."
+    },
+    {
+      "file": "pagination.sh",
+      "severity": "suggestion",
+      "summary": "Arithmetic comparison parses leading-zero input as octal, so values like 0144 pass the 1-100 bound and inputs like 08/099 emit a bash error to stderr."
+    }
+  ]
+}

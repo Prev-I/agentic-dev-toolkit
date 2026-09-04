@@ -1,0 +1,14 @@
+I'll review the shell scripts in the sandbox directory.
+Reviewed all five scripts, including runtime verification of concurrency, quoting/injection, and boundary behavior.
+
+**What I checked and found sound:**
+
+- `api.sh:1` — the Python program is inside single quotes and the value is passed as `argv`, not interpolated, so there is no shell or Python injection path. `json.dumps` correctly escapes quotes, backslashes and non-ASCII. Only `displayName` is emitted, so no field leakage.
+- `authorization.sh:1` — the right-hand side of `[[ ]]` is quoted, so `*` and other glob metacharacters in `caller` or `owner` compare literally and cannot bypass the ownership check. Denial returns before any output, so the value never leaks on the failure path.
+- `counter.sh:1` — the lock file (`$1.lock`) is distinct from the data file, `flock` creates it, and all writers serialize on the same path. Verified with 50 concurrent increments: final value 50, no lost updates. The inner `bash -c` correctly passes the path via `_ "$1"` rather than interpolating it.
+- `storage.sh:1` — executing `$storage` is the intended strategy dispatch, and the argument is quoted so no word splitting occurs.
+- `pagination.sh:1` — the regex anchors both ends, rejecting `abc`, `1e3`, empty input, and negatives; the range check correctly rejects `0` and `101`.
+
+**One non-consequential edge case:** in `pagination.sh`, `(( ))` interprets a leading zero as octal, so `0144` is accepted (evaluated as 100) although its decimal reading is 144, and `0999` triggers a bash arithmetic error on stderr before returning 1. The return code is still a rejection in that case, and leading-zero page sizes are not a realistic input path, so I am not treating this as a defect.
+
+{"findings":[{"file":"pagination.sh","severity":"suggestion","summary":"Arithmetic evaluation treats leading-zero input as octal, so `0144` is accepted as 100 and `0999` emits a bash arithmetic error on stderr before returning 1; stripping leading zeros or comparing via `10#$1` would make the check base-explicit."}]}

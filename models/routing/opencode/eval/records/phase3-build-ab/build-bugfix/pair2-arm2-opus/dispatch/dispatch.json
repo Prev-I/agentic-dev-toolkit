@@ -1,0 +1,35 @@
+{
+  "timestamp": "2026-09-04T21:10:20.537809+02:00",
+  "label": "phase3-build-ab-pair2-bugfix-opus",
+  "attempt": 1,
+  "routing_profile_id": "v1-restored-2026-09",
+  "routing_profile_commit": "bafc5619ff35bd67f0677e7f6502f011bd3e4ae7",
+  "runtime_version": "1.18.27",
+  "eval_runner_version": "phase-r-dispatch-v1",
+  "environment": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+  "dispatch_target": "github-copilot/claude-opus-5",
+  "variant": "high",
+  "timeout_seconds": 480,
+  "exit_status": 0,
+  "classification": "OK",
+  "failure_class": null,
+  "provider_error_text": null,
+  "provider_status_code": null,
+  "observed_cost": 0.26958899999999997,
+  "derived_credits": 26.958899999999996,
+  "normalized_steady_state_cost": null,
+  "tokens": {
+    "total": 23644,
+    "input": 2,
+    "output": 242,
+    "reasoning": 0,
+    "cache": {
+      "write": 501,
+      "read": 22899
+    }
+  },
+  "wall_clock_ms": 43981,
+  "retry_count": 0,
+  "raw_evidence": "raw.jsonl",
+  "decides_gate_outcome": false
+}

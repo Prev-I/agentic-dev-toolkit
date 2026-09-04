@@ -1,0 +1,110 @@
+{
+  "experiment_id": "phase3-build-opus5-vs-sonnet5-high",
+  "preflight_reference": "docs/decisions/2026-09-04-phase3-build-ab-preflight.md",
+  "executed": "2026-09-04",
+  "incumbent": {
+    "model": "github-copilot/claude-opus-5",
+    "variant": "high"
+  },
+  "challenger": {
+    "model": "github-copilot/claude-sonnet-5",
+    "variant": "high"
+  },
+  "budget": {
+    "approved_cap_credits": 158,
+    "consumed_credits": 76.83485,
+    "replacement_pairs_used": 0
+  },
+  "pairs": [
+    {
+      "pair": 1,
+      "workload": "build-feature",
+      "frozen_sequence": [
+        "opus",
+        "sonnet"
+      ],
+      "opus": {
+        "record": "eval/records/phase3-build-ab/build-feature/pair1-arm1-opus/attempt.json",
+        "classification": "OK",
+        "oracle_passed": true,
+        "regression_passed": true,
+        "wall_clock_ms": 51586,
+        "derived_credits": 28.62365
+      },
+      "sonnet": {
+        "record": "eval/records/phase3-build-ab/build-feature/pair1-arm2-sonnet/attempt.json",
+        "classification": "OK",
+        "oracle_passed": true,
+        "regression_passed": true,
+        "wall_clock_ms": 25447,
+        "derived_credits": 8.32915
+      },
+      "functional_comparison": "tied -- both pass correctness/invariant/scope (oracle+regression), no human correction, 0 retries",
+      "wall_clock_relative_range": 0.6786442174133164,
+      "wall_clock_favorable_direction": "sonnet",
+      "wall_clock_clears_threshold": true
+    },
+    {
+      "pair": 2,
+      "workload": "build-bugfix",
+      "frozen_sequence": [
+        "sonnet",
+        "opus"
+      ],
+      "sonnet": {
+        "record": "eval/records/phase3-build-ab/build-bugfix/pair2-arm1-sonnet/attempt.json",
+        "classification": "OK",
+        "oracle_passed": true,
+        "regression_passed": true,
+        "wall_clock_ms": 39369,
+        "derived_credits": 12.923149999999998
+      },
+      "opus": {
+        "record": "eval/records/phase3-build-ab/build-bugfix/pair2-arm2-opus/attempt.json",
+        "classification": "OK",
+        "oracle_passed": true,
+        "regression_passed": true,
+        "wall_clock_ms": 43981,
+        "derived_credits": 26.958899999999996
+      },
+      "functional_comparison": "tied -- both pass correctness/invariant/scope (oracle+regression), no human correction, 0 retries",
+      "wall_clock_relative_range": 0.11066586682663468,
+      "wall_clock_favorable_direction": "sonnet",
+      "wall_clock_clears_threshold": false
+    }
+  ],
+  "replacement_pairs": [],
+  "functional_adjudication": {
+    "criterion_1_correctness": "tied (4/4 OK, 4/4 oracle_passed)",
+    "criterion_2_invariant_preservation": "tied (4/4 regression_passed; oracle's own forbidden-scope hash-pins also held on both models both workloads)",
+    "criterion_3_scope_plan_adherence": "tied (forbidden-scope oracle assertion held for all 4 attempts)",
+    "criterion_4_human_correction_required": "tied (0 -- fully automated single dispatch per arm, no correction applied to any arm)",
+    "criterion_5_convergence_retries": "tied (retry_count 0 for all 4 dispatches)",
+    "result": "functional_tie"
+  },
+  "wall_clock_adjudication": {
+    "threshold_relative_range": 0.378885,
+    "build_feature": {
+      "relative_range": 0.6786442174133164,
+      "clears_threshold": true,
+      "favorable_direction": "sonnet"
+    },
+    "build_bugfix": {
+      "relative_range": 0.11066586682663468,
+      "clears_threshold": false,
+      "favorable_direction": "sonnet"
+    },
+    "both_required": true,
+    "both_cleared": false,
+    "note": "build-bugfix does not clear the 37.8885% threshold despite Sonnet being nominally faster (11.07% < 37.8885%) -- per the frozen rule, one large win (build-feature, 67.86%) cannot compensate for a non-win on the other workload. No aggregation, no averaging."
+  },
+  "cost_observation": {
+    "status": "observational_only_not_used_for_decision",
+    "opus_total_credits": 55.58255,
+    "sonnet_total_credits": 21.2523,
+    "note": "Sonnet was cheaper on both workloads, consistent with the preflight's pricing-ratio estimate, but cost cannot trigger adoption under the frozen rule."
+  },
+  "final_decision": "KEEP_OPUS",
+  "final_decision_basis": "Functional criteria 1-5 tied on both workloads. Wall-clock adjudication required per the frozen rule: Sonnet must clear the 37.8885% threshold on BOTH build-feature AND build-bugfix independently. build-feature cleared it (67.86%); build-bugfix did not (11.07%). Per the frozen rule's explicit 'anything else' branch (advantage on only one workload), the result resolves to KEEP_OPUS.",
+  "routing_impact": "none -- Build routing remains github-copilot/claude-opus-5 high; production routing was never modified during measurement (dispatches used direct --model overrides against fresh isolated sandboxes, not the routed build agent or the user-global profile)"
+}

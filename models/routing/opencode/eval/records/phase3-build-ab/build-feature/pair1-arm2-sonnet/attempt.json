@@ -1,0 +1,50 @@
+{
+  "fixture": "build-feature",
+  "phase": "3-comparative",
+  "label": "phase3-build-ab-pair1-feature-sonnet",
+  "attempt": 1,
+  "acceptance_initially_failing": true,
+  "dispatch": {
+    "timestamp": "2026-09-04T21:08:04.213655+02:00",
+    "label": "phase3-build-ab-pair1-feature-sonnet",
+    "attempt": 1,
+    "routing_profile_id": "v1-restored-2026-09",
+    "routing_profile_commit": "bafc5619ff35bd67f0677e7f6502f011bd3e4ae7",
+    "runtime_version": "1.18.27",
+    "eval_runner_version": "phase-r-dispatch-v1",
+    "environment": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+    "dispatch_target": "github-copilot/claude-sonnet-5",
+    "variant": "high",
+    "timeout_seconds": 480,
+    "exit_status": 0,
+    "classification": "OK",
+    "failure_class": null,
+    "provider_error_text": null,
+    "provider_status_code": null,
+    "observed_cost": 0.0832915,
+    "derived_credits": 8.32915,
+    "normalized_steady_state_cost": null,
+    "tokens": {
+      "total": 21155,
+      "input": 2,
+      "output": 86,
+      "reasoning": 0,
+      "cache": {
+        "write": 136,
+        "read": 20931
+      }
+    },
+    "wall_clock_ms": 25447,
+    "retry_count": 0,
+    "raw_evidence": "raw.jsonl",
+    "decides_gate_outcome": false
+  },
+  "dispatch_healthy": true,
+  "dispatch_classification": "OK",
+  "oracle": "eval/fixtures/build-workloads/build-feature/oracle.sh",
+  "oracle_exit_status": 0,
+  "oracle_passed": true,
+  "regression_passed": true,
+  "human_or_llm_judgment_in_oracle": false,
+  "runner_decides_gate_outcome": false
+}

@@ -1,0 +1,13 @@
+I'll start by looking at the file.
+Bug confirmed at `lib/validate.sh:7` — `>= 0` accepts zero. Reproducing first:
+Reproduced: acceptance fails on `is_positive 0`, regression already passes. Minimal fix:
+Fixed.
+
+**Change:** `lib/validate.sh:7` — `(( $1 >= 0 ))` → `(( $1 > 0 ))`. One operator; the digit-shape guard on line 6 was already correct.
+
+**Verification:**
+- Before: `tests/acceptance.sh` failed with `is_positive(0) must be false` (exit 1).
+- After: `bash -n lib/validate.sh` clean, `tests/acceptance.sh` exit 0, `tests/regression.sh` exit 0.
+- Extra spot checks: `0`→false, `-3`→false, `abc`→false, `""`→false, `1`/`10`/`007`→true.
+
+`README.md` and `is_blank` untouched.

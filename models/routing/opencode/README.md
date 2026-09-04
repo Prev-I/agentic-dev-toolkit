@@ -13,15 +13,30 @@ The routing policy is loaded through OpenCode's `instructions` setting; it does 
 
 | Role | OpenCode agent | Model | Variant |
 |---|---|---|---|
-| Planning/design | `plan` | `github-copilot/claude-opus-4.6` | `max` |
-| Primary build/controller | `build` | `github-copilot/claude-opus-4.6` | `high` |
-| Delegated implementation/debugging | `general` | `github-copilot/claude-opus-4.6` | `xhigh` |
-| Local codebase exploration | `explore` | `github-copilot/gpt-5.3-codex` | `high` |
-| External/upstream research | `scout` | `github-copilot/gpt-5.3-codex` | `high` |
-| Independent review | `reviewer` | `github-copilot/gpt-5.3-codex` | `max` |
-| Escalation-only expert | `expert` | `openai/gpt-5.6` | `high` |
+| Planning/design | `plan` | `github-copilot/claude-opus-5` | `max` |
+| Primary build/controller | `build` | `github-copilot/claude-opus-5` | `high` |
+| Delegated implementation/debugging | `general` | `github-copilot/gpt-5.6-terra` | `high` |
+| Local codebase exploration | `explore` | `github-copilot/gpt-5.6-luna` | `medium` |
+| External/upstream research | `scout` | `github-copilot/gpt-5.6-luna` | `low` |
+| Independent review | `reviewer` | `github-copilot/gpt-5.6-sol` | `high` |
+| Escalation-only expert | `expert` | `openai/gpt-5.6-sol` | `xhigh` |
+| Human-only breakglass | `breakglass` | `openai/gpt-5.6-sol` | `max` |
+| Context compaction | `compaction` | `github-copilot/gpt-5.6-terra` | `medium` |
+| Session title | `title` | `github-copilot/gpt-5.6-luna` | `low` |
+| Session summary | `summary` | `github-copilot/gpt-5.6-luna` | `low` |
 
-The design intentionally keeps `build` and `general` on the same Opus family but gives them different jobs and reasoning levels. Review is deliberately assigned to a different model family (Codex) to ensure adversarial diversity.
+`opencode.jsonc` is the single authority for role-to-model assignment.
+`.opencode/agents/reviewer.md` and `.opencode/agents/expert.md` define prompt,
+permissions and non-routing metadata only; they carry no `model` or `variant`.
+
+`breakglass` is human-selected primary. Ordinary agents cannot reach it: the
+`task` permission denies it explicitly, at the top level and on every agent that
+can delegate. `hidden` is not treated as a security property anywhere in this
+bundle.
+
+Reviewer and Expert both run GPT-5.6 Sol at different providers and efforts.
+The configuration must never install Reviewer Sol `high` together with Expert
+Sol `high`; the Expert bump lands atomically with the Reviewer move.
 
 ## Routing migration
 
@@ -112,9 +127,11 @@ installed runtime and then confirm usable capability with a trivial successful
 call:
 
 ```text
-github-copilot/gpt-5.3-codex
-github-copilot/claude-opus-4.6
-openai/gpt-5.6
+github-copilot/claude-opus-5
+github-copilot/gpt-5.6-terra
+github-copilot/gpt-5.6-luna
+github-copilot/gpt-5.6-sol
+openai/gpt-5.6-sol
 ```
 
 Variant availability can depend on the provider/model catalog exposed to your installation. Verify `high`, `xhigh`, and `max` before merging. If a requested variant is not exposed, use the highest available variant for that model without changing the role mapping.
@@ -141,7 +158,7 @@ Copy these files from this bundle into the matching target paths:
 .opencode/model-routing.md -> .opencode/model-routing.md
 ```
 
-`reviewer` is independent and read-only. `expert` is hidden, read-only, cannot spawn subagents, and is capped at six agentic steps. It is the only intended path to GPT-5.6 Sol.
+`reviewer` is independent and read-only. `expert` is hidden, read-only, cannot spawn subagents, and is capped at six agentic steps. GPT-5.6 Sol is not confined to `expert`: `reviewer` runs it through Copilot at `high`, `expert` runs it direct on OpenAI at `xhigh`, and `breakglass` runs it direct on OpenAI at `max` as a human-selected primary.
 
 ## 4. Merge the OpenCode configuration
 
@@ -149,26 +166,34 @@ Merge `opencode.jsonc` into your existing project or global OpenCode configurati
 
 If your existing configuration already has an `instructions` array, append `.opencode/model-routing.md` to it rather than replacing the existing entries.
 
-The fragment pins the built-in agents as follows:
+The fragment pins all eleven roles as follows:
 
 ```text
-plan    -> Opus 4.6 max
-build   -> Opus 4.6 high
-general -> Opus 4.6 xhigh
-explore -> GPT-5.3 Codex high
-scout   -> GPT-5.3 Codex high
+plan       -> Claude Opus 5 (Copilot)     max
+build      -> Claude Opus 5 (Copilot)     high
+general    -> GPT-5.6 Terra (Copilot)     high
+explore    -> GPT-5.6 Luna (Copilot)      medium
+scout      -> GPT-5.6 Luna (Copilot)      low
+reviewer   -> GPT-5.6 Sol (Copilot)       high
+expert     -> GPT-5.6 Sol (direct OpenAI) xhigh
+breakglass -> GPT-5.6 Sol (direct OpenAI) max
+compaction -> GPT-5.6 Terra (Copilot)     medium
+title      -> GPT-5.6 Luna (Copilot)      low
+summary    -> GPT-5.6 Luna (Copilot)      low
 ```
 
-It also permits `build` to invoke subagents via the Task tool (`"task": "allow"`).
+It also permits `plan`, `build`, and `general` to invoke subagents via the Task
+tool, with `breakglass` explicitly denied at every one of those `task`
+permission blocks and at the top level.
 
 ## 5. Superpowers routing
 
 `.opencode/model-routing.md` provides the semantic mapping:
 
 ```text
-Superpowers implementation subagent -> general  -> Opus xhigh
-Superpowers review / re-review       -> reviewer -> Codex max
-high-risk / disputed judgment        -> expert   -> GPT-5.6 Sol
+Superpowers implementation subagent -> general    -> GPT-5.6 Terra high (Copilot)
+Superpowers review / re-review       -> reviewer   -> GPT-5.6 Sol high (Copilot)
+high-risk / disputed judgment        -> expert     -> GPT-5.6 Sol xhigh (direct OpenAI)
 ```
 
 This layer is still an instruction to the controller, not a hard-coded Superpowers dispatcher. The deterministic parts are the agent-to-model mapping. If future observation shows Superpowers repeatedly dispatching review to the wrong subagent, the next escalation is a minimal Superpowers dispatch override rather than adding more prompt rules.
@@ -192,4 +217,4 @@ After merging the configuration, verify these scenarios:
 
 ## 8. GPT-5.6 quota rule
 
-Do not switch `build`, `plan`, `general`, `explore`, `scout`, or `reviewer` to GPT-5.6 for normal work. Keep GPT-5.6 isolated behind the hidden `expert` agent so ordinary delegation cannot accidentally inherit the scarce model.
+Do not switch `plan`, `build`, `general`, `explore`, `scout`, `reviewer`, `compaction`, `title`, or `summary` to direct OpenAI for normal work; all nine stay on GitHub Copilot. Keep direct OpenAI isolated behind `expert` and the human-selected `breakglass` agent so ordinary delegation cannot accidentally inherit the scarce, credential-gated provider.

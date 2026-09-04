@@ -122,17 +122,59 @@ user-global active profile. `v1-restored-2026-09.jsonc` is unchanged.
 `eval/runtime/opencode-v1-adapter/run-phase3-build-fixture.sh` hardcoded its
 ledger account name to `phase3_build_ab` (a copy-paste artifact from the
 Opus-vs-Sonnet runner) instead of accepting it as a parameter. This meant
-the first dispatch's cost was recorded under the wrong account key in a
-ledger whose `caps` only defined `phase3_build_gpt` — silently defeating the
-`ledger_admit` budget check (it read `spent=0` regardless of true spend).
-Found immediately after the first dispatch, before any budget decision could
-be affected: the script was fixed to accept `--account` as an explicit
-parameter, the one affected ledger entry's `account` field was corrected
-(the credits value itself was always correct — `derived_credits` comes
-straight from `dispatch-fixture.sh`, untouched by this bug), and every
-dispatch from that point on used the corrected script. Budget enforcement
-was never actually bypassed in practice (each dispatch was well within cap
-regardless), but the check was not verifying what it claimed to until fixed.
+the first dispatch's cost landed under the wrong account key in a ledger
+whose `caps` only defined `phase3_build_gpt`, so any query of the *correct*
+account (`ledger_spent`/`ledger_admit` against `phase3_build_gpt`) would
+have under-reported spend by 29.5159 credits until the entry was relabelled.
+**Correction, per independent review**: `dispatch_fixture` (the actual
+dispatch code path) never calls `ledger_admit` at all — it only calls
+`ledger_append` after the fact. No live admission check was running to be
+defeated; the 264-credit cap is reconciled after each dispatch, not
+enforced before it, and this was already true before this bug and remains
+true after the fix. The bug's real effect was narrower than an earlier
+draft of this section claimed (it neither ran nor "defeated" a check): it
+mislabelled one ledger entry's account field, nothing more. Found
+immediately after the first dispatch: the script was fixed to accept
+`--account` as an explicit parameter, and the one affected ledger entry's
+`account` field was corrected (the credits value itself was always correct
+— `derived_credits` comes straight from `dispatch-fixture.sh`, untouched by
+this bug). No path existed for this bug to enable unmeasured spend: only 4
+dispatches were ever made, each is independently reconstructible from its
+own `raw.jsonl`, and the total (94.038) is far under the 264-credit cap
+regardless. Wiring `ledger_admit` into `dispatch_fixture` as a genuine
+pre-spend check remains a real, disclosed gap for a future experiment to
+close — not fixed here, since it doesn't change this outcome.
+
+## Known non-blocking limitations (per independent review)
+
+- **Sandboxes were created inside the git worktree**, so both models' `git
+  log`/`git status` calls (run only as harmless exploration, never as part
+  of completing the task) walked upward and saw this repository's real
+  history and working-tree state, including this experiment's own name and
+  in-flight commits. Confirmed via `raw.jsonl`: this did not affect the
+  outcome (Sol's build-feature failure was already determined at its first
+  tool call, loading a design-confirmation skill, before any git command
+  ran; it passed build-bugfix regardless). This is a real evidence-blinding
+  risk for a *future* experiment where a model's behavior could plausibly
+  depend on seeing the experiment's own framing, and is disclosed rather
+  than fixed here: closing it requires changing the shared sandbox-creation
+  mechanism (`mktemp -d` outside any repository, or a `GIT_CEILING_DIRECTORIES`
+  guard), which is harness-hardening work beyond what this specific
+  decision required.
+- **The installed skill set/version is not recorded in `dispatch.json`.**
+  The `brainstorming` skill Sol invoked comes from a machine-global plugin
+  cache (`superpowers`), available identically to both arms (not a sandbox
+  artifact), but a rerun on a machine with a different superpowers version
+  could in principle behave differently with identical recorded provenance.
+- **The 4 dispatch invocations are not captured as a single reproducible
+  driver script**, and the `--timeout 480` actually used is committed
+  nowhere in the frozen preflight (the runner's own default is 1800s). It
+  applied symmetrically and no dispatch came within 400s of it, so it is
+  harmless here, but the run cannot be replayed from the repository alone.
+
+None of these affect the KEEP_OPUS decision or the `VALID_CONTROLLER_FAILURE`
+classification, both independently re-derived and confirmed correct under
+every alternative reading tried.
 
 ## Verification
 

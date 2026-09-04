@@ -33,7 +33,12 @@ bugfix_opus = load("build-bugfix/pair2-arm2-opus/attempt.json")
 # environment failure)
 for a in (feature_opus, feature_sol, bugfix_sol, bugfix_opus):
     assert a["dispatch_classification"] == "OK", a["label"] + " must be a valid, healthy dispatch"
+    assert a["dispatch_healthy"] is True, a["label"] + " must be dispatch_healthy"
     assert a["dispatch"]["retry_count"] == 0
+    assert a["dispatch"]["failure_class"] is None, \
+        a["label"] + " must have no failure_class -- a real failure_class would mean INVALID_ENVIRONMENT, not VALID_CONTROLLER_FAILURE"
+    assert a["dispatch"]["provider_error_text"] is None, \
+        a["label"] + " must have no provider error -- confirms the dispatch itself was healthy"
 
 # the specific, real outcome of each arm, re-read from raw evidence
 assert feature_opus["oracle_passed"] is True
@@ -79,8 +84,10 @@ assert abs(manifest["credits_consumed"] - adj["budget"]["consumed_credits"]) < 1
 '
 
 # --- production routing files were never touched by this experiment ---
+# 'profiles/' (not just the one named snapshot file) so any profile, present
+# or future, is covered -- not only the canonical restored baseline.
 git -C "$root/.." diff --name-only main -- \
-  'profiles/v1-restored-2026-09.jsonc' 'opencode.jsonc' | \
+  'profiles/' 'opencode.jsonc' | \
   grep -q . && fail "experiment touched a production routing file" || true
 
 printf 'PASS: Phase-3 Build Opus-vs-Sol result is independently re-derivable from raw evidence\n'

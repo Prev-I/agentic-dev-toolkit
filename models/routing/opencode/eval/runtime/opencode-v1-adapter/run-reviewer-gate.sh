@@ -52,6 +52,14 @@ run_reviewer_gate() {
   prompt="$outdir/prompt.txt"
   reviewer_request >"$prompt"
 
+  # Provenance (docs/evidence/2026-09-04-reviewer-fixture-integrity-remediation.md,
+  # section "Evidence/provenance hardening"): the last commit that touched
+  # the fixture tree, so a future fixture defect can mechanically identify
+  # exactly which results it invalidates by commit range, rather than by
+  # hand-auditing every historical run directory again.
+  export REVIEWER_FIXTURE_REVISION
+  REVIEWER_FIXTURE_REVISION=$(git -C "$fixture" log -1 --format=%H -- . 2>/dev/null || printf unknown)
+
   local ledger_args=()
   [[ -n "$ledger" ]] && ledger_args=(--ledger "$ledger")
 
@@ -136,7 +144,9 @@ clean = [{"severity": str(item.get("severity")),
 document = {"seeded": seeded, "clean": clean,
             "normalization": "highest severity the reviewer reported against the case's override file",
             "runner_decides_gate_outcome": False,
-            "scorer": "eval/scoring/reviewer.sh::reviewer_structured_gate"}
+            "scorer": "eval/scoring/reviewer.sh::reviewer_structured_gate",
+            "fixture_revision": os.environ.get("REVIEWER_FIXTURE_REVISION", "unknown"),
+            "fixture_integrity_checked": True}
 with open(f"{outdir}/findings.json", "w", encoding="utf-8") as handle:
     json.dump(document, handle, indent=2)
     handle.write("\n")

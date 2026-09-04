@@ -76,6 +76,21 @@ configuration (`operational_state: active`) and **is** now the
 `canonical_quality_reference` — meaning restoration-quality, not a claim
 that every role's model is optimal for its role.
 
+### Phase-3 Build optimization cycle: closed, KEEP_OPUS
+
+Two hypothesis-driven Build challenger experiments have completed against
+the restored baseline — Opus 5 high vs Sonnet 5 high
+(`docs/decisions/2026-09-04-phase3-build-ab-result.md`) and Opus 5 high vs
+GPT-5.6 Sol high (`docs/decisions/2026-09-04-phase3-build-gpt-result.md`) —
+both concluding **KEEP_OPUS**. **Build remains `github-copilot/claude-opus-5`
+high; Reviewer remains `github-copilot/gpt-5.6-sol` high; neither role
+changed.** The Reviewer-inversion path these experiments gated is
+**NOT_TRIGGERED** (its prerequisite, a Build Sol win, did not occur) and is
+not pre-registered or executed. Full closure record, including the scoped
+Sol conclusion, preserved budget history, and the observation-driven policy
+now governing future experiments:
+[Phase-3 Build optimization cycle closure](docs/decisions/2026-09-04-phase3-build-optimization-closure.md).
+
 ## Restored reference profile
 
 [`profiles/v1-restored-2026-09.jsonc`](profiles/v1-restored-2026-09.jsonc) is

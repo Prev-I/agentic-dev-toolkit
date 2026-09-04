@@ -6,9 +6,12 @@ steps: 6
 hidden: true
 permission:
   edit: deny
-  task: deny
-  skill: allow
   bash: deny
+  task: deny
+  webfetch: deny
+  websearch: deny
+  external_directory: deny
+  skill: allow
 ---
 
 # Expert

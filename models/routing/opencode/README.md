@@ -149,6 +149,44 @@ routing profile, call candidate models during tests, or authorize Phase R. See
 the [Phase 0 gate record](docs/evidence/2026-09-02-phase-0-gates.md) for the
 implemented gates and unresolved budget inputs.
 
+## Alignment check — is the installed configuration still this bundle?
+
+Merging this bundle is a copy, not a link: once installed, the user-global
+configuration and this repository drift independently. To compare them:
+
+```bash
+bash models/routing/opencode/eval/check-alignment.sh
+```
+
+No arguments, no model calls, and it changes nothing. Exit codes: `0`
+aligned, `1` drift, `2` usage error or nothing installed. Add
+`--json /path/report.json` for a machine-readable record.
+
+It reports two severities, deliberately kept apart:
+
+| Severity | What it covers | Fails the check |
+|---|---|---|
+| `DRIFT` | Routing-owned configuration keys — the top-level `model`, the top-level `permission.task`, and the declared agent rows *including their permission blocks* — plus any agent's permission frontmatter | yes |
+| `STALE` | A support file whose prose differs while its permissions still match | no |
+
+Scope of "routing-owned" is taken verbatim from `activate-profile.sh`.
+**Everything else in your configuration is yours and is never reported** —
+your own `plugin` list, theme, or a custom agent row the targets manifest
+does not declare. A check that flagged those would cry wolf, and a check
+that cries wolf is one people stop running.
+
+**It never repairs anything.** Drift is sometimes deliberate: the Build
+`git push*` permission legitimately moved from `deny` to `ask` on
+2026-09-04, and a tool that "corrected" that would have been wrong. When it
+reports drift, decide per item, then either re-copy the bundle file or fix
+the repository.
+
+This answers a different question from
+`eval/runtime/opencode-v1-adapter/verify-effective-routing.sh`, which asks
+whether the *runtime* resolves each role as declared. Alignment asks whether
+the *files on disk* still match this repository. Both are useful; neither
+subsumes the other.
+
 ## 1. Verify model IDs and variants
 
 Connect GitHub Copilot and OpenAI in OpenCode, then inspect the models and variants available to your accounts:
@@ -207,6 +245,10 @@ Copy these files from this bundle into the matching target paths:
 ```
 
 `reviewer` is independent and read-only. `expert` is hidden, read-only, cannot spawn subagents, and is capped at six agentic steps. GPT-5.6 Sol is not confined to `expert`: `reviewer` runs it through Copilot at `high`, `expert` runs it direct on OpenAI at `xhigh`, and `breakglass` runs it direct on OpenAI at `max` as a human-selected primary.
+
+These are copies. After installing them — and after any later change to
+either side — [the alignment check](#alignment-check--is-the-installed-configuration-still-this-bundle)
+tells you whether they still match this bundle.
 
 ## 4. Merge the OpenCode configuration
 

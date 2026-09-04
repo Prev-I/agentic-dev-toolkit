@@ -3,13 +3,16 @@
 // below it (originally "passed... 5/5") is.
 //
 // CORRECTED 2026-09-04, post-hoc, without rewriting this snapshot's routing
-// content: Phase R is BLOCKED_REVIEWER, not PASS. The Reviewer seeded-defect
-// gate's original "5/5" result is invalidated (see I1/I2 in
-// docs/evidence/2026-09-04-phase-r-execution.md and the Reviewer
-// fixture-integrity remediation record for the full trace). This file is
-// retained as a snapshot of what was active, NOT as canonical_quality_reference
-// or as a Phase-3 starting baseline, until the Reviewer gate is re-run clean
-// against an integrity-proven fixture.
+// content: Phase R is BLOCKED_REVIEWER_RERUN, not PASS. The Reviewer
+// seeded-defect gate's original "5/5" result is invalidated (see I1/I2 in
+// docs/evidence/2026-09-04-phase-r-execution.md, the Reviewer
+// fixture-integrity remediation record, and the Reviewer
+// observability/attribution remediation record for the full trace). The
+// Reviewer fixture and scorer are now mechanically admissible offline, but
+// a fresh live rerun and its budget approval are still pending. This file
+// is retained as a snapshot of what was active, NOT as
+// canonical_quality_reference or as a Phase-3 starting baseline, until that
+// rerun passes cleanly.
 //
 // profile_id:     v1-restored-2026-09
 // source_commit:  ee7092d9e94ea6cfc30c570c75dd7a8d21fc8e41

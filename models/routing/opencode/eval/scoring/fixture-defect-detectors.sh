@@ -67,6 +67,18 @@ api_emits_renamed_field() {
   [[ "$output" == *'"name"'* && "$output" != *'"displayName"'* ]]
 }
 
+# R-API observability witness (docs/evidence/2026-09-04-reviewer-fixture-integrity-remediation.md,
+# part 2, "Close R-API observability"): unlike the detector above, this
+# checks the SAME thing a Reviewer looking at the sandbox could observe --
+# clean/api_contract.sh (a downstream consumer's contract expectation,
+# present in every sandbox including R-API's, since it is never overridden)
+# combined with the api.sh actually present. Present (violation) if the
+# combination fails the consumer's own assertion.
+api_violates_public_contract() {
+  local clean_dir=$1 api_file=$2
+  ! ( source "$clean_dir/api_contract.sh"; source "$api_file"; assert_public_response_contract probe >/dev/null 2>&1 )
+}
+
 # Pre-existing clean-control defect (fixed by commit a96c0ce in clean/, but
 # re-verify mechanically rather than assuming): unescaped JSON interpolation
 # lets a value containing a double quote inject arbitrary JSON structure.
@@ -206,6 +218,67 @@ fixture_integrity_check() {
         ok=1
       fi
     done
+  done
+
+  # R-API public-contract witness (separate from the loop above: this
+  # defect is only observable when api.sh is combined with
+  # clean/api_contract.sh -- the constructed-sandbox view every live
+  # dispatch actually uses -- not the override file in isolation).
+  if [[ ! -f "$fixture/clean/api_contract.sh" ]]; then
+    printf 'FIXTURE INTEGRITY: clean/api_contract.sh missing -- R-API public-contract witness not present\n' >&2
+    ok=1
+  else
+    if api_violates_public_contract "$fixture/clean" "$fixture/clean/api.sh"; then
+      printf 'FIXTURE INTEGRITY: clean/api.sh violates its own declared public contract -- clean must satisfy it\n' >&2
+      ok=1
+    fi
+    if [[ -f "$fixture/cases/R-API/api.sh" ]] && ! api_violates_public_contract "$fixture/clean" "$fixture/cases/R-API/api.sh"; then
+      printf 'FIXTURE INTEGRITY: cases/R-API/api.sh does not violate the public contract -- R-API is missing its observable seeded defect\n' >&2
+      ok=1
+    fi
+  fi
+
+  # Scorer attribution integrity (docs/evidence/
+  # 2026-09-04-reviewer-fixture-integrity-remediation.md, part 2): for
+  # every case that declares a diff-derived "witness" substring
+  # (cases/<id>/ground-truth.json), the witness must genuinely discriminate
+  # -- present in the override, absent from clean -- or the scorer's
+  # witness-matched attribution (eval/scoring/reviewer.sh) would silently
+  # fail closed for every future dispatch of that case. Checked here, at
+  # admission time, not only in CI, so drift is caught before a single
+  # credit is spent, the same principle as the fixture-defect checks above.
+  local case_dir2 gt_file witness override_rel clean_file override_file
+  for case_dir2 in "$fixture"/cases/*/; do
+    case_id=$(basename "${case_dir2%/}")
+    gt_file="$case_dir2/ground-truth.json"
+    [[ -f "$gt_file" ]] || continue
+    if ! python3 -c 'import json,sys; sys.exit(0 if "witness" in json.load(open(sys.argv[1])) else 1)' "$gt_file"; then
+      continue
+    fi
+    witness=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("witness") or "")' "$gt_file")
+    if [[ -z "$witness" ]]; then
+      printf 'FIXTURE INTEGRITY: %s witness is present but empty -- an empty substring matches anything, invalid\n' "$case_id" >&2
+      ok=1
+      continue
+    fi
+    override_rel=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["overrides"][0])' "$gt_file")
+    clean_file="$fixture/clean/$override_rel"
+    override_file="$case_dir2$override_rel"
+    if [[ ! -f "$clean_file" || ! -f "$override_file" ]]; then
+      printf 'FIXTURE INTEGRITY: %s witness check cannot run -- %s or %s missing\n' "$case_id" "$clean_file" "$override_file" >&2
+      ok=1
+      continue
+    fi
+    if [[ "$(<"$override_file")" != *"$witness"* ]]; then
+      printf 'FIXTURE INTEGRITY: %s witness %q is not present in %s -- scorer attribution would always miss this case\n' \
+        "$case_id" "$witness" "$override_file" >&2
+      ok=1
+    fi
+    if [[ "$(<"$clean_file")" == *"$witness"* ]]; then
+      printf 'FIXTURE INTEGRITY: %s witness %q is also present in %s -- does not discriminate\n' \
+        "$case_id" "$witness" "$clean_file" >&2
+      ok=1
+    fi
   done
 
   return "$ok"

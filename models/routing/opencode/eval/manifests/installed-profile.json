@@ -20,10 +20,10 @@
   },
   "effective_routing_evidence": "eval/records/phase-r/effective-routing.json",
   "canonical": false,
-  "phase_r_status": "BLOCKED_REVIEWER",
+  "phase_r_status": "BLOCKED_REVIEWER_RERUN",
   "operational_state": "active-provisional",
   "canonical_quality_reference": false,
-  "status_note": "This routing is actively installed on the real, user-global OpenCode configuration and remains in effect -- that activation is not reversed by this status. 'canonical' and 'canonical_quality_reference' were flipped back to false because the Reviewer gate is BLOCKED (see docs/evidence/2026-09-04-phase-r-execution.md), not because the activation itself is in question. Build/Explore/Compaction/routing-resolution/security gates remain valid and are not re-run by this correction.",
+  "status_note": "This routing is actively installed on the real, user-global OpenCode configuration and remains in effect -- that activation is not reversed by this status. 'canonical' and 'canonical_quality_reference' were flipped back to false because the Reviewer gate is blocked (see docs/evidence/2026-09-04-phase-r-execution.md and docs/evidence/2026-09-04-reviewer-observability-attribution-remediation.md), not because the activation itself is in question. Build/Explore/Compaction/routing-resolution/security gates remain valid and are not re-run by this correction. Status is BLOCKED_REVIEWER_RERUN, not plain BLOCKED_REVIEWER: the Reviewer fixture and scorer are now admissible (fixture integrity, R-API observability, and witness-based attribution all mechanically proven offline), but a fresh live 5/5 + clean-zero rerun is still required and no budget tranche for it is yet approved.",
   "restored_profile": "profiles/v1-restored-2026-09.jsonc",
   "provenance_ceiling": "Ordinary sessions are attributable only to the profile known to be installed at the time.",
   "global_configuration_contents_committed": false

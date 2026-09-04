@@ -1,6 +1,10 @@
 {
   "fixture": "reviewer-seeded-defects",
-  "target": {"role": "reviewer", "model": "github-copilot/gpt-5.6-sol", "variant": "high"},
+  "target": {
+    "role": "reviewer",
+    "model": "github-copilot/gpt-5.6-sol",
+    "variant": "high"
+  },
   "per_id_detections": {
     "R-API": "blocking",
     "R-AUTH": "blocking",
@@ -8,10 +12,18 @@
     "R-CONCURRENCY": "blocking",
     "R-ERROR": "material"
   },
-  "clean_control_result": {"material_findings": 0, "all_findings": [{"file": "pagination.sh", "severity": "suggestion"}]},
-  "verdict": "pass",
+  "clean_control_result": {
+    "material_findings": 0,
+    "all_findings": [
+      {
+        "file": "pagination.sh",
+        "severity": "suggestion"
+      }
+    ]
+  },
+  "verdict": "PENDING_RE_VERIFICATION",
   "pricing_regime": "standard",
-  "canonical_cost_reference": true,
+  "canonical_cost_reference": false,
   "run_notes": "Complete re-run of all 5 seeded cases plus the clean control, in one uninterrupted session, against the repaired reviewer-seeded-defects fixture (commit f4026c9: load_items -> load_items_or_fail in clean/storage.sh and cases/R-ERROR/storage.sh, resolving the R_ERROR_FIXTURE_AMBIGUITY root cause identified by a structured H1/H2 investigation). Production Reviewer target unchanged (github-copilot/gpt-5.6-sol, high) -- no effort bump was needed or used. All 6 dispatches were healthy on the first attempt, no retries required. Charged to the Phase-R recovery budget per explicit human authorization (evaluation budget was exhausted from the prior diagnostic work). Superseded a prior 4/5 result (models/routing/opencode/eval/records/phase-r/reviewer-run-1-pre-fixture-fix/) that was produced against the pre-repair fixture and is preserved historically, marked superseded, not used as adjudication evidence.",
   "detected_count": 5,
   "required_count": 5,
@@ -19,5 +31,8 @@
   "reviewer_effort_change_permitted": false,
   "xhigh_diagnostic_used": false,
   "xhigh_diagnostic_note": "Not needed: the repaired fixture passed at high effort on the first complete rerun, so the H3/VALID_CONTROLLER_FAILURE branch (which would have required an xhigh diagnostic run) was never reached.",
-  "phase_3_note": "Per decision doc, Reviewer effort experiments (high vs xhigh) belong to Phase 3 under approved conditions only; not evaluated or changed in Phase R."
+  "phase_3_note": "Per decision doc, Reviewer effort experiments (high vs xhigh) belong to Phase 3 under approved conditions only; not evaluated or changed in Phase R.",
+  "cost_correction_note": "I1 CORRECTION (2026-09-04, post-hoc): dispatch-fixture.sh's cost/credit figures cited throughout this record were undercounted by a step_finish cost-overwrite bug (fixed in commit 505d35a) that summed only the LAST turn's cost instead of every turn's cost for each multi-step dispatch. Corrected observed_cost/derived_credits for every dispatch with surviving raw.jsonl evidence are recorded in each dispatch.json's cost_correction block and in models/routing/opencode/eval/records/phase-r/budget-ledger.json's i1_correction block. canonical_cost_reference is corrected to false: this record's own inline cost figures predate the fix and are known-undercounted; do not cite them for budget accounting.",
+  "previous_verdict": "pass",
+  "i2_correction_note": "I2 FINDING (2026-09-04, post-hoc): the clean-control fixture repair (commit a96c0ce) fixed eval/fixtures/reviewer-seeded-defects/clean/{api.sh,pagination.sh} but was never propagated to the case override files cases/R-API/api.sh and cases/R-BOUNDARY/pagination.sh, which still carried the OLD vulnerable patterns the clean-control repair replaced. Independent verification of R-API/dispatch/response.txt and R-BOUNDARY/dispatch/response.txt confirms both cases' 'blocking' findings are entirely about the reintroduced old-pattern vulnerability (JSON-escaping for R-API, arbitrary command execution via array-subscript substitution for R-BOUNDARY) with zero mention of the seeded ground-truth defect (field-rename for R-API, zero-boundary for R-BOUNDARY). 2 of the 5 credited detections in per_id_detections are therefore NOT detections of the seeded defects. This verdict is PENDING_RE_VERIFICATION until cases/R-API and cases/R-BOUNDARY are repaired to preserve only their seeded defect (pending explicit human-authorized fixture repair, the same pattern used for the R-ERROR storage.sh repair) and the affected cases are rerun."
 }

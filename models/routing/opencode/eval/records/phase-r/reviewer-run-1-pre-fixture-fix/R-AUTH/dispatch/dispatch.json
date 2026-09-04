@@ -15,8 +15,8 @@
   "failure_class": null,
   "provider_error_text": null,
   "provider_status_code": null,
-  "observed_cost": 0.06167725,
-  "derived_credits": 6.167725,
+  "observed_cost": 0.28938825,
+  "derived_credits": 28.938825,
   "normalized_steady_state_cost": null,
   "tokens": {
     "total": 26872,
@@ -31,5 +31,12 @@
   "wall_clock_ms": 58803,
   "retry_count": 0,
   "raw_evidence": "raw.jsonl",
-  "decides_gate_outcome": false
+  "decides_gate_outcome": false,
+  "cost_correction": {
+    "corrected_for": "I1 dispatch-fixture.sh step_finish cost overwrite bug (fixed 2026-09-04)",
+    "originally_recorded_observed_cost": 0.06167725,
+    "originally_recorded_derived_credits": 6.167725,
+    "recomputed_from": "raw.jsonl (sum of every step_finish part.cost)",
+    "step_finish_events": 4
+  }
 }

@@ -1,8 +1,12 @@
 {
-  "status": "SUPERSEDED — not final adjudication evidence",
+  "status": "SUPERSEDED \u2014 not final adjudication evidence",
   "superseded_reason": "Root-cause investigation (H1/H2) confirmed R_ERROR_FIXTURE_AMBIGUITY: the R-ERROR case's storage.sh, unlike all four other seeded cases, gave no name/signature signal that callers rely on distinguishing a backend failure from a genuinely-empty result. The fixture was repaired (load_items -> load_items_or_fail, commit f4026c9) with explicit human approval, independently reviewed, and the Reviewer gate was re-run in full against the repaired fixture. See models/routing/opencode/eval/records/phase-r/reviewer/outcome.json for the current, final result. This directory is preserved as a historical record of the pre-repair run and its diagnostic value (it is what surfaced the fixture defect); it is NOT the basis for any Phase-R pass/fail decision.",
   "fixture": "reviewer-seeded-defects",
-  "target": {"role": "reviewer", "model": "github-copilot/gpt-5.6-sol", "variant": "high"},
+  "target": {
+    "role": "reviewer",
+    "model": "github-copilot/gpt-5.6-sol",
+    "variant": "high"
+  },
   "per_id_detections": {
     "R-API": "blocking",
     "R-AUTH": "blocking",
@@ -10,14 +14,23 @@
     "R-CONCURRENCY": "material",
     "R-ERROR": "suggestion"
   },
-  "clean_control_result": {"material_findings": 0, "all_findings": [{"file": "pagination.sh", "severity": "suggestion"}]},
+  "clean_control_result": {
+    "material_findings": 0,
+    "all_findings": [
+      {
+        "file": "pagination.sh",
+        "severity": "suggestion"
+      }
+    ]
+  },
   "verdict": "block",
   "pricing_regime": "standard",
-  "canonical_cost_reference": true,
+  "canonical_cost_reference": false,
   "run_notes": "Two harness bugs were found and fixed before this final run: (1) dispatch_extract_json (Task 8, shared primitive) desynced on unpaired double-quote characters in the reviewer's own prose, corrupting JSON extraction on the first live attempt across all four runner tasks that use it; fixed by replacing the hand-rolled scanner with json.JSONDecoder().raw_decode(). (2) The fixture's own 'clean' control (eval/fixtures/reviewer-seeded-defects/clean/{api.sh,pagination.sh}) genuinely contained the vulnerabilities its own ground truth claimed did not exist; repaired as a FIXTURE_DEFECT (user-authorized) by analogy to the Build gate's own state-machine taxonomy. After both fixes, two cases (R-API, R-BOUNDARY) needed a second dispatch attempt, charged to the recovery budget (user-authorized given evaluation-budget exhaustion), because their first attempts produced no usable structured output for content reasons unrelated to either fixed bug (R-API: the model's experimental verification command was denied by its own correctly-enforced read-only permission boundary, and it did not recover to a final answer; R-BOUNDARY: the model's final JSON was syntactically truncated, missing its closing brace). Both retries produced clean, complete, correctly-detected results. The R-ERROR result below is from THIS run's ordinary, undisturbed dispatch (not retried) and is a genuine model-judgment outcome: the reviewer's prose and finding summary precisely and correctly describe R-ERROR's actual seeded defect (storage.sh swallowing backend failures as an empty success result) but rated its severity as 'suggestion' rather than 'material'/'blocking', so it does not count as a detection under the committed scorer's material_severities threshold.",
   "detected_count": 4,
   "required_count": 5,
   "gate_verdict_source": "eval/scoring/reviewer.sh::reviewer_structured_gate (unmodified)",
   "reviewer_effort_change_permitted": false,
-  "phase_3_note": "Per decision doc, Reviewer effort experiments (high vs xhigh) belong to Phase 3 under approved conditions only; not evaluated or changed in Phase R."
+  "phase_3_note": "Per decision doc, Reviewer effort experiments (high vs xhigh) belong to Phase 3 under approved conditions only; not evaluated or changed in Phase R.",
+  "cost_correction_note": "I1 CORRECTION (2026-09-04, post-hoc): dispatch-fixture.sh's cost/credit figures cited throughout this record were undercounted by a step_finish cost-overwrite bug (fixed in commit 505d35a) that summed only the LAST turn's cost instead of every turn's cost for each multi-step dispatch. Corrected observed_cost/derived_credits for every dispatch with surviving raw.jsonl evidence are recorded in each dispatch.json's cost_correction block and in models/routing/opencode/eval/records/phase-r/budget-ledger.json's i1_correction block. canonical_cost_reference is corrected to false: this record's own inline cost figures predate the fix and are known-undercounted; do not cite them for budget accounting."
 }

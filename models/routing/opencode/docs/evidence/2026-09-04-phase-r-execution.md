@@ -2,8 +2,14 @@
 
 ## Status
 
-**Phase R: PASS.** Every committed ground-truth gate passed. The restored
-routing profile is active on the real, user-global OpenCode configuration.
+**Phase R: PASS on Build/Explore/Compaction. Reviewer gate PENDING
+RE-VERIFICATION. Budget: both caps corrected and found exceeded.** The
+restored routing profile is active on the real, user-global OpenCode
+configuration; that activation stands. Two post-hoc corrections were made to
+this record on 2026-09-04, after the original "PASS" status below was first
+written — see [Post-hoc corrections (I1, I2)](#post-hoc-corrections-i1-i2)
+before relying on any cost figure or the Reviewer gate's prior "5/5 PASS"
+claim elsewhere in this document.
 
 ## Runtime
 
@@ -138,19 +144,27 @@ files), re-verified `PASS`.
 
 **PASS.** 3/3 valid attempts, all `oracle_passed: true`, all dispatch
 `classification: "OK"`. No classification needed, no n=5 escalation, no
-fixture control. Total cost 5.569 credits.
+fixture control. Gate verdict is unaffected by I1 (cost has no bearing on
+`oracle_passed`). Total cost, corrected per I1: 74.096 credits (originally
+recorded as 5.569 — see [Post-hoc corrections](#post-hoc-corrections-i1-i2)).
 
-| Attempt | Oracle | Dispatch | Credits |
-|---|---|---|---:|
-| 1 | pass | OK | 2.238925 |
-| 2 | pass | OK | 1.657875 |
-| 3 | pass | OK | 1.67235 |
+| Attempt | Oracle | Dispatch | Credits (corrected) | Credits (originally recorded) |
+|---|---|---|---:|---:|
+| 1 | pass | OK | 26.191575 | 2.238925 |
+| 2 | pass | OK | 23.1935 | 1.657875 |
+| 3 | pass | OK | 24.711275 | 1.67235 |
 
 `eval/records/phase-r/build/outcome.json`.
 
 ## Reviewer seeded-defect gate
 
-**PASS — 5/5**, after a fixture repair. Full detail in the section below.
+**PENDING RE-VERIFICATION.** Previously reported here as "PASS — 5/5" after
+a fixture repair; that claim is corrected as of 2026-09-04 — 2 of the 5
+credited detections (R-API, R-BOUNDARY) are now known to be attributable to
+the wrong vulnerability, not the seeded ground-truth defect. See
+[Post-hoc corrections](#post-hoc-corrections-i1-i2). The fixture-repair
+narrative below (R-ERROR / `load_items_or_fail`) remains accurate and is
+unaffected by this correction — it addresses a different case.
 
 `eval/records/phase-r/reviewer/outcome.json`.
 
@@ -204,9 +218,13 @@ involved real engineering work worth recording in full.
    analogy to the Build gate's own state-machine taxonomy, repaired with
    explicit human authorization, independently reviewed and approved
    (confirmed: both vulnerabilities genuinely closed via adversarial testing,
-   original bounds semantics exactly preserved, zero interference with any of
-   the five seeded cases' own detection scoring, a proactive check for other
-   files sharing the same vulnerability class found none in scope).
+   original bounds semantics exactly preserved in `clean/`). **The
+   "zero interference with the five seeded cases' own detection scoring" and
+   "proactive check for other files sharing the same vulnerability class
+   found none in scope" claims here are corrected as of 2026-09-04 — both
+   were wrong.** `cases/R-API/api.sh` and `cases/R-BOUNDARY/pagination.sh`
+   are self-contained files carrying this exact same vulnerability class and
+   were never checked; see [I2](#post-hoc-corrections-i1-i2).
 
 ### Two content-quality dispatch failures, resolved by clean retry
 
@@ -261,26 +279,97 @@ plus the clean control, fresh sandboxes, one uninterrupted session) against
 the repaired fixture, at the **same production target**
 (`github-copilot/gpt-5.6-sol`, `high` — no effort change). All 6 dispatches
 were healthy on the first attempt. `R-ERROR` now correctly resolved
-`"material"`. **5/5, clean control still genuinely clean.** The `xhigh`
-diagnostic authorized for a genuine `VALID_CONTROLLER_FAILURE` was never
-needed — the fixture repair alone resolved it on the first complete rerun at
-production effort.
+`"material"`. **5/5 was reported here at the time, clean control still
+genuinely clean.** The `xhigh` diagnostic authorized for a genuine
+`VALID_CONTROLLER_FAILURE` was never needed for R-ERROR — the fixture
+repair alone resolved it on the first complete rerun at production effort.
+**This "5/5" claim is corrected as of 2026-09-04 — see
+[Post-hoc corrections](#post-hoc-corrections-i1-i2), I2:** 2 of these 5
+detections (R-API, R-BOUNDARY) are now known to be attributable to a
+different, reintroduced vulnerability rather than the seeded defect they
+were credited for detecting. This does not affect the R-ERROR finding
+documented in this section, which remains a correctly-diagnosed and
+correctly-repaired case.
 
 The superseded 4/5 run is preserved historically (not deleted, not
 overwritten) at `eval/records/phase-r/reviewer-run-1-pre-fixture-fix/`,
 explicitly marked non-adjudicating in its own `outcome.json`.
 
+## Post-hoc corrections (I1, I2)
+
+Two Important findings surfaced by the final whole-branch review and
+independently confirmed on 2026-09-04, **after** the sections above were
+first written. Both are now fixed or in progress; this section is the
+authoritative correction — where it disagrees with wording elsewhere in this
+document (e.g. "PASS — 5/5", the credit figures in the Budget section
+below), this section governs.
+
+### I1 — cost/credit undercounting (fixed; historical figures corrected)
+
+`dispatch-fixture.sh`'s raw-stream parser recorded only the **last**
+`step_finish` event's `cost`, overwriting rather than summing every prior
+turn's cost in a multi-turn dispatch (`probe.sh`'s single-turn capability
+probes were unaffected — verified via `cache.read: 0` in every preflight
+record). Fixed 2026-09-04, commit `505d35a`, with a regression test proving
+cost sums across turns while `tokens` (already a cumulative running
+snapshot per event) correctly keeps the last value.
+
+Every committed `dispatch.json` with surviving `raw.jsonl` evidence (17 of
+25 real dispatches) was recomputed from that raw evidence and corrected in
+place; each carries a `cost_correction` block recording the original and
+corrected figures. **8 dispatches have no recoverable true cost**: their
+`raw.jsonl` was overwritten on disk by a later dispatch reusing the same
+output directory before this bug was found. Their ledger entries are
+flagged `cost_correction: "UNRECOVERABLE"` and their recorded credits are a
+**known-undercounted floor**, not the true spend — every sibling dispatch in
+the same batch showed a 6-12x undercount.
+
+Full detail: `eval/records/phase-r/budget-ledger.json`'s `i1_correction`
+block.
+
+### I2 — clean-control fixture repair was incomplete (open; repair pending human authorization)
+
+The clean-control repair (commit `a96c0ce`, authorized during the original
+Reviewer gate investigation) fixed
+`eval/fixtures/reviewer-seeded-defects/clean/{api.sh,pagination.sh}` but was
+never propagated to the case override files
+`cases/R-API/api.sh` and `cases/R-BOUNDARY/pagination.sh`, which are
+self-contained and still carried the pre-repair vulnerable patterns.
+Independent verification of both cases' actual response transcripts
+confirms their "blocking" findings are entirely about the reintroduced old
+vulnerability (JSON-escaping for R-API, arbitrary command execution via
+array-subscript substitution for R-BOUNDARY), with zero mention of either
+case's seeded ground-truth defect. 2 of the 5 detections credited toward the
+reported 5/5 do not detect what they were meant to detect.
+
+Full detail: `eval/records/phase-r/reviewer/outcome.json`'s
+`i2_correction_note`. Repair and rerun require the same human-authorization
+pattern used for the R-ERROR fixture repair above and had not yet been
+executed as of this correction.
+
 ## Budget
 
-- Evaluation credits consumed: **96.754087 / 100**
-- Phase-R recovery credits consumed: **42.486075 / 250**
-  (two single-case retries for R-API/R-BOUNDARY content-quality failures, plus
-  the complete 6-dispatch Reviewer gate rerun against the repaired fixture —
-  both authorized explicitly given evaluation-budget exhaustion)
+**Both figures below are corrected for I1.** Where corrected credits could
+not be recovered (8 dispatches, all Reviewer-gate related), the account
+total is a **floor** — the true total is known to be higher.
+
+- Evaluation credits consumed: **289.012037 / 100 — cap exceeded** (floor;
+  6 of the 8 unrecoverable dispatches are charged to this account, so the
+  true total is higher still)
+- Phase-R recovery credits consumed: **267.909675 / 250 — cap exceeded**
+  (this account has no unrecoverable entries, so this figure is accurate,
+  not a floor)
+- Every `ledger_admit` check performed live during Phase R execution
+  compared against the undercounted figures and reported "admitted" at each
+  step; this correction shows both caps were almost certainly breached in
+  real terms at the time, without any check catching it, because the same
+  bug that undercounted spend also undercounted what was being checked
+  against the cap.
 - Organization guardrail: 7600 credits/billing cycle, externally enforced via
   GitHub billing; this repository holds no current billing snapshot, so
   headroom against the guardrail is reported as unavailable rather than
-  estimated.
+  estimated. Even the corrected evaluation+recovery total (~557 credits)
+  stays under this guardrail.
 - No OpenCode-native spending cap was created.
 
 ## Pricing regime
@@ -288,10 +377,16 @@ explicitly marked non-adjudicating in its own `outcome.json`.
 The Reviewer/Sol probe and every Reviewer dispatch in this execution were
 captured on 2026-09-04 — on or after the promotional-pricing cutoff
 (2026-09-04) named in the decision doc. Recorded pricing regime: `standard`
-(post-promotional). This observation is eligible to become, and is recorded
-as, the canonical Reviewer/Sol steady-state cost reference
-(`canonical_cost_reference: true` in both the capability-preflight record and
-the Reviewer gate's `outcome.json`).
+(post-promotional). **`canonical_cost_reference` is corrected to `false`** in
+both `eval/records/phase-r/reviewer/outcome.json` and
+`eval/records/phase-r/reviewer-run-1-pre-fixture-fix/outcome.json` (the
+capability-preflight probes in `eval/records/phase-r/preflight/` carry no
+such field and are unaffected — they are single-turn, verified unaffected by
+I1): the pricing *regime* classification (standard vs. promotional) is unaffected
+by I1 and remains correct, but the cost figures originally cited alongside
+it were undercounted, so this observation is not fit to serve as the
+canonical steady-state cost reference until re-verified against the I1-
+corrected figures.
 
 ## Installed-profile manifest
 
@@ -319,3 +414,11 @@ pre-existing arrow-alignment nit in the README, and similar) are listed in the
 SDD ledger (`.superpowers/sdd/2026-09-03-opencode-routing-phase-r/progress.md`)
 and are triaged by the final whole-branch review, not individually re-litigated
 here.
+
+I1 and I2 (see [Post-hoc corrections](#post-hoc-corrections-i1-i2)) were the
+two Important findings from that same final whole-branch review. I1 is fixed
+and its historical figures corrected. I2 is confirmed and open: repair of
+`cases/R-API/api.sh` and `cases/R-BOUNDARY/pagination.sh`, and a rerun of the
+affected cases, are pending explicit human authorization for the fixture
+touch, per the same pattern used for every other fixture change in this
+plan.

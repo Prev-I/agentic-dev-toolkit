@@ -19,7 +19,8 @@
     "breakglass": {"model": "openai/gpt-5.6-sol", "variant": "max", "mode": "primary"}
   },
   "effective_routing_evidence": "eval/records/phase-r/effective-routing.json",
-  "canonical": false,
+  "canonical": true,
+  "restored_profile": "profiles/v1-restored-2026-09.jsonc",
   "provenance_ceiling": "Ordinary sessions are attributable only to the profile known to be installed at the time.",
   "global_configuration_contents_committed": false
 }

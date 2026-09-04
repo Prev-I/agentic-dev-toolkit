@@ -23,9 +23,10 @@ PY
 run_capability_preflight() {
   local output_dir=$1 manifest=$2 ledger=$3 targets=$4
   mkdir -p "$output_dir"
-  local role model variant record status classification stop_class credits cost
-  while read -r role model variant; do
-    [[ -n "$role" ]] || continue
+  local role model variant record status classification stop_class credits cost line
+  while IFS= read -r line; do
+    IFS=' ' read -r role model variant <<<"$line"
+    [[ -n "${role:-}" ]] || continue
     record="$output_dir/${role}.json"
     set +e
     probe_model_variant "$model" "$variant" "$record"

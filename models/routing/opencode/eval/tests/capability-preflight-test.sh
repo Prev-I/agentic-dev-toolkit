@@ -64,4 +64,58 @@ print("null" if value is None else value)
 ' "$workspace/failure_no_cost.json")
 assert_eq 'null' "$cost"
 
+# Test the while read loop field splitting under file-scope IFS=$'\n\t' (no space).
+# This verifies the fix for the bug where the entire space-separated line was assigned
+# to the first variable because space was not in IFS. The fix uses an explicit local
+# IFS=' ' in the inner read to properly split role/model/variant.
+# We verify: (1) loop correctly splits all 11 lines from preflight_targets;
+# (2) probe_model_variant is invoked with non-empty model/variant for each role;
+# (3) record path is clean (no embedded spaces or corrupted slashes).
+test_preflight_loop_output="$workspace/test_preflight_loop"
+mkdir -p "$test_preflight_loop_output"
+
+# Create a fake probe function that logs its invocations and writes minimal success records.
+# This avoids real model calls while testing the loop's field-splitting behavior.
+probe_model_variant_fake() {
+  local model=$1 variant=$2 output=$3
+  [[ -n "$model" && "$model" != "" ]] || fail "probe_model_variant_fake called with empty model"
+  [[ -n "$variant" && "$variant" != "" ]] || fail "probe_model_variant_fake called with empty variant"
+  # Verify output path is clean (expected pattern: /path/to/dir/ROLENAME.json, no embedded spaces from corrupted split)
+  [[ "$output" == "$test_preflight_loop_output"/*.json ]] || fail "record path is corrupted: $output"
+  # Write a minimal success record
+  printf '{"error_text":"","status_code":200,"observed_cost":null,"provider":"test","model":"%s","variant":"%s","pricing_regime":"test","wall_clock_ms":0,"runtime_version":"test","exact_invocation":"test"}' "$model" "$variant" >"$output"
+  return 0
+}
+export -f probe_model_variant_fake
+
+# Run a minimal invocation of run_capability_preflight with our test setup.
+# Create a stub ledger file.
+test_ledger="$workspace/test_ledger.json"
+echo '[]' >"$test_ledger"
+
+# Temporarily override probe_model_variant with our fake.
+unset probe_model_variant
+probe_model_variant() { probe_model_variant_fake "$@"; }
+
+# Run preflight (will not exit 0 because records have observed_cost: null, but that's OK —
+# we're testing the loop field-splitting, not the overall status).
+set +e
+run_capability_preflight "$test_preflight_loop_output" "$workspace/test_manifest.json" "$test_ledger" "$root/manifests/phase-r-routing-targets.json" 2>&1 | head -1 || true
+set -e
+
+# Verify all 11 role record files were created (proving the loop iterated all 11 times).
+record_count=$(ls "$test_preflight_loop_output"/*.json 2>/dev/null | wc -l)
+assert_eq '11' "$record_count"
+
+# Spot-check that specific roles got the correct model/variant assignments.
+# Read the first role's record and verify its role, model, variant fields.
+first_record=$(cat "$test_preflight_loop_output/plan.json")
+assert_contains "$first_record" 'plan'
+assert_contains "$first_record" 'github-copilot/claude-opus-5'
+assert_contains "$first_record" 'max'
+
+breakglass_record=$(cat "$test_preflight_loop_output/breakglass.json")
+assert_contains "$breakglass_record" 'breakglass'
+assert_contains "$breakglass_record" 'openai/gpt-5.6-sol'
+
 printf 'PASS: Phase R capability preflight\n'

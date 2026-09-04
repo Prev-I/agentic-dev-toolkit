@@ -67,4 +67,12 @@ if ! api_violates_public_contract "$clean_dir" "$r_api_dir/api.sh"; then
   fail "cases/R-API/api.sh does not violate the public contract -- R-API is missing its observable seeded defect"
 fi
 
+# --- regression: the contract check must not rely on Python's `assert`,
+# which PYTHONOPTIMIZE/-O silently strips, defeating the check without any
+# error. Independent review caught this: with PYTHONOPTIMIZE=1 set, the
+# R-API violation was silently reported as satisfied (rc 0). ---
+if ! PYTHONOPTIMIZE=1 api_violates_public_contract "$clean_dir" "$r_api_dir/api.sh"; then
+  fail "api_violates_public_contract relies on Python assert, which PYTHONOPTIMIZE strips -- R-API's real violation went undetected under PYTHONOPTIMIZE=1"
+fi
+
 printf 'PASS: R-API public-contract observability\n'

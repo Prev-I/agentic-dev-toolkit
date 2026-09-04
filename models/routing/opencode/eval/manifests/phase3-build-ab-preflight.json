@@ -2,7 +2,8 @@
   "experiment_id": "phase3-build-opus5-vs-sonnet5-high",
   "decision_reference": "docs/decisions/2026-09-04-phase3-build-ab-preflight.md",
   "frozen": "2026-09-04",
-  "status": "PENDING_HUMAN_APPROVAL",
+  "status": "APPROVED",
+  "approval_amendment_frozen": "2026-09-04",
   "hypothesis": "Can github-copilot/claude-sonnet-5 high replace github-copilot/claude-opus-5 high for Build without degrading functional correctness/invariants, while demonstrating enough operational advantage to justify changing the restored baseline?",
   "incumbent": {"model": "github-copilot/claude-opus-5", "variant": "high"},
   "challenger": {"model": "github-copilot/claude-sonnet-5", "variant": "high"},
@@ -53,12 +54,42 @@
   },
   "tie_or_inconclusive_policy": "KEEP_OPUS",
   "no_weighted_aggregate_score": true,
+  "final_adoption_rule": {
+    "functional_regression": {
+      "condition": "Sonnet is worse than Opus on any earlier-priority functional criterion (1-5) on either workload",
+      "decision": "KEEP_OPUS",
+      "note": "Operational advantages cannot compensate. Adjudication stops here."
+    },
+    "functional_improvement": {
+      "condition": "Sonnet is strictly better under the earliest differentiating functional criterion (1-5) and is not worse on the other workload under any earlier-or-equal-priority functional criterion",
+      "decision": "ADOPT_SONNET",
+      "note": "Wall-clock superiority is not required in this case."
+    },
+    "functional_tie": {
+      "condition": "criteria 1-5 are functionally tied across both workloads",
+      "decision_rule": "Sonnet may be adopted only if it demonstrates the precommitted wall-clock advantage on BOTH workloads independently, using the exact wall-clock comparison formula already committed above (primary_operational_advantage_threshold) -- not reinterpreted or recomputed",
+      "required_threshold_relative_range": 0.378885,
+      "required": {
+        "build-feature": "Sonnet exceeds threshold in the favorable direction",
+        "build-bugfix": "Sonnet exceeds threshold in the favorable direction"
+      },
+      "aggregation": "none -- both workloads must independently clear the threshold; no averaging, no one-workload win compensating for a non-win on the other"
+    },
+    "anything_else": {
+      "decision": "KEEP_OPUS",
+      "includes": ["tie", "mixed operational result", "advantage on only one workload", "threshold not reached", "genuine inconclusive result", "insufficient valid evidence inside budget"]
+    },
+    "cost": "observational only -- cannot trigger adoption under any branch of this rule",
+    "wall_clock_threshold_caveat": "37.8885% is a precommitted minimum practical effect derived from Phase-0 self-variance on a different fixture family (github-copilot/gpt-5.6-luna). It is not a statistical-significance threshold and is not claimed to characterize Build-specific latency variance (Build's own historical range is 10.7%-1081.5% depending on cold-cache inclusion -- see the decision doc). Requiring both workloads to clear it independently is the additional protection against a one-workload timing outlier. The timing harness is not hardened further before execution."
+  },
   "historical_budgets": {
     "evaluation": {"approved": 100, "observed": 289.012037, "status": "BREACHED"},
     "recovery": {"approved": 250, "observed": 349.944275, "status": "BREACHED"},
     "note": "Closed, not reused, not reset, not enlarged. Phase 3 uses a new, separate budget."
   },
   "proposed_phase3_build_ab_budget": {
+    "status": "APPROVED",
+    "approved_cap_credits": 158,
     "central_estimate_credits": 68.97,
     "conservative_ceiling_credits": 158,
     "derivation": {

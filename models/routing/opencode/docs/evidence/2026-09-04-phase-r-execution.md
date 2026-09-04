@@ -2,14 +2,17 @@
 
 ## Status
 
-**Phase R status: `BLOCKED_REVIEWER`.** Build, Explore, Compaction, routing
-resolution, and security/permission boundaries (including Breakglass) all
-PASS and are not re-run by anything in this correction. The Reviewer
-seeded-defect gate is BLOCKED — originally reported "PASS — 5/5", corrected
-first to BLOCK (4/5) via the I2 rerun below, and as of the Reviewer
-fixture-integrity remediation (see that record) still not cleared for a
-valid rerun. Budget: both the evaluation and recovery caps are corrected and
-confirmed exceeded — see [Budget](#budget).
+**Phase R status: `BLOCKED_REVIEWER_RERUN`.** Build, Explore, Compaction,
+routing resolution, and security/permission boundaries (including
+Breakglass) all PASS and are not re-run by anything in this correction. The
+Reviewer seeded-defect gate is blocked — originally reported "PASS — 5/5",
+corrected first to BLOCK (4/5) via the I2 rerun below, then the fixture and
+scorer were made admissible offline by two further remediations (the
+Reviewer fixture-integrity remediation, and the Reviewer
+observability/attribution remediation) — but a fresh live 5/5 + clean-zero
+rerun is still required and no rerun budget is yet approved. Budget: both
+the evaluation and recovery caps are corrected and confirmed exceeded — see
+[Budget](#budget).
 
 `operational_state: active-provisional` — the restored routing profile is
 installed and active on the real, user-global OpenCode configuration; that

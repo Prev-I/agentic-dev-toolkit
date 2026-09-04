@@ -53,17 +53,21 @@ adds the approved exact Scout `low` and Compaction `medium` variants, executable
 Reviewer/Explore/Compaction fixture ground truth, and the user-global activation
 contract. It does not change or activate the published routing profile.
 
-Phase R executed against every committed gate; **status: `BLOCKED_REVIEWER`**,
-not PASS — see the
+Phase R executed against every committed gate; **status:
+`BLOCKED_REVIEWER_RERUN`**, not PASS — see the
 [Phase-R execution evidence](docs/evidence/2026-09-04-phase-r-execution.md)
 for the full record. Build, Explore, Compaction, routing resolution and
 security boundaries passed and are not re-run by this correction; the
-Reviewer seeded-defect gate is blocked (see I1/I2 and the Reviewer
-fixture-integrity remediation record it points to). The routing profile is
-restored and active on the real, user-global OpenCode configuration
-(`operational_state: active-provisional`) — that activation stands
-independent of the Reviewer gate's status — but is **not** currently a
-`canonical_quality_reference`.
+Reviewer seeded-defect gate is blocked (see I1/I2, the
+[Reviewer fixture-integrity remediation](docs/evidence/2026-09-04-reviewer-fixture-integrity-remediation.md),
+and the
+[Reviewer observability/attribution remediation](docs/evidence/2026-09-04-reviewer-observability-attribution-remediation.md)).
+The Reviewer fixture and scorer are now mechanically admissible offline;
+a fresh live 5/5 + clean-zero rerun and its own budget approval are still
+required. The routing profile is restored and active on the real,
+user-global OpenCode configuration (`operational_state: active-provisional`)
+— that activation stands independent of the Reviewer gate's status — but is
+**not** currently a `canonical_quality_reference`.
 
 ## Restored reference profile
 

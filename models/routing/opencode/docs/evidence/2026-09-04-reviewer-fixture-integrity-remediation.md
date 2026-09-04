@@ -9,7 +9,7 @@ evidence, local shell/Python execution, and mechanical tests.
 ## Phase R status
 
 ```text
-Phase R: BLOCKED_REVIEWER
+Phase R: BLOCKED_REVIEWER (status at the time this document was written)
 ```
 
 Unchanged by this task. Build, Explore, Compaction, routing resolution, and
@@ -23,6 +23,20 @@ remains installed and active on the real, user-global OpenCode
 configuration; that activation is untouched by this task (verified: the
 live config file's mtime is unchanged since its Task-16 activation).
 `canonical_quality_reference: false`, unchanged.
+
+**Superseded 2026-09-04 by the
+[Phase-R scope amendment](../decisions/2026-09-04-phase-r-scope-amendment.md):**
+Phase R is now PASS. The Reviewer seeded-defect gate this document
+remediates is reclassified from a Phase-R restoration gate to Phase-3
+targeted quality evidence — unchanged threshold, unchanged fixture and
+scorer, all fixture-integrity hardening below fully retained. The 238-credit
+tranche proposed later in this document (see
+[Prospective budget proposal](#prospective-budget-proposal-not-self-approved))
+is likewise superseded — that tranche was itself superseded before use by a
+corrected 340-credit proposal in the observability/attribution remediation,
+which is now in turn `NOT_REQUIRED_FOR_PHASE_R / NOT_AUTHORIZED`. This
+section is preserved as the historical record of what was true when this
+document was written, not rewritten to claim the amendment existed then.
 
 ## Budget status
 
@@ -505,7 +519,11 @@ reviewer_remediation_rerun_budget:
                 cases + clean control) plus a reasonable environment-invalid
                 replacement allowance -- no Phase 3, no unrelated
                 experimentation, no effort-level exploration
-    status: PENDING_HUMAN_APPROVAL
+    status: SUPERSEDED (was PENDING_HUMAN_APPROVAL when this document was
+                written; superseded first by a corrected 340-credit
+                proposal in the observability/attribution remediation, then
+                that proposal itself became NOT_REQUIRED_FOR_PHASE_R /
+                NOT_AUTHORIZED under the 2026-09-04 scope amendment)
 ```
 
 The historical 100-credit evaluation and 250-credit recovery caps are
@@ -639,7 +657,11 @@ Build evidence:                    untouched (no files under
                                     eval/records/phase-r/build/ modified)
 Explore evidence:                  untouched
 Compaction evidence:               untouched
-Phase R:                           still BLOCKED_REVIEWER
+Phase R:                           still BLOCKED_REVIEWER (status when this
+                                    document was written; superseded
+                                    2026-09-04 -- Phase R is now PASS under
+                                    the amended, operational-restoration
+                                    gate set -- see the scope amendment)
 Phase 3:                           not started
 Phase 4:                           not started
 ```

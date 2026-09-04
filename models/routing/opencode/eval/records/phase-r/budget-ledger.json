@@ -1,0 +1,74 @@
+{
+  "caps": {
+    "evaluation": 100,
+    "recovery": 250
+  },
+  "recovery_reclaimable_for_eval": false,
+  "organization_guardrail_credits": 7600,
+  "at_guardrail": "stop_and_escalate_no_automatic_fallback",
+  "entries": [
+    {
+      "timestamp": "2026-09-04T05:15:41.226012+02:00",
+      "account": "evaluation",
+      "label": "preflight-plan",
+      "provider": "github-copilot",
+      "credits": 11.4335
+    },
+    {
+      "timestamp": "2026-09-04T05:31:05.658609+02:00",
+      "account": "evaluation",
+      "label": "preflight-build",
+      "provider": "github-copilot",
+      "credits": 11.422875000000001
+    },
+    {
+      "timestamp": "2026-09-04T05:42:34.106905+02:00",
+      "account": "evaluation",
+      "label": "preflight-general",
+      "provider": "github-copilot",
+      "credits": 2.6785
+    },
+    {
+      "timestamp": "2026-09-04T05:42:41.126882+02:00",
+      "account": "evaluation",
+      "label": "preflight-explore",
+      "provider": "github-copilot",
+      "credits": 0.26785
+    },
+    {
+      "timestamp": "2026-09-04T05:42:48.253222+02:00",
+      "account": "evaluation",
+      "label": "preflight-scout",
+      "provider": "github-copilot",
+      "credits": 0.26785
+    },
+    {
+      "timestamp": "2026-09-04T05:42:55.611359+02:00",
+      "account": "evaluation",
+      "label": "preflight-reviewer",
+      "provider": "github-copilot",
+      "credits": 5.3532
+    },
+    {
+      "timestamp": "2026-09-04T05:43:02.462333+02:00",
+      "account": "evaluation",
+      "label": "preflight-compaction",
+      "provider": "github-copilot",
+      "credits": 2.6785
+    },
+    {
+      "timestamp": "2026-09-04T05:43:09.746548+02:00",
+      "account": "evaluation",
+      "label": "preflight-title",
+      "provider": "github-copilot",
+      "credits": 0.022256
+    },
+    {
+      "timestamp": "2026-09-04T05:43:16.844157+02:00",
+      "account": "evaluation",
+      "label": "preflight-summary",
+      "provider": "github-copilot",
+      "credits": 0.022256
+    }
+  ]
+}

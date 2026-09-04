@@ -1,0 +1,4 @@
+I'll start by exploring the sandbox directory.
+Chain verified by execution: `entry.sh` → `facade.sh` → `service.sh` → `adapter.sh` → `protocol.sh`, which defines `readonly PROTOCOL_VERSION="v3"` and sources nothing further. Sourcing the entry script and calling `entry_version` returns `v3`, confirming the path.
+
+{"ordered_path":["entry","facade","service","adapter","protocol"],"reported_hops":4,"terminal_symbol":"PROTOCOL_VERSION","terminal_value":"v3"}

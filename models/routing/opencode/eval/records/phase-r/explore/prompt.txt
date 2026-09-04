@@ -1,0 +1,14 @@
+The current directory contains a set of shell scripts. Starting from the entry
+script, follow the `source` dependencies until you reach the file that defines
+a constant rather than sourcing anything further.
+
+Report your answer and nothing else, as a single JSON object on the final line,
+in exactly this form:
+
+{"ordered_path":["<file stem>", "..."],"reported_hops":<integer>,"terminal_symbol":"<name>","terminal_value":"<value>"}
+
+`ordered_path` lists every file you traversed in order, by stem (file name
+without the .sh extension), beginning with the entry script and ending with the
+terminal file. `reported_hops` is the number of source steps between them.
+`terminal_symbol` and `terminal_value` are the constant defined in the terminal
+file and the value assigned to it.

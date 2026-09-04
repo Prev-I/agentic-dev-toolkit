@@ -293,6 +293,20 @@
       "credits": 34.921425,
       "original_recorded_credits": 5.658225,
       "cost_correction": "I1 fix: recomputed from surviving raw.jsonl (see matching dispatch.json)"
+    },
+    {
+      "timestamp": "2026-09-04T13:11:55.015619+02:00",
+      "account": "recovery",
+      "label": "reviewer-R-API-i2fix",
+      "provider": "",
+      "credits": 45.599349999999994
+    },
+    {
+      "timestamp": "2026-09-04T13:13:14.315901+02:00",
+      "account": "recovery",
+      "label": "reviewer-R-BOUNDARY-i2fix",
+      "provider": "",
+      "credits": 36.435249999999996
     }
   ],
   "i1_correction": {
@@ -301,11 +315,11 @@
     "unrecoverable_entries": 8,
     "unrecoverable_reason": "raw.jsonl for these 8 dispatches was overwritten on disk by a later dispatch reusing the same --outdir before this bug was discovered; their recorded credits are a known-undercounted FLOOR, not the true spend.",
     "corrected_evaluation_total_credits": 289.012037,
-    "corrected_recovery_total_credits": 267.909675,
+    "corrected_recovery_total_credits": 349.944275,
     "evaluation_cap": 100,
     "recovery_cap": 250,
     "evaluation_cap_status": "EXCEEDED (floor; true total is higher due to 6 unrecoverable entries in this account)",
     "recovery_cap_status": "EXCEEDED (this account's total has no unrecoverable entries, so this figure is accurate, not a floor)",
-    "note": "Every ledger_admit check performed live during Phase R execution operated on the undercounted figures and reported 'admitted' at each step. This retroactive correction shows both caps were almost certainly breached in real terms. This was not caught at the time because the bug corrupted the very numbers the admission check compared against the cap."
+    "note": "Every ledger_admit check performed live during Phase R execution operated on the undercounted figures and reported 'admitted' at each step. This retroactive correction shows both caps were almost certainly breached in real terms. This was not caught at the time because the bug corrupted the very numbers the admission check compared against the cap. Updated 2026-09-04 after the I2 rerun (2 new recovery-account dispatches, total 82.03 credits, both correctly accumulated by the now-fixed cost logic): recovery total is now 349.944275 / 250."
   }
 }

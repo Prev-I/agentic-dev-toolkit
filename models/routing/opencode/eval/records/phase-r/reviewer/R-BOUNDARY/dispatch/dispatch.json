@@ -1,9 +1,9 @@
 {
-  "timestamp": "2026-09-04T12:11:23.915989+02:00",
-  "label": "reviewer-R-BOUNDARY-v2",
+  "timestamp": "2026-09-04T13:13:14.373485+02:00",
+  "label": "reviewer-R-BOUNDARY-i2fix",
   "attempt": 1,
   "routing_profile_id": "v1-restored-2026-09",
-  "routing_profile_commit": "965b78ef7fc167834ecff440a2bb4f73fe617eef",
+  "routing_profile_commit": "5d157e79d5125a8a0454a9ac123be253e8f3a624",
   "runtime_version": "1.18.27",
   "eval_runner_version": "phase-r-dispatch-v1",
   "environment": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
@@ -15,28 +15,21 @@
   "failure_class": null,
   "provider_error_text": null,
   "provider_status_code": null,
-  "observed_cost": 0.3293005,
-  "derived_credits": 32.93005,
+  "observed_cost": 0.36435249999999997,
+  "derived_credits": 36.435249999999996,
   "normalized_steady_state_cost": null,
   "tokens": {
-    "total": 27876,
+    "total": 28457,
     "input": 2,
-    "output": 555,
-    "reasoning": 479,
+    "output": 597,
+    "reasoning": 224,
     "cache": {
-      "write": 1091,
-      "read": 25749
+      "write": 1439,
+      "read": 26195
     }
   },
-  "wall_clock_ms": 64983,
+  "wall_clock_ms": 78217,
   "retry_count": 0,
   "raw_evidence": "raw.jsonl",
-  "decides_gate_outcome": false,
-  "cost_correction": {
-    "corrected_for": "I1 dispatch-fixture.sh step_finish cost overwrite bug (fixed 2026-09-04)",
-    "originally_recorded_observed_cost": 0.04555325,
-    "originally_recorded_derived_credits": 4.555325000000001,
-    "recomputed_from": "raw.jsonl (sum of every step_finish part.cost)",
-    "step_finish_events": 5
-  }
+  "decides_gate_outcome": false
 }

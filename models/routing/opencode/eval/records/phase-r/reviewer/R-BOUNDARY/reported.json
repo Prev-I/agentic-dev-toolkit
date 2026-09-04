@@ -2,8 +2,8 @@
   "findings": [
     {
       "file": "pagination.sh",
-      "severity": "blocking",
-      "summary": "Passing untrusted input to bash arithmetic evaluation allows arbitrary command execution via an array-subscript command substitution such as 'x[$(cmd)]', which both runs the command and makes validation succeed."
+      "severity": "material",
+      "summary": "validate_page_size accepts out-of-range values because (( )) reinterprets digit strings, so leading-zero inputs are read as octal (0144 passes as 100) and values above INTMAX wrap around (18446744073709551617 passes), bypassing the 0-100 bound."
     }
   ]
 }

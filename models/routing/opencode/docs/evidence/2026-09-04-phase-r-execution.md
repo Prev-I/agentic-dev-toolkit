@@ -2,14 +2,18 @@
 
 ## Status
 
-**Phase R: PASS on Build/Explore/Compaction. Reviewer gate PENDING
-RE-VERIFICATION. Budget: both caps corrected and found exceeded.** The
-restored routing profile is active on the real, user-global OpenCode
-configuration; that activation stands. Two post-hoc corrections were made to
-this record on 2026-09-04, after the original "PASS" status below was first
-written — see [Post-hoc corrections (I1, I2)](#post-hoc-corrections-i1-i2)
-before relying on any cost figure or the Reviewer gate's prior "5/5 PASS"
-claim elsewhere in this document.
+**Phase R: PASS on Build/Explore/Compaction. Reviewer gate: BLOCK (4/5) as
+of the I2-repair rerun. Budget: both caps corrected and found exceeded.**
+The restored routing profile is active on the real, user-global OpenCode
+configuration; that activation stands — the routing-resolution and security
+boundary gates are unaffected by everything below and remain PASS. Two
+post-hoc corrections were made to this record on 2026-09-04, after the
+original "PASS" status below was first written — see
+[Post-hoc corrections (I1, I2)](#post-hoc-corrections-i1-i2) before relying
+on any cost figure or the Reviewer gate's original "5/5 PASS" claim
+elsewhere in this document. The I2 repair itself surfaced further findings
+during its rerun — see [I2 rerun result](#i2-rerun-result-block-45) — that
+are open and unresolved as of this document.
 
 ## Runtime
 
@@ -158,13 +162,12 @@ recorded as 5.569 — see [Post-hoc corrections](#post-hoc-corrections-i1-i2)).
 
 ## Reviewer seeded-defect gate
 
-**PENDING RE-VERIFICATION.** Previously reported here as "PASS — 5/5" after
-a fixture repair; that claim is corrected as of 2026-09-04 — 2 of the 5
-credited detections (R-API, R-BOUNDARY) are now known to be attributable to
-the wrong vulnerability, not the seeded ground-truth defect. See
-[Post-hoc corrections](#post-hoc-corrections-i1-i2). The fixture-repair
-narrative below (R-ERROR / `load_items_or_fail`) remains accurate and is
-unaffected by this correction — it addresses a different case.
+**BLOCK — 4/5**, as of the I2 repair's live rerun on 2026-09-04. Previously
+reported here as "PASS — 5/5"; that claim is corrected — see
+[Post-hoc corrections](#post-hoc-corrections-i1-i2) and
+[I2 rerun result](#i2-rerun-result-block-45). The fixture-repair narrative
+below (R-ERROR / `load_items_or_fail`) remains accurate and is unaffected by
+either correction — it addresses a different case.
 
 `eval/records/phase-r/reviewer/outcome.json`.
 
@@ -344,8 +347,75 @@ reported 5/5 do not detect what they were meant to detect.
 
 Full detail: `eval/records/phase-r/reviewer/outcome.json`'s
 `i2_correction_note`. Repair and rerun require the same human-authorization
-pattern used for the R-ERROR fixture repair above and had not yet been
-executed as of this correction.
+pattern used for the R-ERROR fixture repair above.
+
+### I2 rerun result: BLOCK, 4/5
+
+The fixture was repaired (commit `5d157e7`): `cases/R-API/api.sh` now
+adopts `clean/api.sh`'s safe JSON-escaping scaffolding but keeps the `name`
+field key (vs. clean's `displayName`), preserving only the seeded
+field-rename defect; `cases/R-BOUNDARY/pagination.sh` now adopts
+`clean/pagination.sh`'s numeric-format guard but keeps the lower bound at
+`0` (vs. clean's `1`), preserving only the seeded zero-boundary defect. Both
+changes were independently reviewed and confirmed correct — each case
+differs from `clean/` by exactly its seeded defect and nothing else, and
+both defects were confirmed real and reachable by direct execution.
+New regression tests (mirroring the existing R-ERROR/storage.sh block)
+proved the repair is minimal and that reverting either defect, or
+introducing an unrelated divergence, correctly fails the test.
+
+R-API and R-BOUNDARY were then redispatched live against the repaired
+fixture (same production target, `github-copilot/gpt-5.6-sol` `high`,
+charged to the recovery account per explicit human authorization given the
+recovery cap was already exceeded — see [Budget](#budget)). The prior
+mis-attributed evidence is archived, not deleted, at
+`eval/records/phase-r/reviewer/pre-i2-fix/`.
+
+**Result: still not 5/5.** The gate's committed scorer
+(`eval/scoring/reviewer.sh::reviewer_structured_gate`, unmodified) returns
+`block`, detected 4/5:
+
+| Case | Result |
+|---|---|
+| R-API | **none** — zero findings reported against `api.sh` in this dispatch |
+| R-AUTH | blocking (unaffected by I2, unchanged from the original run) |
+| R-BOUNDARY | material, but **mis-attributed** (see below) |
+| R-CONCURRENCY | blocking (unaffected by I2, unchanged) |
+| R-ERROR | material (unaffected by I2, unchanged) |
+
+Two new findings, neither yet root-caused or authorized for any further
+fixture change:
+
+1. **R-API: the seeded defect received no signal at all.** Unlike the
+   original run (which flagged the wrong vulnerability), this dispatch
+   reported zero findings — not even a suggestion — against `api.sh`. A
+   single-sample model-judgment outcome, structurally similar to the
+   original R-ERROR shortfall, but not yet investigated with the same
+   H1/H2/H3 rigor.
+2. **R-BOUNDARY's "material" credit is itself mis-attributed.** The
+   mechanical scorer credits any material/blocking finding against the
+   case's override file, regardless of which vulnerability it names. This
+   dispatch's finding is genuine but is about a **newly-discovered defect**
+   in the numeric-format guard shared by every case's sandbox copy of
+   `pagination.sh`: `[[ "$1" =~ ^[0-9]+$ ]]` accepts leading-zero strings,
+   which bash's `(( ))` then reinterprets as octal — `"0144"` passes as
+   decimal 100 (bypassing the intended 1..100 bound), and `"08"` raises a
+   bash arithmetic error instead of a clean rejection, because `8` is not a
+   valid octal digit. This guard pattern originates in `clean/pagination.sh`
+   from the original clean-control repair (commit `a96c0ce`) and was
+   propagated verbatim into `cases/R-BOUNDARY/pagination.sh` by this
+   session's I2 fix. It is present in **every** case sandbox's copy of
+   `pagination.sh` (all six sandboxes include `clean/pagination.sh`
+   unmodified), not only R-BOUNDARY's. The clean-control dispatch's own
+   result (0 material findings) does not disprove this — it reflects
+   model-response variance across independently-sampled dispatches against
+   the same file content, not evidence the defect is absent.
+
+No further fixture modification, live dispatch, or effort escalation was
+made after this rerun. Both findings above are open and require the same
+explicit human-authorization pattern as every other fixture touch in this
+plan before any further action. Full detail:
+`eval/records/phase-r/reviewer/outcome.json`'s `i2_rerun_note`.
 
 ## Budget
 
@@ -356,19 +426,23 @@ total is a **floor** — the true total is known to be higher.
 - Evaluation credits consumed: **289.012037 / 100 — cap exceeded** (floor;
   6 of the 8 unrecoverable dispatches are charged to this account, so the
   true total is higher still)
-- Phase-R recovery credits consumed: **267.909675 / 250 — cap exceeded**
+- Phase-R recovery credits consumed: **349.944275 / 250 — cap exceeded**
   (this account has no unrecoverable entries, so this figure is accurate,
-  not a floor)
-- Every `ledger_admit` check performed live during Phase R execution
-  compared against the undercounted figures and reported "admitted" at each
-  step; this correction shows both caps were almost certainly breached in
-  real terms at the time, without any check catching it, because the same
-  bug that undercounted spend also undercounted what was being checked
-  against the cap.
+  not a floor; includes the 2 I2-rerun dispatches — 82.03 credits — charged
+  here per explicit human authorization given the account was already over
+  cap before that spend)
+- Every `ledger_admit` check performed live during original Phase R
+  execution compared against the undercounted figures and reported
+  "admitted" at each step; this correction shows both caps were almost
+  certainly breached in real terms at the time, without any check catching
+  it, because the same bug that undercounted spend also undercounted what
+  was being checked against the cap. The I2-rerun spend above was made with
+  full knowledge that the recovery cap was already exceeded, by explicit
+  human decision, not by a ledger check that failed to catch it.
 - Organization guardrail: 7600 credits/billing cycle, externally enforced via
   GitHub billing; this repository holds no current billing snapshot, so
   headroom against the guardrail is reported as unavailable rather than
-  estimated. Even the corrected evaluation+recovery total (~557 credits)
+  estimated. Even the corrected evaluation+recovery total (~639 credits)
   stays under this guardrail.
 - No OpenCode-native spending cap was created.
 

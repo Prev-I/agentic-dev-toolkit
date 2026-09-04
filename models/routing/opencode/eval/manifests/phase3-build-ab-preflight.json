@@ -1,0 +1,84 @@
+{
+  "experiment_id": "phase3-build-opus5-vs-sonnet5-high",
+  "decision_reference": "docs/decisions/2026-09-04-phase3-build-ab-preflight.md",
+  "frozen": "2026-09-04",
+  "status": "PENDING_HUMAN_APPROVAL",
+  "hypothesis": "Can github-copilot/claude-sonnet-5 high replace github-copilot/claude-opus-5 high for Build without degrading functional correctness/invariants, while demonstrating enough operational advantage to justify changing the restored baseline?",
+  "incumbent": {"model": "github-copilot/claude-opus-5", "variant": "high"},
+  "challenger": {"model": "github-copilot/claude-sonnet-5", "variant": "high"},
+  "canonical_starting_baseline": "profiles/v1-restored-2026-09.jsonc",
+  "excluded_from_selection": ["build-restoration-gate"],
+  "initial_workloads": [
+    {"id": "build-feature", "order": 1, "sequence": ["opus", "sonnet"]},
+    {"id": "build-bugfix", "order": 2, "sequence": ["sonnet", "opus"]}
+  ],
+  "conditional_workload": {
+    "id": "build-refactor",
+    "trigger": "only if build-feature and build-bugfix do not produce a decision under the ordered criteria",
+    "sequence": ["opus", "sonnet"],
+    "fixture_ready": false,
+    "note": "No fixture content exists yet for build-refactor. Authoring it, if this contingency triggers, is separate follow-up work not covered by this preflight's budget."
+  },
+  "initial_sample": {
+    "pairs": 2,
+    "opus_dispatches": 2,
+    "sonnet_dispatches": 2,
+    "total_dispatches": 4,
+    "deviation_from_3_pair_default": "Repository decision doc section 24 (sequential scenario stopping) runs build-feature and build-bugfix first and treats build-refactor as conditional, not initial. build-refactor also has no fixture content. Both reasons independently justify a 2-pair initial freeze rather than 3."
+  },
+  "invalid_attempt_replacement_rule": "pair-level: if either arm of a pair is classified INVALID_ENVIRONMENT, the entire pair is discarded and replaced with a fresh pair (both arms redispatched) to preserve paired comparability, not just the affected arm.",
+  "failure_taxonomy": ["INVALID_ENVIRONMENT", "VALID_CONTROLLER_FAILURE", "FIXTURE_DEFECT"],
+  "decision_criteria_ordered": [
+    "correctness_task_success",
+    "invariant_preservation",
+    "scope_plan_adherence",
+    "human_correction_required",
+    "convergence_retries",
+    "wall_clock_time",
+    "steady_state_cost"
+  ],
+  "decision_criteria_reference": "docs/decisions/2026-09-02-multi-model-routing-v3.4.3.md section 21",
+  "separation_rules_reference": "docs/decisions/2026-09-02-multi-model-routing-v3.4.3.md section 22",
+  "primary_operational_advantage_criterion": "wall_clock_time",
+  "primary_operational_advantage_threshold": {
+    "metric": "wall_clock_ms",
+    "practical_separation_threshold_relative_range": 0.378885,
+    "source": "docs/evidence/2026-09-02-phase-0-self-variance.md frozen thresholds"
+  },
+  "secondary_observational_criterion": {
+    "metric": "derived_credits",
+    "practical_separation_threshold_relative_range": 21.948831,
+    "status": "non_discriminating_at_current_variance",
+    "reason": "Frozen threshold requires a >2194.8831% relative-range separation to count as a real difference; historical Build cost variance alone (23.19-26.19 credits across 3 Opus runs) cannot plausibly clear this. Cost is recorded and reported, never used to declare a winner."
+  },
+  "tie_or_inconclusive_policy": "KEEP_OPUS",
+  "no_weighted_aggregate_score": true,
+  "historical_budgets": {
+    "evaluation": {"approved": 100, "observed": 289.012037, "status": "BREACHED"},
+    "recovery": {"approved": 250, "observed": 349.944275, "status": "BREACHED"},
+    "note": "Closed, not reused, not reset, not enlarged. Phase 3 uses a new, separate budget."
+  },
+  "proposed_phase3_build_ab_budget": {
+    "central_estimate_credits": 68.97,
+    "conservative_ceiling_credits": 158,
+    "derivation": {
+      "opus_cost_per_run": {
+        "source": "eval/records/phase-r/build/attempt-{1,2,3}/dispatch/dispatch.json",
+        "mean": 24.699, "min": 23.194, "max": 26.192
+      },
+      "sonnet_cost_per_run": {
+        "source": "no live Sonnet Build history exists; estimated via a pricing ratio derived from two directly comparable, same-shape capability-preflight probes (single-turn, ~18.1-18.2k tokens each, same provider, same standard pricing regime): eval/records/phase-r/preflight/build.json (opus, cost 0.11422875) and eval/records/claude-sonnet-5-high.json (sonnet, cost 0.045259)",
+        "ratio_sonnet_over_opus": 0.3962,
+        "estimated_mean": 9.786,
+        "uncertainty": "This ratio is derived from single-turn trivial calls, not multi-turn agentic Build tasks. If Sonnet requires materially more turns/retries to solve the same task, its total cost could exceed this estimate despite a lower per-token rate. The conservative ceiling therefore assumes NO Sonnet cost savings (priced at Opus's own historical maximum)."
+      },
+      "initial_4_dispatches_central": "2 x 24.699 (opus) + 2 x 9.786 (sonnet) = 68.97",
+      "initial_4_dispatches_ceiling": "4 x 26.192 (opus max, no Sonnet savings assumed) = 104.77",
+      "replacement_allowance": "1 additional complete paired comparison (2 dispatches) priced at the Opus historical ceiling = 52.38",
+      "total_ceiling": "104.77 + 52.38 = 157.15, rounded up to 158"
+    }
+  },
+  "additional_live_spend_this_task": 0,
+  "organizational_guardrail_credits_per_billing_cycle": 7600,
+  "organizational_guardrail_is_separate_control": true
+}

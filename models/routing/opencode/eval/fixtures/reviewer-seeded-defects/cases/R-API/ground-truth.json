@@ -1,1 +1,1 @@
-{"base":"../../clean","overrides":["api.sh"],"expected_material_defect":{"id":"R-API","description":"documented public displayName field renamed without compatibility handling"}}
+{"base": "../../clean", "overrides": ["api.sh"], "expected_material_defect": {"id": "R-API", "description": "documented public displayName field renamed without compatibility handling"}, "witness": "{\"name\""}

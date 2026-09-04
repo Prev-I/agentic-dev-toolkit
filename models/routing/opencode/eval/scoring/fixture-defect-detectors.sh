@@ -67,6 +67,18 @@ api_emits_renamed_field() {
   [[ "$output" == *'"name"'* && "$output" != *'"displayName"'* ]]
 }
 
+# R-API observability witness (docs/evidence/2026-09-04-reviewer-fixture-integrity-remediation.md,
+# part 2, "Close R-API observability"): unlike the detector above, this
+# checks the SAME thing a Reviewer looking at the sandbox could observe --
+# clean/api_contract.sh (a downstream consumer's contract expectation,
+# present in every sandbox including R-API's, since it is never overridden)
+# combined with the api.sh actually present. Present (violation) if the
+# combination fails the consumer's own assertion.
+api_violates_public_contract() {
+  local clean_dir=$1 api_file=$2
+  ! ( source "$clean_dir/api_contract.sh"; source "$api_file"; assert_public_response_contract probe >/dev/null 2>&1 )
+}
+
 # Pre-existing clean-control defect (fixed by commit a96c0ce in clean/, but
 # re-verify mechanically rather than assuming): unescaped JSON interpolation
 # lets a value containing a double quote inject arbitrary JSON structure.
@@ -207,6 +219,24 @@ fixture_integrity_check() {
       fi
     done
   done
+
+  # R-API public-contract witness (separate from the loop above: this
+  # defect is only observable when api.sh is combined with
+  # clean/api_contract.sh -- the constructed-sandbox view every live
+  # dispatch actually uses -- not the override file in isolation).
+  if [[ ! -f "$fixture/clean/api_contract.sh" ]]; then
+    printf 'FIXTURE INTEGRITY: clean/api_contract.sh missing -- R-API public-contract witness not present\n' >&2
+    ok=1
+  else
+    if api_violates_public_contract "$fixture/clean" "$fixture/clean/api.sh"; then
+      printf 'FIXTURE INTEGRITY: clean/api.sh violates its own declared public contract -- clean must satisfy it\n' >&2
+      ok=1
+    fi
+    if [[ -f "$fixture/cases/R-API/api.sh" ]] && ! api_violates_public_contract "$fixture/clean" "$fixture/cases/R-API/api.sh"; then
+      printf 'FIXTURE INTEGRITY: cases/R-API/api.sh does not violate the public contract -- R-API is missing its observable seeded defect\n' >&2
+      ok=1
+    fi
+  fi
 
   return "$ok"
 }

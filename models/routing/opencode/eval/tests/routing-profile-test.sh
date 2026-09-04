@@ -91,7 +91,8 @@ for role, row in agents.items():
     task = row.get("permission", {}).get("task")
     if task is None:
         continue
-    check(isinstance(task, dict) and task.get("breakglass") == "deny",
+    denies_breakglass = task == "deny" or (isinstance(task, dict) and task.get("breakglass") == "deny")
+    check(denies_breakglass,
           f"{role}: Task permission must deny breakglass explicitly")
 top_task = profile.get("permission", {}).get("task")
 check(isinstance(top_task, dict) and top_task.get("breakglass") == "deny",

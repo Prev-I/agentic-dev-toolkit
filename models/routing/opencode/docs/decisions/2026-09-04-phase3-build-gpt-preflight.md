@@ -201,8 +201,17 @@ phase3_build_gpt_budget:
     conservative ceiling: 264 credits (includes a 1.3x role-transfer
                           margin on the Sol side, plus a 1-pair
                           replacement allowance for INVALID_ENVIRONMENT)
-    status:               PENDING_HUMAN_APPROVAL
+    approved cap:         264 credits
+    status:               APPROVED
 ```
+
+**Approval amendment (2026-09-04, this document, on this same PR before merge)**:
+the human owner has approved a Phase-3 Build (Opus vs Sol) budget of **264
+credits**, status `APPROVED`. This is the same conservative-ceiling figure
+derived above (including the 1.3x role-transfer margin) — the human approved
+the ceiling itself, not a separately invented number. The closed 158-credit
+Opus-vs-Sonnet budget and the historical evaluation/recovery budgets are
+unaffected: closed, not reused, not reset, not enlarged.
 
 ### Derivation
 

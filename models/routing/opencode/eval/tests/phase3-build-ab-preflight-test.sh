@@ -18,10 +18,27 @@ python3 -c '
 import json
 m = json.load(open("'"$manifest"'"))
 
-assert m["status"] == "PENDING_HUMAN_APPROVAL"
+assert m["status"] == "APPROVED"
 assert m["additional_live_spend_this_task"] == 0
 assert m["no_weighted_aggregate_score"] is True
 assert m["tie_or_inconclusive_policy"] == "KEEP_OPUS"
+
+# approval amendment: budget is approved at the conservative ceiling,
+# not a separately invented number
+b0 = m["proposed_phase3_build_ab_budget"]
+assert b0["status"] == "APPROVED"
+assert b0["approved_cap_credits"] == 158
+assert b0["approved_cap_credits"] == b0["conservative_ceiling_credits"]
+
+# final adoption rule: frozen adjudication policy is present and exact
+far = m["final_adoption_rule"]
+assert far["functional_regression"]["decision"] == "KEEP_OPUS"
+assert far["functional_improvement"]["decision"] == "ADOPT_SONNET"
+assert far["functional_tie"]["required_threshold_relative_range"] == 0.378885
+assert far["functional_tie"]["required"]["build-feature"]
+assert far["functional_tie"]["required"]["build-bugfix"]
+assert far["anything_else"]["decision"] == "KEEP_OPUS"
+assert far["cost"] == "observational only -- cannot trigger adoption under any branch of this rule"
 assert m["incumbent"] == {"model": "github-copilot/claude-opus-5", "variant": "high"}
 assert m["challenger"] == {"model": "github-copilot/claude-sonnet-5", "variant": "high"}
 assert m["canonical_starting_baseline"] == "profiles/v1-restored-2026-09.jsonc"

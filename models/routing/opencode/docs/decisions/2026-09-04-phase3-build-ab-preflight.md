@@ -185,11 +185,51 @@ estimate holds) is only an **86.5%** relative range — nowhere near a
 ~22x-relative-range separation. Cost is recorded and reported in full,
 never used to declare a winner.
 
-**What Sonnet must demonstrate to justify adoption**: non-inferior
-correctness and invariant preservation (criteria 1-3, per the ordered
-separation rules) **AND** a wall-clock advantage that clears the frozen
-37.8885% threshold. Absent both, per the tie/inconclusive policy: KEEP
-OPUS.
+**What Sonnet must demonstrate to justify adoption**: see the Final
+adoption rule below, frozen as part of the approval amendment.
+
+## Final adoption rule (frozen as part of the 2026-09-04 approval amendment)
+
+This is the exact adjudication policy for Stage B — it does not replace the
+ordered decision hierarchy above, it specifies how that hierarchy resolves
+to a single decision. Machine-readable form:
+`final_adoption_rule` in `eval/manifests/phase3-build-ab-preflight.json`.
+
+**Functional regression.** If Sonnet is worse than Opus on any earlier
+functional criterion (1-5) on either workload: **KEEP_OPUS**. Operational
+advantages cannot compensate. Adjudication stops here.
+
+**Functional improvement.** If Sonnet is strictly better under the earliest
+differentiating functional criterion and is not worse on the other workload
+under any earlier-or-equal-priority functional criterion: **ADOPT_SONNET**.
+Wall-clock superiority is not required in this case.
+
+**Functional tie.** If criteria 1-5 are functionally tied across both
+workloads, Sonnet may be adopted only if it demonstrates the precommitted
+wall-clock advantage on **both workloads independently**, using the exact
+wall-clock comparison formula already committed above — not reinterpreted
+or recomputed. Required threshold: **37.8885%** relative-range separation,
+in the favorable direction, on `build-feature` **AND** on `build-bugfix`.
+No aggregation, no averaging, no one-workload win compensating for a
+non-win on the other.
+
+**Anything else** — tie, mixed operational result, advantage on only one
+workload, threshold not reached, genuine inconclusive result, or
+insufficient valid evidence inside budget — resolves to **KEEP_OPUS**.
+
+**Cost remains observational only** under every branch of this rule; it
+cannot trigger adoption.
+
+**Wall-clock caveat, preserved, not reinterpreted as Build-specific
+validation**: 37.8885% is a precommitted minimum practical effect derived
+from Phase-0 self-variance on a *different* fixture family
+(`github-copilot/gpt-5.6-luna`). It is not a statistical-significance
+threshold and is not claimed to characterize Build-specific latency
+variance — Build's own historical range is 10.7%-1081.5% depending on
+cold-cache inclusion (see the caveat above). Requiring both workloads to
+independently clear it is the additional protection against a
+one-workload timing outlier substituting for a real effect. The timing
+harness is not hardened further before execution.
 
 ## Sample size
 
@@ -224,8 +264,17 @@ phase3_build_ab_budget:
     central estimate:     68.97 credits
     conservative ceiling: 158 credits (includes a 1-pair replacement
                           allowance for INVALID_ENVIRONMENT)
-    status:               PENDING_HUMAN_APPROVAL
+    approved cap:         158 credits
+    status:               APPROVED
 ```
+
+**Approval amendment (2026-09-04, this document, post-merge of PR #13)**:
+the human owner has approved a Phase-3 Build A/B budget of **158 credits**,
+status `APPROVED`. This is the same conservative-ceiling figure derived
+above — the human approved the ceiling itself, not a separate number.
+Historical evaluation (100/289.01 BREACHED) and recovery (250/349.94
+BREACHED) budgets are unaffected: closed, not reused, not reset, not
+enlarged.
 
 ### Derivation
 

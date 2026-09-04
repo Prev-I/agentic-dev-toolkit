@@ -1,4 +1,6 @@
 {
+  "status": "SUPERSEDED — not final adjudication evidence",
+  "superseded_reason": "Root-cause investigation (H1/H2) confirmed R_ERROR_FIXTURE_AMBIGUITY: the R-ERROR case's storage.sh, unlike all four other seeded cases, gave no name/signature signal that callers rely on distinguishing a backend failure from a genuinely-empty result. The fixture was repaired (load_items -> load_items_or_fail, commit f4026c9) with explicit human approval, independently reviewed, and the Reviewer gate was re-run in full against the repaired fixture. See models/routing/opencode/eval/records/phase-r/reviewer/outcome.json for the current, final result. This directory is preserved as a historical record of the pre-repair run and its diagnostic value (it is what surfaced the fixture defect); it is NOT the basis for any Phase-R pass/fail decision.",
   "fixture": "reviewer-seeded-defects",
   "target": {"role": "reviewer", "model": "github-copilot/gpt-5.6-sol", "variant": "high"},
   "per_id_detections": {

@@ -7,6 +7,10 @@ readonly MISE_INSTALL_URL="https://mise.run"
 readonly OPENCODE_INSTALL_URL="https://opencode.ai/install"
 readonly CODEX_INSTALL_URL="https://chatgpt.com/codex/install.sh"
 readonly SUPERPOWERS_PLUGIN_BASE='superpowers@git+https://github.com/obra/superpowers.git'
+readonly KARPATHY_RAW_BASE='https://raw.githubusercontent.com/multica-ai/andrej-karpathy-skills'
+readonly KARPATHY_SKILL_PATH='skills/karpathy-guidelines/SKILL.md'
+readonly KARPATHY_DEFAULT_REF='2c606141936f1eeef17fa3043a72095b4765b9c2'
+readonly KARPATHY_DEFAULT_SHA256='6e22cc54cb02a5e98ae42d06d9d7292db0c1b43894831b32879beb0166b2aea7'
 
 DRY_RUN=0
 UPGRADE=0
@@ -22,6 +26,7 @@ SKIP_CLAUDE=0
 SKIP_CODEX=0
 SKIP_OPENSPEC=0
 SKIP_SUPERPOWERS=0
+SKIP_KARPATHY=0
 SKIP_QUALITY_TOOLS=0
 
 JAVA_21_VERSION="${ADT_JAVA_21_VERSION:-temurin-21}"
@@ -33,6 +38,8 @@ NODE_VERSION="${ADT_NODE_VERSION:-24}"
 UV_VERSION="${ADT_UV_VERSION:-latest}"
 OPENSPEC_VERSION="${ADT_OPENSPEC_VERSION:-1.9.0}"
 SUPERPOWERS_REF="${ADT_SUPERPOWERS_REF:-v6.3.0}"
+KARPATHY_REF="${ADT_KARPATHY_REF:-$KARPATHY_DEFAULT_REF}"
+KARPATHY_SHA256="${ADT_KARPATHY_SHA256:-}"
 OPENSPEC_TOOLS="${ADT_OPENSPEC_TOOLS:-opencode,claude,codex}"
 SHELLCHECK_VERSION="${ADT_SHELLCHECK_VERSION:-latest}"
 GITLEAKS_VERSION="${ADT_GITLEAKS_VERSION:-latest}"
@@ -110,7 +117,8 @@ usage() {
 Usage: $SCRIPT_NAME [options]
 
 Provision a Debian/Ubuntu development workstation with direnv, mise-managed
-runtimes, OpenCode, Claude Code, Codex CLI, OpenSpec, and Superpowers.
+runtimes, OpenCode, Claude Code, Codex CLI, OpenSpec, Superpowers, and the
+Karpathy guidelines skill.
 
 General options:
   --dry-run                    Print actions without changing the system.
@@ -130,6 +138,7 @@ Selective installation:
   --skip-codex                 Skip Codex CLI installation/update.
   --skip-openspec              Skip OpenSpec installation/update.
   --skip-superpowers           Do not modify the OpenCode Superpowers config.
+  --skip-karpathy              Do not install the Karpathy guidelines skill.
   --skip-quality-tools         Skip shellcheck, gitleaks, and PyYAML.
                                Implied by --skip-runtimes, which are what
                                installs them.
@@ -144,6 +153,10 @@ Version overrides:
   --dotnet-10-version VERSION  .NET 10 SDK version (default: $DOTNET_10_VERSION).
   --openspec-version VERSION   OpenSpec version (default: $OPENSPEC_VERSION).
   --superpowers-ref REF        Superpowers Git ref (default: $SUPERPOWERS_REF).
+  --karpathy-ref REF           Karpathy skill Git ref (default: the pinned commit).
+  --karpathy-sha256 DIGEST     Expected SHA-256 of the Karpathy skill. Required to
+                               verify a --karpathy-ref other than the pinned one;
+                               without it such a ref installs unverified.
   --shellcheck-version VERSION shellcheck version (default: $SHELLCHECK_VERSION).
   --gitleaks-version VERSION   gitleaks version (default: $GITLEAKS_VERSION).
   --pyyaml-version VERSION     PyYAML version (default: $PYYAML_VERSION).
@@ -154,6 +167,7 @@ Environment variables provide the same defaults:
   ADT_JAVA_17_VERSION, ADT_JAVA_21_VERSION,
   ADT_DOTNET_8_VERSION, ADT_DOTNET_10_VERSION,
   ADT_OPENSPEC_VERSION, ADT_SUPERPOWERS_REF, ADT_OPENSPEC_TOOLS,
+  ADT_KARPATHY_REF, ADT_KARPATHY_SHA256,
   ADT_SHELLCHECK_VERSION, ADT_GITLEAKS_VERSION, ADT_PYYAML_VERSION
 
 Examples:
@@ -187,6 +201,7 @@ parse_args() {
       --skip-codex) SKIP_CODEX=1 ;;
       --skip-openspec) SKIP_OPENSPEC=1 ;;
       --skip-superpowers) SKIP_SUPERPOWERS=1 ;;
+      --skip-karpathy) SKIP_KARPATHY=1 ;;
       --skip-quality-tools) SKIP_QUALITY_TOOLS=1 ;;
       --project)
         require_value "$1" "${2:-}"
@@ -221,6 +236,12 @@ parse_args() {
       --superpowers-ref)
         require_value "$1" "${2:-}"; SUPERPOWERS_REF="$2"; shift ;;
       --superpowers-ref=*) SUPERPOWERS_REF="${1#*=}" ;;
+      --karpathy-ref)
+        require_value "$1" "${2:-}"; KARPATHY_REF="$2"; shift ;;
+      --karpathy-ref=*) KARPATHY_REF="${1#*=}" ;;
+      --karpathy-sha256)
+        require_value "$1" "${2:-}"; KARPATHY_SHA256="$2"; shift ;;
+      --karpathy-sha256=*) KARPATHY_SHA256="${1#*=}" ;;
       --shellcheck-version)
         require_value "$1" "${2:-}"; SHELLCHECK_VERSION="$2"; shift ;;
       --shellcheck-version=*) SHELLCHECK_VERSION="${1#*=}" ;;
@@ -803,6 +824,99 @@ configure_opencode_superpowers() {
   fi
 }
 
+install_karpathy_skill() {
+  if (( SKIP_KARPATHY == 1 )); then
+    log "Skipping the Karpathy guidelines skill"
+    return
+  fi
+
+  # Two destinations cover three harnesses. Claude Code reads ~/.claude/skills
+  # and Codex reads $CODEX_HOME/skills; OpenCode reads BOTH of those in addition
+  # to its own directory, so a third copy under ~/.config/opencode/skills would
+  # be dead weight. The absence is deliberate — do not "fix" it.
+  #
+  # Only the skill file is installed. Upstream also ships AGENTS.md, CLAUDE.md
+  # and editor rule-file adapters carrying the same text; those would collide
+  # with instruction files a project already owns, and a skill is loaded on
+  # demand rather than occupying every prompt.
+  #
+  # Deliberately independent of --skip-claude and --skip-codex: those decline to
+  # install a harness, not to configure one, and the Claude Code directory
+  # serves OpenCode whether or not Claude Code is present.
+  local claude_skill="$HOME/.claude/skills/karpathy-guidelines/SKILL.md"
+  local codex_skill="$CODEX_HOME/skills/karpathy-guidelines/SKILL.md"
+  local url="$KARPATHY_RAW_BASE/$KARPATHY_REF/$KARPATHY_SKILL_PATH"
+
+  log "Installing the Karpathy guidelines skill ($KARPATHY_REF)"
+
+  if (( DRY_RUN == 1 )); then
+    info "Would download $url and write it to:"
+    info "  $claude_skill (Claude Code and OpenCode)"
+    info "  $codex_skill (Codex)"
+    return
+  fi
+
+  local expected_sha
+  if [[ "$KARPATHY_REF" == "$KARPATHY_DEFAULT_REF" ]]; then
+    # The pin is authoritative for the pinned ref. Honouring a caller-supplied
+    # digest here would let --karpathy-sha256 authorise different content at the
+    # pinned commit, which is the one thing the pin exists to prevent.
+    [[ -z "$KARPATHY_SHA256" || "${KARPATHY_SHA256,,}" == "$KARPATHY_DEFAULT_SHA256" ]] || \
+      die "--karpathy-sha256 conflicts with the digest pinned for the default ref; pass --karpathy-ref too if you mean to install different content"
+    expected_sha="$KARPATHY_DEFAULT_SHA256"
+  else
+    # A custom ref has content the built-in digest cannot describe. This file
+    # becomes standing instructions to every coding agent on the machine, so it
+    # is not installed on trust alone.
+    [[ -n "$KARPATHY_SHA256" ]] || \
+      die "--karpathy-ref '$KARPATHY_REF' also requires --karpathy-sha256; refusing to install unverified agent instructions"
+    expected_sha="${KARPATHY_SHA256,,}"
+  fi
+
+  [[ "$expected_sha" =~ ^[0-9a-f]{64}$ ]] || die "Not a SHA-256 digest: $expected_sha"
+
+  local temp_file actual_sha target staged
+  temp_file="$(mktemp)"
+  TEMP_PATHS+=("$temp_file")
+
+  # --url marks the URL explicitly. curl treats a bare `--` as "every remaining
+  # argument is a URL", which would silently swallow -o and print to stdout.
+  curl -fsSL --proto '=https' --proto-redir '=https' -o "$temp_file" --url "$url" || \
+    die "Could not download the Karpathy skill from $url"
+
+  actual_sha="$(sha256sum -- "$temp_file" | cut -d' ' -f1)"
+  [[ "$actual_sha" == "$expected_sha" ]] || \
+    die "Karpathy skill checksum mismatch: expected $expected_sha, got $actual_sha"
+
+  # Every harness resolves a skill by the name in its frontmatter, which must
+  # equal the containing directory. A file that fails this is silently ignored
+  # at load time, so it is worth catching here instead.
+  [[ "$(sed -n 's/^name: //p' "$temp_file" | head -n1)" == "karpathy-guidelines" ]] || \
+    die "The downloaded skill does not declare 'name: karpathy-guidelines'"
+
+  # The verified file is copied byte for byte rather than round-tripped through
+  # a shell string, which would strip its trailing newline and install content
+  # the digest above never covered.
+  #
+  # Staging beside the target and moving into place keeps the replacement
+  # atomic, so an interrupted run cannot leave a truncated skill behind, and
+  # replaces a symlink rather than writing through it to whatever it points at.
+  # mktemp creates its file 0600, so the mode is always set explicitly.
+  for target in "$claude_skill" "$codex_skill"; do
+    mkdir -p -- "$(dirname -- "$target")"
+    if [[ -f "$target" && ! -L "$target" ]] && cmp -s -- "$target" "$temp_file"; then
+      chmod 644 -- "$target"
+      continue
+    fi
+    staged="$target.adt-staged.$$"
+    TEMP_PATHS+=("$staged")
+    cp -- "$temp_file" "$staged"
+    chmod 644 -- "$staged"
+    # -T refuses to descend into a directory standing where the file belongs.
+    mv -Tf -- "$staged" "$target"
+  done
+}
+
 configure_project() {
   [[ -n "$PROJECT_PATH" ]] || return 0
 
@@ -913,6 +1027,31 @@ verify_installation() {
     jq -e --arg plugin "$plugin" '.plugin | type == "array" and index($plugin) != null' "$OPENCODE_CONFIG" >/dev/null || \
       die "Superpowers $SUPERPOWERS_REF is not configured in $OPENCODE_CONFIG"
   fi
+
+  if (( SKIP_KARPATHY == 0 && DRY_RUN == 0 )); then
+    # An instruction file that every agent on the machine reads is worth
+    # verifying by content, not by filename. On the pinned ref the expected
+    # digest is known, so a corrupted or swapped body is caught; on a custom ref
+    # the caller's own digest is the reference.
+    local skill skill_sha expected_skill_sha=""
+    if [[ "$KARPATHY_REF" == "$KARPATHY_DEFAULT_REF" ]]; then
+      expected_skill_sha="$KARPATHY_DEFAULT_SHA256"
+    elif [[ -n "$KARPATHY_SHA256" ]]; then
+      expected_skill_sha="${KARPATHY_SHA256,,}"
+    fi
+
+    for skill in "$HOME/.claude/skills/karpathy-guidelines/SKILL.md" \
+                 "$CODEX_HOME/skills/karpathy-guidelines/SKILL.md"; do
+      [[ -s "$skill" ]] || die "The Karpathy guidelines skill is missing at $skill"
+      [[ "$(sed -n 's/^name: //p' "$skill" | head -n1)" == "karpathy-guidelines" ]] || \
+        die "$skill does not declare 'name: karpathy-guidelines' and no harness will load it"
+      if [[ -n "$expected_skill_sha" ]]; then
+        skill_sha="$(sha256sum -- "$skill" | cut -d' ' -f1)"
+        [[ "$skill_sha" == "$expected_skill_sha" ]] || \
+          die "$skill does not match the expected digest: expected $expected_skill_sha, got $skill_sha"
+      fi
+    done
+  fi
 }
 
 print_summary() {
@@ -921,6 +1060,17 @@ print_summary() {
   if (( DRY_RUN == 1 )); then
     info "No changes were made because --dry-run was used."
     return
+  fi
+
+  local karpathy_note
+  if (( SKIP_KARPATHY == 1 )); then
+    karpathy_note="     The Karpathy guidelines skill was NOT installed (--skip-karpathy)."
+  else
+    karpathy_note="     The Karpathy guidelines skill needs no such step: it is already installed
+     for all three harnesses at
+       \$HOME/.claude/skills/karpathy-guidelines/  (Claude Code, and OpenCode)
+       $CODEX_HOME/skills/karpathy-guidelines/  (Codex)
+     OpenCode reads the Claude Code directory, so it needs no copy of its own."
   fi
 
   cat <<EOF_SUMMARY
@@ -933,6 +1083,7 @@ Manual steps after installation:
   4. Codex: run 'codex' and sign in with your ChatGPT account.
   5. Install Superpowers separately in Claude Code and Codex using each
      harness's plugin/skill installation mechanism.
+$karpathy_note
   6. For the streamlined OpenSpec 1.9.0 workflow, run once:
        openspec config profile core
    7. To initialize or update OpenSpec for a specific Git project, run:
@@ -980,6 +1131,7 @@ main() {
   install_codex
   install_openspec
   configure_opencode_superpowers
+  install_karpathy_skill
   configure_project
   verify_installation
   print_summary

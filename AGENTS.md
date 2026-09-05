@@ -61,7 +61,7 @@ variable of the same name:
 
 | Component | Default |
 |---|---|
-| Java | `temurin-21`, `temurin-17` |
+| Java | `temurin-17` (default), `temurin-21` |
 | .NET | `10`, `8` |
 | Python | `3.12` |
 | Node.js | `24` |

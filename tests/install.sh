@@ -182,6 +182,47 @@ test_mise_configuration_pins_maven() {
   [[ "$config" == *'maven = "3.8.8"'* ]] || fail "ADT_MAVEN_VERSION override must reach the rendered config"
 }
 
+test_mise_configuration_pins_bun() {
+  # Bun is pinned to a major like Node, not tracked as `latest` like the
+  # developer tools. It is a package manager, bundler and test runner as well
+  # as a runtime, so the major it resolves to changes how a project builds and
+  # what its lockfile means.
+  #
+  # The default is asserted against the installer SOURCE, for the same reason
+  # the Python default is: BUN_VERSION is a global that other tests here assign
+  # to, so a rendered-output check could pass on an inherited value.
+  grep -qE '^BUN_VERSION="\$\{ADT_BUN_VERSION:-1\}"$' "$INSTALLER" \
+    || fail "installer must default BUN_VERSION to the 1 major"
+
+  # The dynamically sourced installer reads these globals.
+  # shellcheck disable=SC2034
+  { SKIP_QUALITY_TOOLS=0; BUN_VERSION="1"; }
+
+  local config
+  config="$(render_mise_configuration)"
+  [[ "$config" == *'bun = "1"'* ]] || fail "mise config must declare bun at the pinned major"
+  [[ "$config" != *'bun = "latest"'* ]] || fail "bun must not float on latest: a silent major bump is a build change"
+  assert_equal "$(grep -c '^\[tools\]$' <<<"$config")" "1" "bun must extend the existing table, not open a second one"
+
+  # shellcheck disable=SC2034
+  BUN_VERSION="1.2.0"
+  config="$(render_mise_configuration)"
+  [[ "$config" == *'bun = "1.2.0"'* ]] || fail "ADT_BUN_VERSION override must reach the rendered config"
+
+  parse_args --bun-version 1.3.0
+  assert_equal "$BUN_VERSION" "1.3.0" "--bun-version must accept a separate value"
+  parse_args --bun-version=1.4.0
+  assert_equal "$BUN_VERSION" "1.4.0" "--bun-version= must accept an inline value"
+  if ( parse_args --bun-version 2>/dev/null ); then
+    fail "--bun-version must require a value"
+  fi
+
+  # Restore the declared default so later rendered-config tests are not read
+  # against a value this test left behind.
+  # shellcheck disable=SC2034
+  BUN_VERSION="1"
+}
+
 test_mise_configuration_declares_dotnet_ef() {
   # dotnet-ef comes through mise's `dotnet:` backend instead of a global
   # `dotnet tool install`, so a rebuilt workstation gets it from the same
@@ -680,6 +721,7 @@ test_mise_configuration_includes_quality_tools_by_default
 test_mise_configuration_omits_quality_tools_when_skipped
 test_mise_configuration_pins_maven
 test_mise_configuration_omits_maven_when_runtimes_skipped
+test_mise_configuration_pins_bun
 test_mise_configuration_declares_dotnet_ef
 test_mise_configuration_renders_parseable_toml
 test_installer_defaults_python_to_312

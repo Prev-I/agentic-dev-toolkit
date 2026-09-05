@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Prev-I/agentic-dev-toolkit/blob/main/repository-policy/schema/repository-policy.v1.schema.json",
+  "title": "Repository policy, version 1",
+  "description": "Declares how a repository integrates work, for humans and coding agents alike. A declaration of intent, not an enforcement mechanism: hosting-platform rules enforce, this file states what they are meant to enforce.",
+  "type": "object",
+  "required": ["version", "branching", "integration"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "description": "Policy format version. A reader that does not know this version must refuse the file rather than guess.",
+      "const": 1
+    },
+    "branching": {
+      "type": "object",
+      "required": ["workflow", "stableBranch"],
+      "additionalProperties": false,
+      "properties": {
+        "workflow": {
+          "description": "The branching model. Independent of how work is integrated: every workflow below is valid with either integration mode.",
+          "enum": ["github-flow", "git-flow", "trunk"]
+        },
+        "stableBranch": {
+          "description": "The branch that represents releasable state. No name is privileged: 'main' does not imply pull requests and 'master' does not imply direct commits.",
+          "type": "string",
+          "minLength": 1
+        },
+        "integrationBranch": {
+          "description": "The branch feature work merges into before reaching the stable branch. Required for git-flow, forbidden otherwise, because a second long-lived branch is what distinguishes git-flow from the other two models.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "integration": {
+      "type": "object",
+      "required": ["mode"],
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "description": "How a change reaches its target branch. Deliberately separate from the branching model, so the two dimensions can be read independently.",
+          "enum": ["pull-request", "direct"]
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": ["branching"],
+        "properties": {
+          "branching": {
+            "required": ["workflow"],
+            "properties": { "workflow": { "const": "git-flow" } }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "branching": { "required": ["integrationBranch"] }
+        }
+      },
+      "else": {
+        "properties": {
+          "branching": { "not": { "required": ["integrationBranch"] } }
+        }
+      }
+    }
+  ]
+}

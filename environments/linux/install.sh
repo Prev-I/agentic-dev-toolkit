@@ -35,6 +35,7 @@ DOTNET_10_VERSION="${ADT_DOTNET_10_VERSION:-10}"
 DOTNET_8_VERSION="${ADT_DOTNET_8_VERSION:-8}"
 PYTHON_VERSION="${ADT_PYTHON_VERSION:-3.14}"
 NODE_VERSION="${ADT_NODE_VERSION:-24}"
+MAVEN_VERSION="${ADT_MAVEN_VERSION:-3.9.16}"
 UV_VERSION="${ADT_UV_VERSION:-latest}"
 OPENSPEC_VERSION="${ADT_OPENSPEC_VERSION:-1.9.0}"
 SUPERPOWERS_REF="${ADT_SUPERPOWERS_REF:-v6.3.0}"
@@ -421,12 +422,25 @@ install_mise() {
 }
 
 render_mise_configuration() {
+  # Maven is pinned exactly, not tracked as `latest` like uv/shellcheck/gitleaks.
+  # Those are developer tools where newest is what you want; Maven is a *build*
+  # tool, and its version participates in build reproducibility — plugin
+  # resolution and the local-repository layout are version-sensitive. An
+  # unannounced Maven bump is a build change, so it stays an explicit decision
+  # (override with ADT_MAVEN_VERSION).
+  #
+  # Installing it through mise also removes a real failure mode on WSL: with no
+  # Linux Maven present, `mvn` resolves to a Windows installation on /mnt/c via
+  # the interop PATH. That still runs, and even picks up the Linux JDK, but the
+  # whole distribution and its plugin classpath are then read across the 9p
+  # filesystem on every build.
   cat <<EOF_MISE
 [tools]
 java = ["${JAVA_21_VERSION}", "${JAVA_17_VERSION}"]
 dotnet = ["${DOTNET_10_VERSION}", "${DOTNET_8_VERSION}"]
 python = "${PYTHON_VERSION}"
 node = "${NODE_VERSION}"
+maven = "${MAVEN_VERSION}"
 uv = "${UV_VERSION}"
 EOF_MISE
 
@@ -975,6 +989,7 @@ verify_installation() {
       quote_command "$MISE_BIN" exec -- dotnet --list-sdks
       quote_command "$MISE_BIN" exec "java@$JAVA_21_VERSION" -- java -version
       quote_command "$MISE_BIN" exec "java@$JAVA_17_VERSION" -- java -version
+      quote_command "$MISE_BIN" exec -- mvn -version
     else
       [[ -x "$MISE_BIN" ]] || die "mise is missing at $MISE_BIN"
       "$MISE_BIN" --version
@@ -986,6 +1001,10 @@ verify_installation() {
       "$MISE_BIN" exec -- dotnet --list-sdks
       "$MISE_BIN" exec "java@$JAVA_21_VERSION" -- java -version
       "$MISE_BIN" exec "java@$JAVA_17_VERSION" -- java -version
+      # Reported, not asserted: `mvn -version` prints the Maven home and the JDK
+      # it resolved, which is exactly what distinguishes a mise-managed Maven
+      # from one inherited off /mnt/c through the WSL interop PATH.
+      "$MISE_BIN" exec -- mvn -version
     fi
   fi
 
@@ -1097,12 +1116,13 @@ Useful maintenance commands:
   ./$SCRIPT_NAME --repair-codex
 
 Useful checks:
-  command -v mise node java python dotnet uv direnv opencode claude codex openspec
+  command -v mise node java python dotnet mvn uv direnv opencode claude codex openspec
   mise ls
   shellcheck --version
   gitleaks version
   python -c 'import yaml; print(yaml.__version__)'
   dotnet --list-sdks
+  mvn -version
   opencode --version
   claude --version
   codex --version

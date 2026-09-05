@@ -162,6 +162,31 @@ test_mise_configuration_includes_quality_tools_by_default() {
   assert_equal "$(grep -c '^\[tools\]$' <<<"$config")" "1" "quality tools must extend the existing table, not open a second one"
 }
 
+test_mise_configuration_defaults_java_to_17() {
+  # Order is load-bearing, not cosmetic: mise resolves bare `java` to the FIRST
+  # entry of a multi-version list. The projects here build on 17, so 17 leads
+  # and 21 is installed alongside it. This has already been got wrong once by a
+  # hand-written ~/.config/mise/config.toml shadowing the list, which is exactly
+  # the kind of silent JDK swap the assertion below exists to catch.
+  # The dynamically sourced installer reads these globals.
+  # shellcheck disable=SC2034
+  { SKIP_QUALITY_TOOLS=0; JAVA_17_VERSION="temurin-17"; JAVA_21_VERSION="temurin-21"; }
+
+  local config
+  config="$(render_mise_configuration)"
+  [[ "$config" == *'java = ["temurin-17", "temurin-21"]'* ]] \
+    || fail "java must list 17 first: mise makes the first entry the default JDK"
+
+  # Both must still be present — 21 is opt-in, not dropped.
+  [[ "$config" == *"temurin-21"* ]] || fail "java 21 must remain installed alongside the default"
+
+  # shellcheck disable=SC2034
+  JAVA_17_VERSION="temurin-17.0.9"
+  config="$(render_mise_configuration)"
+  [[ "$config" == *'java = ["temurin-17.0.9", "temurin-21"]'* ]] \
+    || fail "ADT_JAVA_17_VERSION override must reach the rendered config and keep the lead position"
+}
+
 test_mise_configuration_pins_maven() {
   # Maven is a build tool: its version participates in build reproducibility,
   # so it must be pinned exactly rather than tracked as `latest`, and it must
@@ -719,6 +744,7 @@ test_project_configuration_preserves_existing_direnv_file
 test_project_configuration_dry_run_previews_direnv_file_without_creating_it
 test_mise_configuration_includes_quality_tools_by_default
 test_mise_configuration_omits_quality_tools_when_skipped
+test_mise_configuration_defaults_java_to_17
 test_mise_configuration_pins_maven
 test_mise_configuration_omits_maven_when_runtimes_skipped
 test_mise_configuration_pins_bun

@@ -65,6 +65,7 @@ variable of the same name:
 | .NET | `10`, `8` |
 | Python | `3.12` |
 | Node.js | `24` |
+| Bun | `1` |
 | Maven | `3.9.16` |
 | dotnet-ef (EF Core CLI, `dotnet:` backend) | `latest` |
 | uv, shellcheck, gitleaks, PyYAML | `latest` |

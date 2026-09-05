@@ -455,9 +455,16 @@ render_mise_configuration() {
   # test runner, so its version participates in how a project builds and what
   # its lockfile means. A major bump arriving unannounced is a build change,
   # which makes it an explicit decision (override with ADT_BUN_VERSION).
+  #
+  # Java lists 17 before 21 on purpose. For a multi-version tool mise treats the
+  # FIRST entry as the default — the one bare `java` resolves to — and installs
+  # the rest alongside it, reachable through `mise exec java@...` or a project
+  # config. The projects on this workstation build on 17, so 17 is the default
+  # and 21 is the one you opt into. Reordering this list silently changes which
+  # JDK every unpinned build picks up.
   cat <<EOF_MISE
 [tools]
-java = ["${JAVA_21_VERSION}", "${JAVA_17_VERSION}"]
+java = ["${JAVA_17_VERSION}", "${JAVA_21_VERSION}"]
 dotnet = ["${DOTNET_10_VERSION}", "${DOTNET_8_VERSION}"]
 python = "${PYTHON_VERSION}"
 node = "${NODE_VERSION}"

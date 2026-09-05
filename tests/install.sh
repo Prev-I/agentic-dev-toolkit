@@ -162,6 +162,37 @@ test_mise_configuration_includes_quality_tools_by_default() {
   assert_equal "$(grep -c '^\[tools\]$' <<<"$config")" "1" "quality tools must extend the existing table, not open a second one"
 }
 
+test_mise_configuration_pins_maven() {
+  # Maven is a build tool: its version participates in build reproducibility,
+  # so it must be pinned exactly rather than tracked as `latest`, and it must
+  # be overridable like every other pin.
+  # The dynamically sourced installer reads these globals.
+  # shellcheck disable=SC2034
+  { SKIP_QUALITY_TOOLS=0; MAVEN_VERSION="3.9.16"; }
+
+  local config
+  config="$(render_mise_configuration)"
+  [[ "$config" == *'maven = "3.9.16"'* ]] || fail "mise config must pin the requested maven version"
+  [[ "$config" != *'maven = "latest"'* ]] || fail "maven must not float on latest: a silent bump is a build change"
+  assert_equal "$(grep -c '^\[tools\]$' <<<"$config")" "1" "maven must extend the existing table, not open a second one"
+
+  # shellcheck disable=SC2034
+  MAVEN_VERSION="3.8.8"
+  config="$(render_mise_configuration)"
+  [[ "$config" == *'maven = "3.8.8"'* ]] || fail "ADT_MAVEN_VERSION override must reach the rendered config"
+}
+
+test_mise_configuration_omits_maven_when_runtimes_skipped() {
+  # Maven is a runtime, not a quality tool: --skip-quality-tools must keep it,
+  # and it must not acquire a skip flag of its own.
+  # shellcheck disable=SC2034
+  { SKIP_QUALITY_TOOLS=1; MAVEN_VERSION="3.9.16"; }
+
+  local config
+  config="$(render_mise_configuration)"
+  [[ "$config" == *"maven = "* ]] || fail "--skip-quality-tools must leave maven installed"
+}
+
 test_mise_configuration_omits_quality_tools_when_skipped() {
   # shellcheck disable=SC2034
   SKIP_QUALITY_TOOLS=1
@@ -581,6 +612,8 @@ test_project_configuration_preserves_existing_direnv_file
 test_project_configuration_dry_run_previews_direnv_file_without_creating_it
 test_mise_configuration_includes_quality_tools_by_default
 test_mise_configuration_omits_quality_tools_when_skipped
+test_mise_configuration_pins_maven
+test_mise_configuration_omits_maven_when_runtimes_skipped
 test_python_libraries_are_skipped_without_runtimes
 test_karpathy_skill_is_installed_for_claude_and_codex
 test_karpathy_skill_rejects_content_that_fails_the_checksum

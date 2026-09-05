@@ -65,6 +65,7 @@ variable of the same name:
 | .NET | `10`, `8` |
 | Python | `3.14` |
 | Node.js | `24` |
+| Maven | `3.9.16` |
 | uv, shellcheck, gitleaks, PyYAML | `latest` |
 | OpenSpec | `1.9.0` |
 | Superpowers | `v6.3.0` |

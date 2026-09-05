@@ -1,0 +1,13 @@
+# Git Flow with pull-request integration. The pairing is main + develop, not
+# master + develop: the stable branch name and the integration mechanism are
+# independent choices, and this repository's policy states both explicitly
+# rather than leaving either to be inferred.
+version: 1
+
+branching:
+  workflow: git-flow
+  stableBranch: main
+  integrationBranch: develop
+
+integration:
+  mode: pull-request

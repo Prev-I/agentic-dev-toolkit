@@ -1,0 +1,10 @@
+# GitHub Flow: short-lived branches cut from the stable branch, integrated by
+# pull request. No second long-lived branch.
+version: 1
+
+branching:
+  workflow: github-flow
+  stableBranch: main
+
+integration:
+  mode: pull-request

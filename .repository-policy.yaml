@@ -1,0 +1,10 @@
+# This repository's own integration policy, in the format it defines.
+# See repository-policy/README.md.
+version: 1
+
+branching:
+  workflow: github-flow
+  stableBranch: main
+
+integration:
+  mode: pull-request

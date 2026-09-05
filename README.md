@@ -24,6 +24,9 @@ A collection of reusable components for teams using AI coding agents:
 - **OpenCode model-routing bundle** — a starter configuration that assigns models to OpenCode's
   built-in agents and adds two custom subagents (`reviewer` and `expert`) for independent review
   and scarce-model escalation.
+- **Repository policy** — `.repository-policy.yaml`, a small versioned format letting a repository
+  declare its branching model and integration mechanism so agents read the workflow instead of
+  guessing it from branch names, with a schema, examples and a validator.
 
 ## What this is NOT
 
@@ -67,6 +70,12 @@ agentic-dev-toolkit/
           agents/
             reviewer.md                            # Independent review subagent
             expert.md                              # Escalation-only expert subagent
+  repository-policy/
+    README.md                                      # Format, usage and agent guidance
+    validate.sh                                    # Policy validator
+    schema/
+      repository-policy.v1.schema.json             # JSON Schema for version 1
+    examples/                                      # One file per representative policy
   docs/
     multi-agent-workspace-guide.md                 # Full guide: AGENTS.md pattern + MCP parity
 ```
@@ -215,6 +224,43 @@ scarce high-end model behind a hidden `expert` agent.
 
 See [`models/routing/opencode/README.md`](models/routing/opencode/README.md) for the model map,
 installation instructions, and smoke tests.
+
+## Repository policy
+
+Git has no portable way for a repository to state that it uses GitHub Flow rather than Git Flow,
+or that changes arrive by pull request rather than by direct commit. Hosting products enforce
+those rules, but that configuration is vendor-specific and an agent working from a clone may not
+see it at all.
+
+`.repository-policy.yaml` declares it in the repository:
+
+```yaml
+version: 1
+
+branching:
+  workflow: github-flow
+  stableBranch: main
+
+integration:
+  mode: pull-request
+```
+
+Branching model and integration mechanism are separate fields on purpose. A branch named `main`
+does not imply pull requests, and one named `master` does not imply direct commits — those are
+conventions in some environments, not rules of Git, and the format refuses to encode them.
+
+The file declares intent; GitHub rulesets and GitLab protected branches enforce it. Reviewers,
+CODEOWNERS, signed commits and required checks stay out by design.
+
+```bash
+bash repository-policy/validate.sh
+```
+
+See [`repository-policy/README.md`](repository-policy/README.md) for the format, the validator's
+exit codes, and how an agent should consume a policy. The reasoning behind it is recorded in
+[ADR-0005](https://github.com/Prev-I/agentic-engineering/blob/main/decisions/0005-declare-repository-workflow-as-machine-readable-policy.md)
+and the [Repository Workflow Contract](https://github.com/Prev-I/agentic-engineering/blob/main/patterns/repository-workflow-contract.md)
+pattern in [agentic-engineering](https://github.com/Prev-I/agentic-engineering).
 
 ## Security
 

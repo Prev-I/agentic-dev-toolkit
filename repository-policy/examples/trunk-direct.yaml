@@ -1,0 +1,10 @@
+# Trunk-based development with direct commits, on a stable branch named
+# master. The traditional pairing, stated rather than assumed.
+version: 1
+
+branching:
+  workflow: trunk
+  stableBranch: master
+
+integration:
+  mode: direct

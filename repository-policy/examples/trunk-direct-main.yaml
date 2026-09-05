@@ -1,0 +1,15 @@
+# The case that proves branch names carry no integration semantics: a stable
+# branch named main that accepts direct commits. Valid, and deliberately so.
+#
+# A tool that rejected this, or that quietly assumed pull requests because the
+# branch is called main, would be encoding a naming habit as if it were a rule
+# of Git. Documentation repositories with a single maintainer commonly work
+# exactly this way.
+version: 1
+
+branching:
+  workflow: trunk
+  stableBranch: main
+
+integration:
+  mode: direct

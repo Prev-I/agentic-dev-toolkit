@@ -63,9 +63,10 @@ variable of the same name:
 |---|---|
 | Java | `temurin-21`, `temurin-17` |
 | .NET | `10`, `8` |
-| Python | `3.14` |
+| Python | `3.12` |
 | Node.js | `24` |
 | Maven | `3.9.16` |
+| dotnet-ef (EF Core CLI, `dotnet:` backend) | `latest` |
 | uv, shellcheck, gitleaks, PyYAML | `latest` |
 | OpenSpec | `1.9.0` |
 | Superpowers | `v6.3.0` |

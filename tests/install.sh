@@ -182,6 +182,72 @@ test_mise_configuration_pins_maven() {
   [[ "$config" == *'maven = "3.8.8"'* ]] || fail "ADT_MAVEN_VERSION override must reach the rendered config"
 }
 
+test_mise_configuration_declares_dotnet_ef() {
+  # dotnet-ef comes through mise's `dotnet:` backend instead of a global
+  # `dotnet tool install`, so a rebuilt workstation gets it from the same
+  # manifest as everything else. The key must stay QUOTED: `dotnet:dotnet-ef`
+  # contains a colon, which bare TOML keys do not permit — an unquoted key
+  # would render a config file mise cannot parse at all.
+  # The dynamically sourced installer reads these globals.
+  # shellcheck disable=SC2034
+  { SKIP_QUALITY_TOOLS=0; DOTNET_EF_VERSION="latest"; }
+
+  local config
+  config="$(render_mise_configuration)"
+  [[ "$config" == *'"dotnet:dotnet-ef" = "latest"'* ]] \
+    || fail "mise config must declare dotnet-ef through the dotnet: backend, with a quoted key"
+  [[ "$config" != *$'\ndotnet:dotnet-ef ='* ]] \
+    || fail "dotnet:dotnet-ef key must be quoted: a bare key with a colon is invalid TOML"
+
+  # shellcheck disable=SC2034
+  DOTNET_EF_VERSION="9.0.0"
+  config="$(render_mise_configuration)"
+  [[ "$config" == *'"dotnet:dotnet-ef" = "9.0.0"'* ]] \
+    || fail "ADT_DOTNET_EF_VERSION override must reach the rendered config"
+}
+
+test_mise_configuration_renders_parseable_toml() {
+  # The rendered file is consumed by mise as TOML. Asserting on substrings
+  # proves the values are present but not that the document parses — and the
+  # quoted dotnet: key is exactly the kind of thing that silently breaks it.
+  # The dynamically sourced installer reads these globals.
+  # shellcheck disable=SC2034
+  { SKIP_QUALITY_TOOLS=0; PYTHON_VERSION="3.12"; DOTNET_EF_VERSION="latest"; }
+
+  local config rendered
+  config="$(render_mise_configuration)"
+  rendered="$(mktemp)"
+  printf '%s\n' "$config" > "$rendered"
+
+  if ! python3 -c '
+import sys, tomllib
+with open(sys.argv[1], "rb") as handle:
+    document = tomllib.load(handle)
+tools = document["tools"]
+assert tools["python"] == "3.12", tools["python"]
+assert tools["dotnet:dotnet-ef"] == "latest", tools["dotnet:dotnet-ef"]
+' "$rendered" 2>/dev/null; then
+    rm -f "$rendered"
+    fail "rendered mise configuration must be valid TOML with the expected tool keys"
+  fi
+  rm -f "$rendered"
+}
+
+test_installer_defaults_python_to_312() {
+  # Python was moved 3.14 -> 3.12 to match what the reference workstation
+  # actually runs; the previous default was declared but never effective.
+  #
+  # This asserts against the installer SOURCE rather than calling
+  # render_mise_configuration, deliberately: PYTHON_VERSION is a global that
+  # earlier tests in this file assign to, so a rendered-output check would
+  # pass on a value inherited from whichever test ran before it rather than
+  # on the declared default.
+  grep -qE '^PYTHON_VERSION="\$\{ADT_PYTHON_VERSION:-3\.12\}"$' "$INSTALLER" \
+    || fail "installer must default PYTHON_VERSION to 3.12"
+  grep -qE '^DOTNET_EF_VERSION="\$\{ADT_DOTNET_EF_VERSION:-latest\}"$' "$INSTALLER" \
+    || fail "installer must default DOTNET_EF_VERSION to latest"
+}
+
 test_mise_configuration_omits_maven_when_runtimes_skipped() {
   # Maven is a runtime, not a quality tool: --skip-quality-tools must keep it,
   # and it must not acquire a skip flag of its own.
@@ -614,6 +680,9 @@ test_mise_configuration_includes_quality_tools_by_default
 test_mise_configuration_omits_quality_tools_when_skipped
 test_mise_configuration_pins_maven
 test_mise_configuration_omits_maven_when_runtimes_skipped
+test_mise_configuration_declares_dotnet_ef
+test_mise_configuration_renders_parseable_toml
+test_installer_defaults_python_to_312
 test_python_libraries_are_skipped_without_runtimes
 test_karpathy_skill_is_installed_for_claude_and_codex
 test_karpathy_skill_rejects_content_that_fails_the_checksum

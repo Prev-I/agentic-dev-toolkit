@@ -33,9 +33,10 @@ JAVA_21_VERSION="${ADT_JAVA_21_VERSION:-temurin-21}"
 JAVA_17_VERSION="${ADT_JAVA_17_VERSION:-temurin-17}"
 DOTNET_10_VERSION="${ADT_DOTNET_10_VERSION:-10}"
 DOTNET_8_VERSION="${ADT_DOTNET_8_VERSION:-8}"
-PYTHON_VERSION="${ADT_PYTHON_VERSION:-3.14}"
+PYTHON_VERSION="${ADT_PYTHON_VERSION:-3.12}"
 NODE_VERSION="${ADT_NODE_VERSION:-24}"
 MAVEN_VERSION="${ADT_MAVEN_VERSION:-3.9.16}"
+DOTNET_EF_VERSION="${ADT_DOTNET_EF_VERSION:-latest}"
 UV_VERSION="${ADT_UV_VERSION:-latest}"
 OPENSPEC_VERSION="${ADT_OPENSPEC_VERSION:-1.9.0}"
 SUPERPOWERS_REF="${ADT_SUPERPOWERS_REF:-v6.3.0}"
@@ -167,6 +168,7 @@ Environment variables provide the same defaults:
   ADT_NODE_VERSION, ADT_PYTHON_VERSION, ADT_UV_VERSION,
   ADT_JAVA_17_VERSION, ADT_JAVA_21_VERSION,
   ADT_DOTNET_8_VERSION, ADT_DOTNET_10_VERSION,
+  ADT_MAVEN_VERSION, ADT_DOTNET_EF_VERSION,
   ADT_OPENSPEC_VERSION, ADT_SUPERPOWERS_REF, ADT_OPENSPEC_TOOLS,
   ADT_KARPATHY_REF, ADT_KARPATHY_SHA256,
   ADT_SHELLCHECK_VERSION, ADT_GITLEAKS_VERSION, ADT_PYYAML_VERSION
@@ -434,6 +436,14 @@ render_mise_configuration() {
   # the interop PATH. That still runs, and even picks up the Linux JDK, but the
   # whole distribution and its plugin classpath are then read across the 9p
   # filesystem on every build.
+  #
+  # dotnet-ef is the EF Core CLI, installed through mise's `dotnet:` backend
+  # rather than `dotnet tool install -g`. A global .NET tool lands in
+  # ~/.dotnet/tools and is versioned per-machine by whoever ran the install;
+  # declaring it here keeps it in the same manifest as every other tool, so a
+  # rebuilt workstation gets it without a remembered manual step. The quoted
+  # key is required: `dotnet:dotnet-ef` contains a colon, which bare TOML keys
+  # do not allow.
   cat <<EOF_MISE
 [tools]
 java = ["${JAVA_21_VERSION}", "${JAVA_17_VERSION}"]
@@ -442,6 +452,7 @@ python = "${PYTHON_VERSION}"
 node = "${NODE_VERSION}"
 maven = "${MAVEN_VERSION}"
 uv = "${UV_VERSION}"
+"dotnet:dotnet-ef" = "${DOTNET_EF_VERSION}"
 EOF_MISE
 
   # The two linters below go through mise rather than APT on purpose. Both are
@@ -990,6 +1001,7 @@ verify_installation() {
       quote_command "$MISE_BIN" exec "java@$JAVA_21_VERSION" -- java -version
       quote_command "$MISE_BIN" exec "java@$JAVA_17_VERSION" -- java -version
       quote_command "$MISE_BIN" exec -- mvn -version
+      quote_command "$MISE_BIN" exec -- dotnet-ef --version
     else
       [[ -x "$MISE_BIN" ]] || die "mise is missing at $MISE_BIN"
       "$MISE_BIN" --version
@@ -1005,6 +1017,7 @@ verify_installation() {
       # it resolved, which is exactly what distinguishes a mise-managed Maven
       # from one inherited off /mnt/c through the WSL interop PATH.
       "$MISE_BIN" exec -- mvn -version
+      "$MISE_BIN" exec -- dotnet-ef --version
     fi
   fi
 
@@ -1116,13 +1129,14 @@ Useful maintenance commands:
   ./$SCRIPT_NAME --repair-codex
 
 Useful checks:
-  command -v mise node java python dotnet mvn uv direnv opencode claude codex openspec
+  command -v mise node java python dotnet mvn dotnet-ef uv direnv opencode claude codex openspec
   mise ls
   shellcheck --version
   gitleaks version
   python -c 'import yaml; print(yaml.__version__)'
   dotnet --list-sdks
   mvn -version
+  dotnet-ef --version
   opencode --version
   claude --version
   codex --version

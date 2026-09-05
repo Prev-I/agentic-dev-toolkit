@@ -35,6 +35,7 @@ DOTNET_10_VERSION="${ADT_DOTNET_10_VERSION:-10}"
 DOTNET_8_VERSION="${ADT_DOTNET_8_VERSION:-8}"
 PYTHON_VERSION="${ADT_PYTHON_VERSION:-3.12}"
 NODE_VERSION="${ADT_NODE_VERSION:-24}"
+BUN_VERSION="${ADT_BUN_VERSION:-1}"
 MAVEN_VERSION="${ADT_MAVEN_VERSION:-3.9.16}"
 DOTNET_EF_VERSION="${ADT_DOTNET_EF_VERSION:-latest}"
 UV_VERSION="${ADT_UV_VERSION:-latest}"
@@ -147,6 +148,7 @@ Selective installation:
 
 Version overrides:
   --node-version VERSION       Node.js version (default: $NODE_VERSION).
+  --bun-version VERSION        Bun version (default: $BUN_VERSION).
   --python-version VERSION     Python version (default: $PYTHON_VERSION).
   --uv-version VERSION         uv version (default: $UV_VERSION).
   --java-17-version VERSION    Java 17 distribution/version (default: $JAVA_17_VERSION).
@@ -165,7 +167,7 @@ Version overrides:
   -h, --help                   Show this help.
 
 Environment variables provide the same defaults:
-  ADT_NODE_VERSION, ADT_PYTHON_VERSION, ADT_UV_VERSION,
+  ADT_NODE_VERSION, ADT_BUN_VERSION, ADT_PYTHON_VERSION, ADT_UV_VERSION,
   ADT_JAVA_17_VERSION, ADT_JAVA_21_VERSION,
   ADT_DOTNET_8_VERSION, ADT_DOTNET_10_VERSION,
   ADT_MAVEN_VERSION, ADT_DOTNET_EF_VERSION,
@@ -215,6 +217,9 @@ parse_args() {
       --node-version)
         require_value "$1" "${2:-}"; NODE_VERSION="$2"; shift ;;
       --node-version=*) NODE_VERSION="${1#*=}" ;;
+      --bun-version)
+        require_value "$1" "${2:-}"; BUN_VERSION="$2"; shift ;;
+      --bun-version=*) BUN_VERSION="${1#*=}" ;;
       --python-version)
         require_value "$1" "${2:-}"; PYTHON_VERSION="$2"; shift ;;
       --python-version=*) PYTHON_VERSION="${1#*=}" ;;
@@ -444,12 +449,19 @@ render_mise_configuration() {
   # rebuilt workstation gets it without a remembered manual step. The quoted
   # key is required: `dotnet:dotnet-ef` contains a colon, which bare TOML keys
   # do not allow.
+  #
+  # Bun is pinned to a major, like Node and unlike the `latest` developer
+  # tools. It is not only a runtime: it is also a package manager, bundler and
+  # test runner, so its version participates in how a project builds and what
+  # its lockfile means. A major bump arriving unannounced is a build change,
+  # which makes it an explicit decision (override with ADT_BUN_VERSION).
   cat <<EOF_MISE
 [tools]
 java = ["${JAVA_21_VERSION}", "${JAVA_17_VERSION}"]
 dotnet = ["${DOTNET_10_VERSION}", "${DOTNET_8_VERSION}"]
 python = "${PYTHON_VERSION}"
 node = "${NODE_VERSION}"
+bun = "${BUN_VERSION}"
 maven = "${MAVEN_VERSION}"
 uv = "${UV_VERSION}"
 "dotnet:dotnet-ef" = "${DOTNET_EF_VERSION}"
@@ -1002,6 +1014,7 @@ verify_installation() {
       quote_command "$MISE_BIN" exec "java@$JAVA_17_VERSION" -- java -version
       quote_command "$MISE_BIN" exec -- mvn -version
       quote_command "$MISE_BIN" exec -- dotnet-ef --version
+      quote_command "$MISE_BIN" exec -- bun --version
     else
       [[ -x "$MISE_BIN" ]] || die "mise is missing at $MISE_BIN"
       "$MISE_BIN" --version
@@ -1018,6 +1031,7 @@ verify_installation() {
       # from one inherited off /mnt/c through the WSL interop PATH.
       "$MISE_BIN" exec -- mvn -version
       "$MISE_BIN" exec -- dotnet-ef --version
+      "$MISE_BIN" exec -- bun --version
     fi
   fi
 
@@ -1129,7 +1143,7 @@ Useful maintenance commands:
   ./$SCRIPT_NAME --repair-codex
 
 Useful checks:
-  command -v mise node java python dotnet mvn dotnet-ef uv direnv opencode claude codex openspec
+  command -v mise node bun java python dotnet mvn dotnet-ef uv direnv opencode claude codex openspec
   mise ls
   shellcheck --version
   gitleaks version
@@ -1137,6 +1151,7 @@ Useful checks:
   dotnet --list-sdks
   mvn -version
   dotnet-ef --version
+  bun --version
   opencode --version
   claude --version
   codex --version

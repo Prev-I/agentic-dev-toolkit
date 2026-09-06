@@ -238,6 +238,54 @@ is_rancher_linux_path() {
      "$p" == *"$base/docker-cli-plugins/"* ]]
 }
 
+# Windows-backed directories whose contents are Linux-executable launchers.
+#
+# The policy this tool enforces exists to stop a Linux build binding to a
+# Windows PE where a Linux binary was meant. It does not follow from that
+# that every directory on a Windows mount is dangerous: an `sh` script or a
+# Linux ELF binary that merely lives on DrvFs runs correctly, just slowly.
+# The two that a WSL developer cannot work without are the editor launcher
+# and the container tooling, and both are exactly that.
+#
+# Allowlisting a directory does NOT allowlist a Windows binary inside it.
+# Tool classification is independent of this list and still fails PE targets,
+# Windows shebang interpreters, and any managed runtime resolved from a
+# Windows mount, so widening the list cannot smuggle in a PE.
+#
+# Substrings, matched case-insensitively against the canonical path, so a
+# per-user or non-default install location still matches. Extend for this
+# machine with WTD_PATH_ALLOW, colon-separated.
+windows_path_allowlist() {
+  printf '%s\n' "/rancher desktop/resources/resources/linux/bin"
+  printf '%s\n' "/rancher desktop/resources/resources/linux/docker-cli-plugins"
+  printf '%s\n' "/microsoft vs code/bin"
+  printf '%s\n' "/microsoft vs code insiders/bin"
+
+  local extra
+  if [[ -n "${WTD_PATH_ALLOW:-}" ]]; then
+    # The `|| [[ -n ]]` guard is load-bearing: the last field has no trailing
+    # newline, so without it a single-entry WTD_PATH_ALLOW is read and then
+    # silently discarded when read returns non-zero.
+    while IFS= read -r extra || [[ -n "$extra" ]]; do
+      [[ -n "$(trim "$extra")" ]] || continue
+      lower "$(trim "$extra")"
+      printf '\n'
+    done < <(printf '%s' "$WTD_PATH_ALLOW" | tr ':' '\n')
+  fi
+}
+
+is_allowlisted_windows_path() {
+  local p entry
+  p="$(lower "$1")"
+  while IFS= read -r entry || [[ -n "$entry" ]]; do
+    [[ -n "$entry" ]] || continue
+    if [[ "$p" == *"$entry" || "$p" == *"$entry/"* ]]; then
+      return 0
+    fi
+  done < <(windows_path_allowlist)
+  return 1
+}
+
 audit_path_raw_syntax() {
   local value=$SCAN_PATH
   if [[ "$value" =~ (^|[:;])[A-Za-z]:[\\/] ]]; then
@@ -301,7 +349,9 @@ audit_path_entries() {
 
     if is_windows_backed_path "$canonical"; then
       if is_rancher_linux_path "$canonical"; then
-        add_finding INFO PATH_RANCHER_LINUX_ALLOWED "$entry" "Rancher Desktop Linux-bin directory is the only allowed Windows-backed PATH exception."
+        add_finding INFO PATH_RANCHER_LINUX_ALLOWED "$entry" "Rancher Desktop Linux-bin directory is an allowed Windows-backed PATH exception."
+      elif is_allowlisted_windows_path "$canonical"; then
+        add_finding INFO PATH_ALLOWLISTED_WINDOWS "$entry" "Windows-backed PATH entry is allowlisted as a Linux-executable launcher directory; tool checks still reject PE targets."
       else
         add_finding FAIL PATH_WINDOWS_DRVFS "$entry" "Windows-backed DrvFs PATH entry violates Linux-first isolation."
       fi
@@ -614,7 +664,7 @@ line_references_windows_mount() {
 
 audit_shell_profiles() {
   local file line stripped lower_line n segment lower_segment
-  local has_rancher has_generic
+  local has_rancher has_allowlisted has_generic
   local -a segments=()
   while IFS= read -r file; do
     [[ -n "$file" && -f "$file" && -r "$file" ]] || continue
@@ -628,6 +678,7 @@ audit_shell_profiles() {
       [[ "$lower_line" == *"path"* ]] || continue
 
       has_rancher=0
+      has_allowlisted=0
       has_generic=0
       segments=()
       IFS=':' read -r -a segments <<< "$line"
@@ -635,6 +686,13 @@ audit_shell_profiles() {
         lower_segment="$(lower "$segment")"
         if [[ "$lower_segment" == *"/rancher desktop/resources/resources/linux/bin"* || "$lower_segment" == *"/rancher desktop/resources/resources/linux/docker-cli-plugins"* ]]; then
           has_rancher=1
+          continue
+        fi
+        # A profile that re-adds an allowlisted launcher directory is the
+        # documented way to keep the editor and container tooling working once
+        # appendWindowsPath is off, so it must not be reported as a relapse.
+        if is_allowlisted_windows_path "$lower_segment"; then
+          has_allowlisted=1
           continue
         fi
         if line_references_windows_mount "$segment" || \
@@ -647,6 +705,9 @@ audit_shell_profiles() {
 
       if (( has_rancher )); then
         add_finding INFO SHELL_PROFILE_RANCHER_PATH_ALLOWED "$file:$n" "Profile adds the narrow Rancher Desktop Linux-bin PATH exception."
+      fi
+      if (( has_allowlisted )); then
+        add_finding INFO SHELL_PROFILE_ALLOWLISTED_PATH "$file:$n" "Profile adds an allowlisted Windows-backed launcher directory."
       fi
       if (( has_generic )); then
         add_finding FAIL SHELL_PROFILE_WINDOWS_PATH "$file:$n" "Shell startup line may reintroduce Windows tooling into PATH; remediation is manual."
@@ -747,11 +808,11 @@ rewrite_path_assignment_line() {
     if [[ -e "$expanded" ]]; then
       canonical="$(readlink -f -- "$expanded" 2>/dev/null || printf '%s' "$expanded")"
       if [[ ! -d "$expanded" ]]; then changed=1; continue; fi
-      if is_windows_backed_path "$canonical" && ! is_rancher_linux_path "$canonical"; then changed=1; continue; fi
+      if is_windows_backed_path "$canonical" && ! is_allowlisted_windows_path "$canonical"; then changed=1; continue; fi
       if [[ ${seen_canonical[$canonical]+x} ]]; then changed=1; continue; fi
       seen_canonical[$canonical]=1
     else
-      if is_windows_backed_path "$expanded" && ! is_rancher_linux_path "$expanded"; then changed=1; continue; fi
+      if is_windows_backed_path "$expanded" && ! is_allowlisted_windows_path "$expanded"; then changed=1; continue; fi
       if (( DROP_MISSING )); then changed=1; continue; fi
     fi
     kept+=("$seg")

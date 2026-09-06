@@ -11,9 +11,32 @@ TMP_ROOT=""
 
 pass() { printf 'ok - %s\n' "$1"; PASS_COUNT=$((PASS_COUNT + 1)); }
 fail() { printf 'not ok - %s\n%s\n' "$1" "${2:-}"; FAIL_COUNT=$((FAIL_COUNT + 1)); }
-assert_contains() { local name=$1 haystack=$2 needle=$3; [[ "$haystack" == *"$needle"* ]] && pass "$name" || fail "$name" "expected to contain: $needle\nactual: $haystack"; }
-assert_not_contains() { local name=$1 haystack=$2 needle=$3; [[ "$haystack" != *"$needle"* ]] && pass "$name" || fail "$name" "did not expect: $needle\nactual: $haystack"; }
-assert_eq() { local name=$1 actual=$2 expected=$3; [[ "$actual" == "$expected" ]] && pass "$name" || fail "$name" "expected: $expected\nactual: $actual"; }
+assert_contains() {
+  local name=$1 haystack=$2 needle=$3
+  if [[ "$haystack" == *"$needle"* ]]; then
+    pass "$name"
+  else
+    fail "$name" "expected to contain: $needle\nactual: $haystack"
+  fi
+}
+
+assert_not_contains() {
+  local name=$1 haystack=$2 needle=$3
+  if [[ "$haystack" != *"$needle"* ]]; then
+    pass "$name"
+  else
+    fail "$name" "did not expect: $needle\nactual: $haystack"
+  fi
+}
+
+assert_eq() {
+  local name=$1 actual=$2 expected=$3
+  if [[ "$actual" == "$expected" ]]; then
+    pass "$name"
+  else
+    fail "$name" "expected: $expected\nactual: $actual"
+  fi
+}
 
 setup_fixture() {
   TMP_ROOT="$(mktemp -d)"
@@ -33,7 +56,15 @@ teardown_fixture() { [[ -n "$TMP_ROOT" ]] && rm -rf "$TMP_ROOT"; TMP_ROOT=""; }
 
 run_doctor() {
   set +e
+  # MISE_SHELL and MISE_SESSION are cleared so that WTD_MISE_ACTIVATED is the
+  # only thing deciding whether the run looks activated. mise_is_activated
+  # falls back to those two variables when the override is empty, and the
+  # reference workstation activates mise from .bashrc, so without this the
+  # non-activated cases pass or fail according to the shell that happened to
+  # launch the suite -- green from a script, two failures from a terminal.
   LAST_OUT="$(env \
+    -u MISE_SHELL \
+    -u MISE_SESSION \
     WTD_ASSUME_WSL=1 \
     WTD_NO_COLOR=1 \
     WTD_WSL_CONF="$TMP_ROOT/wsl.conf" \
@@ -496,6 +527,9 @@ assert_contains "excessive backslash escaping is detected" "$LAST_OUT" "PATH_EXC
 teardown_fixture
 
 setup_fixture
+# The single quotes are the point: this feeds the doctor the literal text a
+# malformed PATH contains, so $HOME and %USERPROFILE% must reach it unexpanded.
+# shellcheck disable=SC2016
 WTD_TEST_SCAN_PATH='"/usr/bin":$HOME/bin:%USERPROFILE%/bin' run_doctor audit
 assert_eq "literal quote and variables in effective PATH fail" "$LAST_RC" "1"
 assert_contains "literal quote is detected" "$LAST_OUT" "PATH_LITERAL_QUOTE"
@@ -704,6 +738,32 @@ WTD_TEST_PROFILE_FILES="$TMP_ROOT/home/.profile" run_doctor fix --all
 assert_eq "combined remediation prefers restart exit code" "$LAST_RC" "10"
 assert_contains "combined remediation changes wsl.conf" "$LAST_OUT" "WSL_RESTART_REQUIRED"
 assert_contains "combined remediation changes PATH source" "$LAST_OUT" "PATH_PROFILE_CHANGED"
+teardown_fixture
+
+# mise lists one row per installed version, so a tool pinned to several
+# versions -- java = ["temurin-17", "temurin-21"] on the reference workstation
+# -- used to be audited once per row and reported three identical findings per
+# extra version. Every question the audit asks about a tool has one answer per
+# tool, not per version.
+setup_fixture
+mkdir -p "$TMP_ROOT/mise/bin" "$TMP_ROOT/mise/java/bin"
+cat > "$TMP_ROOT/mise/bin/mise" <<'MISE'
+#!/usr/bin/env bash
+case "$1" in
+  ls) printf 'java  17.0.20  ~/.config/mise.toml  temurin-17\njava  21.0.12  ~/.config/mise.toml  temurin-21\n' ;;
+  which) [[ "$2" == java ]] && printf '%s\n' "$WTD_FAKE_MISE_JAVA" ;;
+  *) exit 1 ;;
+esac
+MISE
+cat > "$TMP_ROOT/mise/java/bin/java" <<'JAVA'
+#!/usr/bin/env bash
+exit 0
+JAVA
+chmod +x "$TMP_ROOT/mise/bin/mise" "$TMP_ROOT/mise/java/bin/java"
+WTD_TEST_MISE_BIN="$TMP_ROOT/mise/bin/mise" WTD_FAKE_MISE_JAVA="$TMP_ROOT/mise/java/bin/java" WTD_TEST_SCAN_PATH="$TMP_ROOT/mise/java/bin" run_doctor audit
+assert_eq "a tool pinned to two versions is configured once" "$(printf '%s\n' "$LAST_OUT" | grep -c 'MISE_TOOL_CONFIGURED')" "1"
+assert_eq "a tool pinned to two versions is bound once" "$(printf '%s\n' "$LAST_OUT" | grep -c 'MISE_BINDING_OK')" "1"
+assert_contains "the deduplicated tool is still audited" "$LAST_OUT" "MISE_BINDING_OK"
 teardown_fixture
 
 printf '\n%d passed, %d failed\n' "$PASS_COUNT" "$FAIL_COUNT"

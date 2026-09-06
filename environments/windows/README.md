@@ -11,6 +11,7 @@ directory holds the part that does not.
 | Lives | inside the distribution | Windows user profile |
 | Scope | that distribution only | the WSL2 virtual machine, shared by all distributions |
 | Holds | `boot.systemd`, `interop.enabled`, `interop.appendWindowsPath`, `automount` | `[wsl2]`: `memory`, `processors`, `networkingMode`, `dnsTunneling`. `[experimental]`: `autoMemoryReclaim`, `sparseVhd` |
+| Enabled here | — | `autoMemoryReclaim` only; see below for why not `sparseVhd` |
 | In this repository | managed by `wsl-toolchain-doctor` | the template beside this file |
 | Applied by | `wsl-toolchain-doctor.sh fix` | copying it by hand |
 
@@ -32,9 +33,9 @@ Copy-Item .\environments\windows\.wslconfig $env:USERPROFILE\.wslconfig
 wsl.exe --shutdown
 ```
 
-Read it before copying. Two settings are enabled and the rest are deliberately
+Read it before copying. One setting is enabled and the rest are deliberately
 absent, with the reasoning inline — the absences are as considered as the
-presences, and a machine with a different problem may want different values.
+presence, and a machine with a different problem may want different values.
 
 Then check that WSL accepted every key. Any command that makes WSL read the
 file reports the rejected ones, `wsl.exe -l -v` among them:
@@ -62,6 +63,49 @@ The second easiest is a key under the wrong section, and that one does warn. The
 two failures look identical from inside the distribution — the setting is not in
 force either way — so when a `.wslconfig` setting appears to have no effect,
 check the restart first and the warnings second.
+
+## Why `sparseVhd` is not enabled
+
+It is the setting most likely to be reached for, and on a machine that already
+has the problem it solves nothing. Two independent reasons, both worth knowing
+before overriding this.
+
+**It never retrofits an existing disk.** The key governs virtual disks created
+after it is set. An `ext4.vhdx` that has already grown keeps every byte it has
+committed. On one host with the key correctly placed and in force, all three
+distributions still reported as not sparse:
+
+```
+rancher-desktop         0.96 GB   not sparse
+Ubuntu                 31.79 GB   not sparse
+rancher-desktop-data   64.59 GB   not sparse   (distribution stopped)
+```
+
+97 GB committed, none of it recoverable by the setting that was supposed to
+recover it.
+
+**The feature is gated off, for data corruption.** Converting an existing disk
+by hand does not work either. Its release notes put the gate in WSL 2.5.6, and
+the service refuses:
+
+```powershell
+wsl.exe --manage rancher-desktop --set-sparse true
+# reports that sparse VHD support is disabled due to potential data corruption,
+# directs you to --allow-unsafe, and exits with
+# Error code: Wsl/Service/E_INVALIDARG
+```
+
+Observed on WSL 2.7.13.0. The message is localised; the error code is not.
+
+`--allow-unsafe` exists and does force it. Whether to point it at a disk you
+care about is a decision with a real downside, and not one a template should
+make on someone's behalf — which is why the key is documented here and left
+unset in the file.
+
+**To actually reclaim space from an existing `ext4.vhdx`**, shut the
+distribution down and compact the file with `diskpart` or `Optimize-VHD`. Note
+that this is also the path a sparse disk closes off: `Optimize-VHD` refuses
+files that are sparse.
 
 ## Why the installer does not write this file
 

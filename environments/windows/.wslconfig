@@ -9,29 +9,15 @@
 # restart. Deleting the file returns WSL to its defaults, which are a memory
 # ceiling of half the host RAM and all processors available.
 #
+# The section headings are load-bearing. autoMemoryReclaim belongs under
+# [experimental]; placed under [wsl2] it is reported as an unknown key and
+# ignored, while WSL starts normally - so the file looks applied when the
+# setting is in fact doing nothing. Observed on WSL 2.7.13.0.
+#
 # A template, not a managed file. The installer never writes it - see
 # README.md in this directory for why.
 
 [wsl2]
-
-# Return page-cache memory to Windows.
-#
-# The virtual machine grows its working set to cache file data and, left alone,
-# does not give it back. The symptom is a vmmemWSL process holding several
-# times more memory than the distribution reports in use, which persists until
-# the machine is shut down.
-#
-# `gradual` releases memory while the virtual machine is idle. `dropcache` is
-# more aggressive and pays for it on re-reads.
-autoMemoryReclaim=gradual
-
-# Let a virtual disk return freed space to the Windows volume.
-#
-# Without this an ext4.vhdx only ever grows: deleting data inside the
-# distribution leaves the file at its high-water mark. The effect is largest on
-# distributions used as container storage, where image churn is routine and can
-# leave tens of gigabytes committed to a distribution that is not even running.
-sparseVhd=true
 
 # Deliberately not set. Each of these is a behaviour change rather than an
 # improvement, and each belongs to a measurement or a named problem:
@@ -48,3 +34,40 @@ sparseVhd=true
 #
 #   kernelCommandLine, swap, swapFile, localhostForwarding, nestedVirtualization
 #     Same rule. A specific need, or leave the default alone.
+
+[experimental]
+
+# Return page-cache memory to Windows.
+#
+# The virtual machine grows its working set to cache file data and, left alone,
+# does not give it back. The symptom is a vmmemWSL process holding several
+# times more memory than the distribution reports in use, which persists until
+# the machine is shut down.
+#
+# `gradual` releases memory while the virtual machine is idle. `dropcache` is
+# more aggressive and pays for it on re-reads.
+autoMemoryReclaim=gradual
+
+# sparseVhd is deliberately not set.
+#
+# It reads as free disk space and delivers none, on two independent counts.
+#
+# It applies only to virtual disks created after it is set. An existing
+# ext4.vhdx is never retrofitted, so whatever a machine has already committed
+# stays committed - which is the whole of the problem on any machine old enough
+# to have one.
+#
+# And the feature is gated off. Its release notes put the gate in WSL 2.5.6:
+# the service refuses to make a disk sparse unless --allow-unsafe is passed,
+# because sparse VHDs were implicated in data corruption. Observed directly on
+# WSL 2.7.13.0:
+# `wsl.exe --manage <distro> --set-sparse true` returns a message naming the
+# corruption risk and the flag, with `Error code: Wsl/Service/E_INVALIDARG`.
+#
+# So enabling it here would turn on, by default and for everyone, a feature its
+# own vendor withdrew for data loss - while doing nothing at all for the disk
+# that prompted the search. To reclaim space from an existing ext4.vhdx, run
+# fstrim inside it and then compact the file with diskpart or Optimize-VHD, with
+# the distribution shut down. The fstrim is the half that matters: compaction
+# alone reclaims almost nothing, because it can only drop blocks the filesystem
+# has declared free. See README.md in this directory for the procedure.

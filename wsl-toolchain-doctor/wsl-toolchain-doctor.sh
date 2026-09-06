@@ -255,6 +255,7 @@ audit_path_raw_syntax() {
   if [[ "$value" == *$'\r'* || "$value" == *$'\n'* || "$value" == *$'\t'* ]]; then
     add_finding FAIL PATH_CONTROL_CHAR "PATH" "PATH contains a CR, LF, or TAB control character."
   fi
+  # shellcheck disable=SC1003
   if [[ "$value" == *'\\'* ]]; then
     add_finding WARN PATH_EXCESSIVE_ESCAPE "PATH" "PATH contains repeated backslash escaping; verify that Windows escaping has not leaked into WSL."
   fi
@@ -486,7 +487,7 @@ first_command_candidate() {
 }
 
 audit_mise() {
-  local mise canonical format output line tool primary selected selected_canonical selected_format current current_canonical
+  local mise canonical format output line tool primary selected selected_canonical selected_format current current_canonical seen_tools
   if ! mise="$(mise_bin)"; then
     add_finding INFO MISE_NOT_AVAILABLE "mise" "mise is not available; the doctor does not substitute a static required-tool matrix."
     return 0
@@ -505,10 +506,21 @@ audit_mise() {
     return 0
   fi
 
+  seen_tools=""
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ -n "$(trim "$line")" ]] || continue
     tool="${line%%[[:space:]]*}"
     tool="${tool%%@*}"
+
+    # mise emits one row per installed version, so a tool pinned to several
+    # versions -- java = ["temurin-17", "temurin-21"] -- appears more than
+    # once. Every question below is about the binding the tool resolves to,
+    # which has one answer per tool rather than one per version, so a second
+    # row would repeat all three findings verbatim and query mise again for
+    # the same answer.
+    [[ "$seen_tools" != *"|$tool|"* ]] || continue
+    seen_tools+="|$tool|"
+
     primary="$(primary_binary_for_mise_tool "$tool" 2>/dev/null || true)"
     [[ -n "$primary" ]] || continue
     add_finding INFO MISE_TOOL_CONFIGURED "$tool" "mise configures watched tool '$tool' in the current context; primary binary=$primary."
@@ -644,6 +656,10 @@ audit_shell_profiles() {
 }
 
 
+# The single quotes below are deliberate: these functions compare against the
+# literal text '$PATH' and '$HOME' as written in a profile file. Expanding
+# them is precisely the bug being avoided.
+# shellcheck disable=SC2016
 path_assignment_parts() {
   local line=$1 stripped rhs export_kw=""
   stripped="$(trim "$line")"
@@ -657,6 +673,7 @@ path_assignment_parts() {
   return 1
 }
 
+# shellcheck disable=SC2016
 path_rhs_safe() {
   local rhs=$1 body=$1 scrub
   [[ "$rhs" != *'$('* && "$rhs" != *'`'* && "$rhs" != *'#'* ]] || return 1
@@ -681,9 +698,10 @@ path_rhs_safe() {
 
 expand_path_source_segment() {
   local seg=$1
-  # The tilde patterns below are literal match targets, not expansions:
-  # quoting them is deliberate and SC2088 does not apply.
-  # shellcheck disable=SC2088
+  # The tilde and variable patterns below are literal match targets, not
+  # expansions: quoting them is deliberate, and expanding them is the bug this
+  # function exists to avoid. Neither SC2088 nor SC2016 applies.
+  # shellcheck disable=SC2088,SC2016
   case "$seg" in
     '$PATH'|'${PATH}') printf '%s' "$seg" ; return 0 ;;
     '~') printf '%s' "$HOME" ; return 0 ;;
@@ -695,6 +713,7 @@ expand_path_source_segment() {
   printf '%s' "$seg"
 }
 
+# shellcheck disable=SC2016
 rewrite_path_assignment_line() {
   local line=$1 parts export_kw rhs body seg expanded canonical key joined="" changed=0
   local -a segments=() kept=()

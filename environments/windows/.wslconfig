@@ -66,5 +66,8 @@ autoMemoryReclaim=gradual
 #
 # So enabling it here would turn on, by default and for everyone, a feature its
 # own vendor withdrew for data loss - while doing nothing at all for the disk
-# that prompted the search. To reclaim space from an existing ext4.vhdx, compact
-# it with diskpart or Optimize-VHD instead, with the distribution shut down.
+# that prompted the search. To reclaim space from an existing ext4.vhdx, run
+# fstrim inside it and then compact the file with diskpart or Optimize-VHD, with
+# the distribution shut down. The fstrim is the half that matters: compaction
+# alone reclaims almost nothing, because it can only drop blocks the filesystem
+# has declared free. See README.md in this directory for the procedure.

@@ -105,6 +105,36 @@ test_shell_configuration_enables_direnv() {
   HOME="$original_home"
 }
 
+test_shell_configuration_guards_the_path_entries_it_adds() {
+  local original_home="$HOME"
+  HOME="$TEMP_DIR/path-guard-home"
+  DRY_RUN=0
+
+  mkdir -p "$HOME/.local/bin" "$HOME/.opencode/bin"
+
+  ensure_shell_configuration >/dev/null
+
+  local block_file="$TEMP_DIR/managed-path-block.sh"
+  awk '
+    $0 == "# >>> agentic-dev-toolkit >>>" { collecting = 1; next }
+    collecting { print }
+    $0 == "export PATH" { if (collecting) exit }
+  ' "$HOME/.bashrc" > "$block_file"
+
+  local result entries
+  result="$(PATH="$HOME/.local/bin:/usr/bin" bash -c '. "$1"; printf "%s" "$PATH"' _ "$block_file")"
+  entries="$(printf '%s' "$result" | tr ':' '
+')"
+
+  assert_equal "$(printf '%s' "$entries" | grep -cxF "$HOME/.local/bin")" "1"     "a directory already on PATH must not be added a second time"
+  printf '%s' "$entries" | grep -qxF "$HOME/bin" &&
+    fail "a directory that does not exist must not be put on PATH"
+  printf '%s' "$entries" | grep -qxF "$HOME/.opencode/bin" ||
+    fail "a directory that exists and is absent from PATH must still be added"
+
+  HOME="$original_home"
+}
+
 test_project_configuration_creates_direnv_file_when_missing() {
   local project_root="$TEMP_DIR/project-with-direnv"
   PROJECT_PATH="$project_root"
@@ -986,6 +1016,7 @@ test_lttng_selector_prefers_time64_package_when_available
 test_lttng_selector_falls_back_to_legacy_package
 test_dry_run_does_not_probe_apt_package_metadata
 test_shell_configuration_enables_direnv
+test_shell_configuration_guards_the_path_entries_it_adds
 test_project_configuration_creates_direnv_file_when_missing
 test_project_configuration_preserves_existing_direnv_file
 test_project_configuration_dry_run_previews_direnv_file_without_creating_it

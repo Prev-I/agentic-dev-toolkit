@@ -732,6 +732,253 @@ test_karpathy_skill_rejects_a_malformed_digest_before_downloading() {
   HOME="$original_home"
 }
 
+# Isolates $HOME *and* git's global configuration. GIT_CONFIG_GLOBAL is the
+# load-bearing half: the step under test runs `git config --global`, which would
+# otherwise rewrite the credential helper in the developer's own ~/.gitconfig.
+# Setting HOME alone does not redirect it, because git resolves the global file
+# before this suite's HOME reassignment is visible to a child process.
+setup_credential_sandbox() {
+  local sandbox="$TEMP_DIR/$1"
+
+  HOME="$sandbox/home"
+  GIT_CREDENTIAL_WRAPPER="$HOME/.local/bin/git-credential-manager-wsl"
+  GCM_WINDOWS_PATH="$sandbox/delegate.exe"
+  GIT_CONFIG_GLOBAL="$sandbox/gitconfig"
+  export GIT_CONFIG_GLOBAL
+  DRY_RUN=0
+  SKIP_GIT_CREDENTIAL=0
+  ADT_FORCE_WSL=1
+
+  # WSLENV is ambient machine state: unset on a plain host, empty on this one,
+  # and arbitrary on somebody else's. Clear it so the append assertions describe
+  # the wrapper's behaviour rather than the host that happened to run the suite.
+  unset WSLENV
+
+  mkdir -p "$HOME/.local/bin"
+  : > "$GIT_CONFIG_GLOBAL"
+
+  # A stand-in for the Windows executable. It reports the two variables the
+  # wrapper is responsible for, which is what lets these tests assert the
+  # wrapper's decision rather than merely that a file was written.
+  # shellcheck disable=SC2016
+  printf '#!/usr/bin/env bash\nprintf "%%s|%%s\\n" "${GCM_INTERACTIVE-unset}" "${WSLENV-unset}"\n' \
+    > "$GCM_WINDOWS_PATH"
+  chmod 755 "$GCM_WINDOWS_PATH"
+}
+
+teardown_credential_sandbox() {
+  HOME="$1"
+  unset GIT_CONFIG_GLOBAL
+  unset ADT_FORCE_WSL
+}
+
+test_git_credential_wrapper_declines_to_prompt_without_a_terminal() {
+  local original_home="$HOME"
+  setup_credential_sandbox credential-headless
+
+  configure_git_credential_helper >/dev/null
+
+  [[ -x "$GIT_CREDENTIAL_WRAPPER" ]] || fail "the wrapper must be installed executable"
+  # The whole point of the wrapper. Left to itself GCM opens a web view and
+  # blocks forever; with no terminal it must instead be told never to prompt.
+  assert_equal "$("$GIT_CREDENTIAL_WRAPPER" get </dev/null)" "never|GCM_INTERACTIVE" \
+    "with no terminal the wrapper must disable prompting and export the variable through WSLENV"
+
+  teardown_credential_sandbox "$original_home"
+}
+
+test_git_credential_wrapper_leaves_prompting_alone_when_a_terminal_exists() {
+  local original_home="$HOME"
+  setup_credential_sandbox credential-terminal
+
+  configure_git_credential_helper >/dev/null
+
+  command -v script >/dev/null 2>&1 || fail "script(1) is required to allocate a pty for this test"
+  # A human at a terminal must keep the interactive sign-in. Verified under a
+  # real pty, because the wrapper decides on whether /dev/tty can be opened.
+  local observed
+  observed="$(script -qec "$GIT_CREDENTIAL_WRAPPER get" /dev/null | tr -d '\r' | head -n1)"
+  assert_equal "$observed" "unset|unset" \
+    "with a terminal present the wrapper must not touch interactivity"
+
+  teardown_credential_sandbox "$original_home"
+}
+
+test_git_credential_wrapper_respects_an_explicit_interactivity_choice() {
+  local original_home="$HOME"
+  setup_credential_sandbox credential-explicit
+
+  configure_git_credential_helper >/dev/null
+
+  # The escape hatch: authenticating deliberately from a non-tty context.
+  assert_equal "$(GCM_INTERACTIVE=auto "$GIT_CREDENTIAL_WRAPPER" get </dev/null)" "auto|GCM_INTERACTIVE" \
+    "an explicit GCM_INTERACTIVE must survive, and still be exported through WSLENV"
+
+  teardown_credential_sandbox "$original_home"
+}
+
+test_git_credential_wrapper_appends_to_wslenv_instead_of_replacing_it() {
+  local original_home="$HOME"
+  setup_credential_sandbox credential-wslenv
+
+  configure_git_credential_helper >/dev/null
+
+  # WSLENV is shared machine state. Assigning it would silently strip whatever
+  # else crosses the boundary, and the loss would surface far from here.
+  assert_equal "$(WSLENV=FOO/p "$GIT_CREDENTIAL_WRAPPER" get </dev/null)" "never|FOO/p:GCM_INTERACTIVE" \
+    "the wrapper must append to an existing WSLENV, not overwrite it"
+
+  teardown_credential_sandbox "$original_home"
+}
+
+test_git_credential_wrapper_bakes_in_the_configured_delegate_path() {
+  local original_home="$HOME"
+  setup_credential_sandbox credential-delegate
+  GCM_WINDOWS_PATH="/somewhere/else/git-credential-manager.exe"
+
+  configure_git_credential_helper >/dev/null 2>&1
+
+  grep -qF "$GCM_WINDOWS_PATH" "$GIT_CREDENTIAL_WRAPPER" ||
+    fail "--gcm-path must reach the generated wrapper"
+
+  teardown_credential_sandbox "$original_home"
+}
+
+test_git_credential_wrapper_reports_a_missing_delegate_without_hanging() {
+  local original_home="$HOME"
+  setup_credential_sandbox credential-missing-delegate
+
+  configure_git_credential_helper >/dev/null 2>&1
+  rm -f "$GCM_WINDOWS_PATH"
+
+  local status=0
+  local message
+  message="$("$GIT_CREDENTIAL_WRAPPER" get </dev/null 2>&1 >/dev/null)" || status=$?
+  assert_equal "$status" "1" "a missing delegate must fail, not hang or succeed silently"
+  [[ "$message" == *"not executable"* ]] || fail "the failure must name the missing delegate, got: $message"
+
+  teardown_credential_sandbox "$original_home"
+}
+
+test_git_credential_helper_is_adopted_when_nothing_owns_it() {
+  local original_home="$HOME"
+  setup_credential_sandbox credential-adopt
+
+  configure_git_credential_helper >/dev/null
+
+  assert_equal "$(git config --global --get credential.helper)" "$GIT_CREDENTIAL_WRAPPER" \
+    "an unset credential.helper must be pointed at the wrapper"
+
+  teardown_credential_sandbox "$original_home"
+}
+
+test_git_credential_helper_replaces_a_direct_credential_manager() {
+  local original_home="$HOME"
+  setup_credential_sandbox credential-upgrade
+  git config --global credential.helper "/mnt/c/Program Files/Git/mingw64/bin/git-credential-manager.exe"
+
+  configure_git_credential_helper >/dev/null
+
+  # The pre-wrapper arrangement is the case this feature exists to fix, so
+  # adopting it is an upgrade rather than overriding somebody's choice.
+  assert_equal "$(git config --global --get credential.helper)" "$GIT_CREDENTIAL_WRAPPER" \
+    "a helper pointing straight at Git Credential Manager must be replaced by the wrapper"
+
+  teardown_credential_sandbox "$original_home"
+}
+
+test_git_credential_helper_leaves_an_unrelated_helper_alone() {
+  local original_home="$HOME"
+  setup_credential_sandbox credential-foreign
+  git config --global credential.helper "libsecret"
+
+  local message
+  message="$( configure_git_credential_helper 2>&1 >/dev/null )"
+
+  # Redirecting where a machine's credentials come from is not the installer's
+  # decision to make silently.
+  assert_equal "$(git config --global --get credential.helper)" "libsecret" \
+    "a helper the user chose must not be replaced"
+  [[ "$message" == *"leaving it unchanged"* ]] || fail "the untouched helper must be reported, got: $message"
+
+  teardown_credential_sandbox "$original_home"
+}
+
+test_git_credential_wrapper_is_not_installed_off_wsl() {
+  local original_home="$HOME"
+  setup_credential_sandbox credential-not-wsl
+  # Read by is_wsl in the sourced installer, which shellcheck cannot see.
+  # shellcheck disable=SC2034
+  ADT_FORCE_WSL=0
+
+  configure_git_credential_helper >/dev/null
+
+  [[ ! -e "$GIT_CREDENTIAL_WRAPPER" ]] ||
+    fail "a wrapper around a Windows executable must not be installed off WSL"
+  assert_equal "$(git config --global --get credential.helper || true)" "" \
+    "credential.helper must not be touched off WSL"
+
+  teardown_credential_sandbox "$original_home"
+}
+
+test_git_credential_wrapper_is_skipped_when_requested() {
+  local original_home="$HOME"
+  setup_credential_sandbox credential-skipped
+  # Read by the sourced installer, which shellcheck cannot see.
+  # shellcheck disable=SC2034
+  SKIP_GIT_CREDENTIAL=1
+
+  configure_git_credential_helper >/dev/null
+
+  [[ ! -e "$GIT_CREDENTIAL_WRAPPER" ]] || fail "--skip-git-credential must install nothing"
+  assert_equal "$(git config --global --get credential.helper || true)" "" \
+    "--skip-git-credential must not touch credential.helper"
+
+  teardown_credential_sandbox "$original_home"
+}
+
+test_git_credential_wrapper_dry_run_previews_without_writing() {
+  local original_home="$HOME"
+  setup_credential_sandbox credential-dry-run
+  # Read by the sourced installer, which shellcheck cannot see.
+  # shellcheck disable=SC2034
+  DRY_RUN=1
+
+  local output
+  output="$(configure_git_credential_helper)"
+
+  [[ ! -e "$GIT_CREDENTIAL_WRAPPER" ]] || fail "--dry-run must not write the wrapper"
+  assert_equal "$(git config --global --get credential.helper || true)" "" \
+    "--dry-run must not change credential.helper"
+  [[ "$output" == *"GCM_INTERACTIVE"* ]] || fail "--dry-run must preview the wrapper it would write"
+
+  teardown_credential_sandbox "$original_home"
+}
+
+test_git_credential_wrapper_is_valid_shell_and_rewritten_on_change() {
+  local original_home="$HOME"
+  setup_credential_sandbox credential-idempotent
+
+  configure_git_credential_helper >/dev/null
+  bash -n "$GIT_CREDENTIAL_WRAPPER" || fail "the generated wrapper must be valid bash"
+
+  # write_managed_file leaves an identical file untouched; a changed delegate
+  # must still take effect, since that is how --gcm-path gets corrected.
+  local before after
+  before="$(sha256sum "$GIT_CREDENTIAL_WRAPPER" | cut -d' ' -f1)"
+  configure_git_credential_helper >/dev/null
+  assert_equal "$(sha256sum "$GIT_CREDENTIAL_WRAPPER" | cut -d' ' -f1)" "$before" \
+    "re-running with no change must leave the wrapper byte-identical"
+
+  GCM_WINDOWS_PATH="$TEMP_DIR/credential-idempotent/other.exe"
+  cp "$TEMP_DIR/credential-idempotent/delegate.exe" "$GCM_WINDOWS_PATH"
+  configure_git_credential_helper >/dev/null
+  after="$(sha256sum "$GIT_CREDENTIAL_WRAPPER" | cut -d' ' -f1)"
+  [[ "$after" != "$before" ]] || fail "a changed delegate path must be rewritten into the wrapper"
+
+  teardown_credential_sandbox "$original_home"
+}
+
 TEMP_DIR="$(mktemp -d)"
 test_claude_template_resolves_after_copying_to_project_root
 load_installer_functions
@@ -768,5 +1015,18 @@ test_karpathy_verification_reports_a_missing_skill
 test_summary_does_not_claim_a_skipped_skill_was_installed
 test_karpathy_skill_accepts_an_uppercase_digest
 test_karpathy_skill_rejects_a_malformed_digest_before_downloading
+test_git_credential_wrapper_declines_to_prompt_without_a_terminal
+test_git_credential_wrapper_leaves_prompting_alone_when_a_terminal_exists
+test_git_credential_wrapper_respects_an_explicit_interactivity_choice
+test_git_credential_wrapper_appends_to_wslenv_instead_of_replacing_it
+test_git_credential_wrapper_bakes_in_the_configured_delegate_path
+test_git_credential_wrapper_reports_a_missing_delegate_without_hanging
+test_git_credential_helper_is_adopted_when_nothing_owns_it
+test_git_credential_helper_replaces_a_direct_credential_manager
+test_git_credential_helper_leaves_an_unrelated_helper_alone
+test_git_credential_wrapper_is_not_installed_off_wsl
+test_git_credential_wrapper_is_skipped_when_requested
+test_git_credential_wrapper_dry_run_previews_without_writing
+test_git_credential_wrapper_is_valid_shell_and_rewritten_on_change
 
 printf 'PASS: installer compatibility tests\n'

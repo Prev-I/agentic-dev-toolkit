@@ -16,7 +16,7 @@ appendWindowsPath=false
 
 Windows processes can still be invoked explicitly, while the Windows PATH is not automatically appended to the Linux PATH.
 
-The effective development PATH must otherwise be Linux-backed. A Windows-backed DrvFs entry is a failure except for Rancher Desktop's narrow `resources/resources/linux/bin` exception. Even there, only known container tooling may use the exception and the final target must be ELF or a Linux script.
+The effective development PATH must otherwise be Linux-backed. A Windows-backed DrvFs entry is a failure unless its directory is on the launcher allowlist — Rancher Desktop's `resources/resources/linux/bin` and `resources/resources/linux/docker-cli-plugins`, VS Code's `bin`, plus anything added through `WTD_PATH_ALLOW`. The allowlist governs the PATH entry only: tool classification runs independently, so a PE/MZ target still fails, only known container tooling may resolve from the Rancher directories, the final target must be ELF or a Linux script, and managed language runtimes never receive any exception.
 
 ## Tool ownership: mise is authoritative
 
@@ -219,7 +219,7 @@ For a safe assignment the fixer can:
 - remove textual duplicates, preserving the first occurrence;
 - remove canonical duplicates among existing directories;
 - remove generic Windows-backed DrvFs segments;
-- preserve the Rancher Desktop Linux-bin exception;
+- preserve allowlisted Windows-backed launcher directories, so remediation does not undo the reason the allowlist exists;
 - remove entries that exist but are not directories;
 - preserve missing entries by default, or drop them with `--drop-missing`;
 - preserve `$PATH`, `${PATH}`, `$HOME`, `${HOME}`, and `~/...` expressions without evaluating shell code.
@@ -286,17 +286,40 @@ By default the checker considers readable files among:
 
 `WTD_PROFILE_FILES` is available as a test/controlled-invocation override.
 
-## Rancher Desktop exception
+## The Windows-backed launcher allowlist
 
-The exception is intentionally narrow. A pathname merely containing `Rancher Desktop` is not enough. The final target must be under:
+The policy exists to stop a Linux build binding to a Windows PE where a Linux binary was meant. It does not follow that every directory on a Windows mount is dangerous: an `sh` script or a Linux ELF binary that merely lives on DrvFs executes correctly, only slower across the 9p filesystem.
 
-```text
-Rancher Desktop/resources/resources/linux/bin
+Two such directories are load-bearing on a WSL development machine, and disabling `interop.appendWindowsPath` removes both, because neither is added by any Linux-side PATH source:
+
+| Directory | Provides | File kind |
+| --- | --- | --- |
+| `Rancher Desktop/resources/resources/linux/bin` | `docker`, `kubectl`, `helm`, `nerdctl` | Linux ELF |
+| `Rancher Desktop/resources/resources/linux/docker-cli-plugins` | `docker-compose` | Linux ELF |
+| `Microsoft VS Code/bin` | `code` | `sh` script |
+
+Without the editor entry, `code .` works only inside VS Code's own integrated terminal, where the server exports `VSCODE_IPC_HOOK_CLI` and its bundled `remote-cli/code` shim resolves. From a plain WSL terminal there is no such shim, and the version-hashed server path is not stable enough to put on `PATH`.
+
+Extend the list for a single machine with `WTD_PATH_ALLOW`, colon-separated, matched as case-insensitive path substrings so a non-default install location still matches:
+
+```bash
+WTD_PATH_ALLOW='/program files/jetbrains/bin' wsl-toolchain-doctor.sh audit
 ```
 
-and only known container tooling may use the exception. PE/MZ always fails.
+### What the allowlist does not do
 
-Managed language/tooling never receives the Rancher exception.
+It governs the PATH entry only. Tool classification is independent and unchanged, so widening the list cannot smuggle in a Windows binary:
+
+- a PE/MZ final target still fails;
+- a Windows-backed shebang interpreter still fails;
+- only known container tooling may resolve from the Rancher directories, and the target must be ELF or a Linux script;
+- managed language runtimes — Java, .NET, Python, Maven, uv — never receive any exception, wherever they resolve from.
+
+A pathname merely containing `Rancher Desktop` has never been enough, and still is not.
+
+### What the allowlist does not fix
+
+The Docker CLI is not the Docker daemon. Tools that speak the Docker API over `/var/run/docker.sock` — Testcontainers, for instance — are unaffected by PATH policy entirely, because that socket is served from a Linux `tmpfs` mount rather than DrvFs. Tools that shell out to the `docker` binary, such as the devcontainer CLI, need the CLI on `PATH` and therefore need the allowlist entry.
 
 ## JSON mode
 

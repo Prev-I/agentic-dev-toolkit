@@ -766,5 +766,70 @@ assert_eq "a tool pinned to two versions is bound once" "$(printf '%s\n' "$LAST_
 assert_contains "the deduplicated tool is still audited" "$LAST_OUT" "MISE_BINDING_OK"
 teardown_fixture
 
+# The Windows-backed PATH allowlist.
+#
+# The policy exists to stop a Linux build binding to a Windows PE, not to ban
+# every directory that happens to sit on DrvFs. An `sh` script or Linux ELF
+# under /mnt/c runs correctly, and the editor launcher and container tooling
+# are exactly that -- without them appendWindowsPath=false costs `code .` and
+# `docker`, which is why the exception cannot stay hardcoded to one vendor.
+setup_fixture
+mkdir -p "$TMP_ROOT/win/Program Files/Microsoft VS Code/bin" "$TMP_ROOT/win/Program Files/Nowhere/bin"
+cat > "$TMP_ROOT/mounts" <<MOUNTS
+/dev/root / ext4 rw,relatime 0 0
+C: $TMP_ROOT/win 9p rw,aname=drvfs 0 0
+MOUNTS
+WTD_TEST_SCAN_PATH="$TMP_ROOT/win/Program Files/Microsoft VS Code/bin" run_doctor audit
+assert_contains "the editor launcher directory is allowlisted" "$LAST_OUT" "PATH_ALLOWLISTED_WINDOWS"
+assert_not_contains "the editor launcher directory does not fail" "$LAST_OUT" "PATH_WINDOWS_DRVFS"
+
+WTD_TEST_SCAN_PATH="$TMP_ROOT/win/Program Files/Nowhere/bin" run_doctor audit
+assert_contains "an unlisted Windows directory still fails" "$LAST_OUT" "PATH_WINDOWS_DRVFS"
+assert_not_contains "an unlisted Windows directory is not allowlisted" "$LAST_OUT" "PATH_ALLOWLISTED_WINDOWS"
+
+# A single entry has no trailing newline once split on ':', so the read loop
+# must not discard the last field. This regressed during implementation and
+# silently ignored the whole variable.
+WTD_PATH_ALLOW="/program files/nowhere/bin" WTD_TEST_SCAN_PATH="$TMP_ROOT/win/Program Files/Nowhere/bin" run_doctor audit
+assert_contains "a single WTD_PATH_ALLOW entry is honoured" "$LAST_OUT" "PATH_ALLOWLISTED_WINDOWS"
+assert_not_contains "the allowlisted directory no longer fails" "$LAST_OUT" "PATH_WINDOWS_DRVFS"
+
+WTD_PATH_ALLOW="/program files/elsewhere: /program files/nowhere/bin " WTD_TEST_SCAN_PATH="$TMP_ROOT/win/Program Files/Nowhere/bin" run_doctor audit
+assert_contains "a later WTD_PATH_ALLOW entry with padding is honoured" "$LAST_OUT" "PATH_ALLOWLISTED_WINDOWS"
+teardown_fixture
+
+# Allowlisting a directory must not allowlist a Windows binary inside it: tool
+# classification is independent, so a PE still fails and the list cannot be
+# used to smuggle one in.
+setup_fixture
+mkdir -p "$TMP_ROOT/win/Program Files/Microsoft VS Code/bin"
+cat > "$TMP_ROOT/mounts" <<MOUNTS
+/dev/root / ext4 rw,relatime 0 0
+C: $TMP_ROOT/win 9p rw,aname=drvfs 0 0
+MOUNTS
+printf 'MZ\x90\x00\x03\x00\x00\x00' > "$TMP_ROOT/win/Program Files/Microsoft VS Code/bin/python"
+chmod +x "$TMP_ROOT/win/Program Files/Microsoft VS Code/bin/python"
+WTD_TEST_SCAN_PATH="$TMP_ROOT/win/Program Files/Microsoft VS Code/bin" run_doctor audit
+assert_contains "the directory is still allowlisted" "$LAST_OUT" "PATH_ALLOWLISTED_WINDOWS"
+assert_contains "a PE inside an allowlisted directory still fails" "$LAST_OUT" "WINDOWS"
+assert_eq "a PE inside an allowlisted directory fails the run" "$LAST_RC" "1"
+teardown_fixture
+
+# fix --path must keep an allowlisted entry, or the remediation would undo the
+# reason the allowlist exists.
+setup_fixture
+mkdir -p "$TMP_ROOT/win/Program Files/Microsoft VS Code/bin" "$TMP_ROOT/win/Tools" "$TMP_ROOT/linux/one"
+cat > "$TMP_ROOT/mounts" <<MOUNTS
+/dev/root / ext4 rw,relatime 0 0
+C: $TMP_ROOT/win 9p rw,aname=drvfs 0 0
+MOUNTS
+cat > "$TMP_ROOT/home/.profile" <<PROFILE
+export PATH="$TMP_ROOT/linux/one:$TMP_ROOT/win/Program Files/Microsoft VS Code/bin:$TMP_ROOT/win/Tools:\$PATH"
+PROFILE
+WTD_TEST_PROFILE_FILES="$TMP_ROOT/home/.profile" run_doctor fix --path
+assert_contains "remediation kept the allowlisted launcher directory" "$(cat "$TMP_ROOT/home/.profile")" "Microsoft VS Code/bin"
+assert_not_contains "remediation dropped the unlisted Windows directory" "$(cat "$TMP_ROOT/home/.profile")" "win/Tools"
+teardown_fixture
+
 printf '\n%d passed, %d failed\n' "$PASS_COUNT" "$FAIL_COUNT"
 (( FAIL_COUNT == 0 ))

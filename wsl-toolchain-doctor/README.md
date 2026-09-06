@@ -41,9 +41,15 @@ without `--path` touches only `/etc/wsl.conf`.
 
 - WSL interop stays enabled; automatic Windows PATH import is disabled.
 - Generic Windows-backed PATH entries fail.
-- Rancher Desktop gets only a narrow Linux container-tool exception, limited to
-  `resources/resources/linux/bin` and `resources/resources/linux/docker-cli-plugins`.
-  Managed language runtimes never receive it, and PE/MZ always fails.
+- A small allowlist of Windows-backed directories that hold Linux-executable
+  launchers is accepted: Rancher Desktop's `resources/resources/linux/bin` and
+  `resources/resources/linux/docker-cli-plugins`, and VS Code's `bin`. Extend it
+  for one machine with `WTD_PATH_ALLOW` (colon-separated, matched as
+  case-insensitive path substrings).
+- **Allowlisting a directory does not allowlist a Windows binary inside it.**
+  Tool classification is independent: a PE/MZ target still fails, so does a
+  Windows shebang interpreter, and managed language runtimes never receive the
+  exception regardless of where they resolve from.
 - `mise` is the source of truth for configured language/tool versions.
 - Java, .NET, Python, Maven and uv names are a collision watchlist, not a static
   required-tool matrix — a tool mise does not configure is not reported missing.

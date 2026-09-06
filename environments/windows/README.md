@@ -102,10 +102,83 @@ care about is a decision with a real downside, and not one a template should
 make on someone's behalf — which is why the key is documented here and left
 unset in the file.
 
-**To actually reclaim space from an existing `ext4.vhdx`**, shut the
-distribution down and compact the file with `diskpart` or `Optimize-VHD`. Note
-that this is also the path a sparse disk closes off: `Optimize-VHD` refuses
-files that are sparse.
+**To actually reclaim space from an existing `ext4.vhdx`**, compact it — see
+below. Note that this is also the path a sparse disk closes off: `Optimize-VHD`
+refuses files that are sparse.
+
+## Reclaiming space from an existing `ext4.vhdx`
+
+Compaction is the part everyone reaches for, and on its own it recovers almost
+nothing. `diskpart` can only drop blocks the filesystem has declared free, and
+ext4 does not declare them by deleting a file. **Discard the free blocks first,
+with `fstrim`.** Skipping that step is the likeliest reason for the widespread
+impression that compacting a WSL disk does not work.
+
+Measured on one host, on the `rancher-desktop-data` disk listed above (64.08 GB
+by the time the run started, having drifted down a little across the restarts in
+between):
+
+| Step | Result |
+| --- | --- |
+| `fstrim` on the mounted filesystem | 973.7 GiB of free blocks discarded |
+| `diskpart` compact, 28 s | **64.08 GB → 35.00 GB** |
+| `e2fsck -fn` afterwards | clean, no corrections, 710,653 files |
+
+35.00 GB against 33 GiB of real data: no meaningful slack left.
+
+### The procedure
+
+Everything must be stopped first — `wsl.exe --shutdown`, and quit any desktop
+application that owns a distribution, or it will restart one underneath you.
+
+```powershell
+wsl.exe --mount --vhd "<path>\ext4.vhdx" --name work
+wsl.exe -d <other-distro> -u root -- fstrim -v /mnt/wsl/work
+wsl.exe --shutdown
+```
+
+Then compact, with the distribution still down:
+
+```
+diskpart
+  select vdisk file="<path>\ext4.vhdx"
+  attach vdisk readonly
+  compact vdisk
+  detach vdisk
+```
+
+Three things about this are not obvious and each one costs a run to discover.
+
+**A data-only distribution may have no userland to run `fstrim` in.** Container
+storage distributions can ship little more than `/bin/sh` — no `ls`, no `df`.
+Mounting the disk from a distribution that does have tools, as above, sidesteps
+that entirely.
+
+**`wsl --mount` mounts are lost when the virtual machine idles out.** The VM
+stops once no distribution is running, and takes every manual mount with it. Do
+the mount and the `fstrim` in one invocation; run them as separate steps and the
+second one silently operates on an empty directory on `/mnt/wsl` instead — and
+`fstrim` will report `the discard operation is not supported` rather than
+anything that names the real problem.
+
+**`wsl -d <distro> -u root` is root without `sudo`**, which is what makes
+`fstrim` and `e2fsck` runnable non-interactively on a machine whose `sudo` asks
+for a password.
+
+### Verifying
+
+Check the filesystem before trusting the result. Attach the disk without
+mounting it, so `e2fsck` sees it offline:
+
+```powershell
+wsl.exe --shutdown
+wsl.exe --mount --vhd "<path>\ext4.vhdx" --bare
+wsl.exe -d <other-distro> -u root -- e2fsck -fn /dev/sdX
+```
+
+Copy the `.vhdx` aside before compacting if the contents are expensive to
+rebuild. On the run above the copy took 45 s for 64 GB, which is a cheap way to
+make the whole operation reversible.
 
 ## Why the installer does not write this file
 

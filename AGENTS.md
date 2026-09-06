@@ -37,12 +37,16 @@ one that governs work here.
 There is no build step and no package manager.
 
 ```bash
-bash tests/install.sh          # the full test suite
+bash tests/install.sh                   # the installer suite
 bash tests/repository-policy.sh         # the policy validator suite
+bash models/routing/opencode/eval/run-tests.sh   # the routing eval suite
 bash -n environments/linux/install.sh   # syntax check
 shellcheck environments/linux/install.sh tests/install.sh \
   tests/repository-policy.sh repository-policy/validate.sh
 ```
+
+All three suites are expected to be run and reported together; the evidence
+documents under `models/routing/opencode/docs/` transcribe them that way.
 
 `tests/install.sh` sources the installer's functions by stripping its final
 `main "$@"` line, so **that line must remain last in the file** — the suite
@@ -126,7 +130,8 @@ none does; it must never degrade to a skip.
 - **`*.sh` is pinned to `eol=lf`** in `.gitattributes`. A CRLF shebang makes bash
   refuse the script outright.
 - Shell scripts are tracked executable (`100755`); the tests invoke several
-  directly.
+  directly. Suite entry points under `tests/` are the exception at `100644`,
+  because they are always run as `bash tests/<name>.sh`.
 - Documentation, comments and commit messages in English. Conventional commits.
 - No secrets, tokens or credentials in any committed file.
 

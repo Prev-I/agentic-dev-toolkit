@@ -218,6 +218,69 @@ machine, so there is no path that installs it unverified.
 that was edited or replaced after installation is reported rather than passing on
 the strength of its filename.
 
+### Git credentials on WSL
+
+On WSL the installer generates `~/.local/bin/git-credential-manager-wsl` and, if
+nothing else owns the setting, points `credential.helper` at it. Off WSL it does
+nothing — there is no Windows credential manager to delegate to. Skip it with
+`--skip-git-credential`; point it elsewhere with `--gcm-path`.
+
+The wrapper exists because Git Credential Manager is a Windows program invoked by
+Linux git, and that puts two boundaries between them:
+
+- **It cannot read this side's git config.** GCM shells out to *Windows* git,
+  whose global config is `C:\Users\<name>\.gitconfig`, not `~/.gitconfig`. A
+  `credential.interactive` set on the Linux side is invisible to it, and so is a
+  `git -c` override, which travels in `GIT_CONFIG_PARAMETERS`.
+- **It cannot read this side's environment.** WSL passes no Linux variable into a
+  Windows process unless that variable is named in `WSLENV`.
+
+So the only route that reaches GCM is to export the variable *and* name it in
+`WSLENV`. Doing either alone is silently ineffective — which is the trap this
+wrapper closes.
+
+What it decides: with no terminal reachable, GCM is told never to prompt.
+Otherwise GCM answers an uncached request by opening an embedded web view and
+waiting, so an agent harness, cron job or CI run hangs indefinitely instead of
+failing. With prompting disabled the same call returns in about a second with
+`fatal: Cannot prompt because user interactivity has been disabled.`
+Authenticate once from your own terminal and the cached credential serves every
+later non-interactive run. `GCM_INTERACTIVE` set explicitly always wins, which is
+the escape hatch for authenticating from a non-tty context on purpose.
+
+Two details are load-bearing, and both are covered by tests:
+
+- **The terminal test asks whether `/dev/tty` can be opened**, not whether a file
+  descriptor is a tty. Git hands every credential helper pipes on stdin and
+  stdout by protocol, so an fd test would misread every interactive run as
+  headless; and a human who pipes git's output still has a controlling terminal,
+  so this way they keep their prompt.
+- **`WSLENV` is appended to, never assigned.** It is shared machine state, and
+  overwriting it would silently strip whatever else crosses the boundary.
+
+The wrapper is deliberately harness-agnostic. Configuring this per harness was
+rejected: OpenCode's config is generated and would erase the setting on its next
+activation, and Claude Code's would only ever cover Claude Code. Git calls the
+wrapper whoever the caller is.
+
+None of this depends on the Windows `PATH`, so it is unaffected by setting
+`interop.appendWindowsPath=false` — the policy `wsl-toolchain-doctor` audits. The
+helper is named by absolute path, and interop, not `PATH`, is what launches a
+Windows executable.
+
+For GitHub specifically, routing to the GitHub CLI avoids the Windows round trip
+altogether. This installer does not install `gh`, so it does not configure this;
+once `gh` is present and authenticated:
+
+```bash
+git config --global credential.https://github.com.helper ''
+git config --global --add credential.https://github.com.helper '!gh auth git-credential'
+```
+
+The empty value first is required, not decoration: `credential.helper` is a
+**list**, and a URL-specific section appends to the global helper unless an empty
+value resets it. Omit it and GCM stays first in line for GitHub.
+
 ## Shared `AGENTS.md` pattern
 
 The core idea: write workspace guidance once in `AGENTS.md`, then give each agent harness access

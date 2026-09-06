@@ -17,6 +17,7 @@ executed.
 
 ```
 environments/linux/install.sh   The workstation installer — the main deliverable
+environments/windows/           Windows-side WSL2 VM settings; a template, never installed
 instructions/                   AGENTS.md pattern shipped to other projects
   AGENTS.md                     A TEMPLATE for consumers, not this repo's own
   adapters/{claude-code,codex,opencode}/

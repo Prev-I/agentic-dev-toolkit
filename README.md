@@ -27,6 +27,10 @@ A collection of reusable components for teams using AI coding agents:
 - **Repository policy** — `.repository-policy.yaml`, a small versioned format letting a repository
   declare its branching model and integration mechanism so agents read the workflow instead of
   guessing it from branch names, with a schema, examples and a validator.
+- **WSL toolchain doctor** — a Bash auditor that enforces a Linux-first development boundary
+  inside WSL: it checks the `interop` policy, audits PATH hygiene and provenance, verifies that
+  `mise`-managed runtimes are not shadowed by Windows executables, and can conservatively
+  remediate `wsl.conf` and persistent `PATH=` assignments.
 
 ## What this is NOT
 
@@ -80,8 +84,12 @@ agentic-dev-toolkit/
     schema/
       repository-policy.v1.schema.json             # JSON Schema for version 1
     examples/                                      # One file per representative policy
+  wsl-toolchain-doctor/
+    README.md                                      # Component overview and policy
+    wsl-toolchain-doctor.sh                        # Linux-first PATH and toolchain auditor
   docs/
     multi-agent-workspace-guide.md                 # Full guide: AGENTS.md pattern + MCP parity
+    wsl-toolchain-doctor.md                        # Toolchain doctor operational documentation
 ```
 
 ## Workstation bootstrap

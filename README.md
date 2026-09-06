@@ -43,6 +43,10 @@ flag allows running on non-Debian distributions but these are untested.
 
 ## Repository structure
 
+What a consumer copies from, rather than a full listing. The test suites,
+planning documents under `docs/superpowers/`, and the routing bundle's own
+evaluation harness are omitted; see `AGENTS.md` for the working layout.
+
 ```
 agentic-dev-toolkit/
   LICENSE                                          # MIT

@@ -10,13 +10,19 @@ directory holds the part that does not.
 | --- | --- | --- |
 | Lives | inside the distribution | Windows user profile |
 | Scope | that distribution only | the WSL2 virtual machine, shared by all distributions |
-| Holds | `boot.systemd`, `interop.enabled`, `interop.appendWindowsPath`, `automount` | `memory`, `processors`, `autoMemoryReclaim`, `sparseVhd`, `networkingMode`, `dnsTunneling` |
+| Holds | `boot.systemd`, `interop.enabled`, `interop.appendWindowsPath`, `automount` | `[wsl2]`: `memory`, `processors`, `networkingMode`, `dnsTunneling`. `[experimental]`: `autoMemoryReclaim`, `sparseVhd` |
 | In this repository | managed by `wsl-toolchain-doctor` | the template beside this file |
 | Applied by | `wsl-toolchain-doctor.sh fix` | copying it by hand |
 
 Getting the two confused is the common mistake: a `memory` setting in
 `/etc/wsl.conf` is silently ignored, and an `[interop]` section in `.wslconfig`
 is equally inert.
+
+Inside `.wslconfig` the section matters just as much. `autoMemoryReclaim` and
+`sparseVhd` belong under `[experimental]`. Placed under `[wsl2]`, each is
+reported as an unknown key — named as `wsl2.<key>`, with the file and line — and
+WSL then starts normally without it. Observed on WSL 2.7.13.0; check the current
+release notes before assuming either key has graduated to `[wsl2]`.
 
 ## Applying the template
 
@@ -30,6 +36,17 @@ Read it before copying. Two settings are enabled and the rest are deliberately
 absent, with the reasoning inline — the absences are as considered as the
 presences, and a machine with a different problem may want different values.
 
+Then check that WSL accepted every key. Any command that makes WSL read the
+file reports the rejected ones, `wsl.exe -l -v` among them:
+
+```powershell
+wsl.exe -l -v     # no line naming .wslconfig and a line number
+```
+
+A warning there names a key WSL discarded, and that setting is not in force. The
+message is localised, so match on the file name and the line number rather than
+on its wording.
+
 Then reopen the distribution and confirm the virtual machine restarted:
 
 ```bash
@@ -40,6 +57,11 @@ uptime -s     # must be later than the moment you copied the file
 nothing.** It is not applied on write, and there is no warning that it has been
 ignored — the file simply sits there until the next shutdown. This is the single
 easiest thing to get wrong about it.
+
+The second easiest is a key under the wrong section, and that one does warn. The
+two failures look identical from inside the distribution — the setting is not in
+force either way — so when a `.wslconfig` setting appears to have no effect,
+check the restart first and the warnings second.
 
 ## Why the installer does not write this file
 

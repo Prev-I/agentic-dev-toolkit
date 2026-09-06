@@ -9,10 +9,33 @@
 # restart. Deleting the file returns WSL to its defaults, which are a memory
 # ceiling of half the host RAM and all processors available.
 #
+# The section headings are load-bearing. autoMemoryReclaim and sparseVhd belong
+# under [experimental]; placed under [wsl2] they are reported as unknown keys
+# and ignored, while WSL starts normally - so the file looks applied when both
+# settings are in fact doing nothing. Observed on WSL 2.7.13.0.
+#
 # A template, not a managed file. The installer never writes it - see
 # README.md in this directory for why.
 
 [wsl2]
+
+# Deliberately not set. Each of these is a behaviour change rather than an
+# improvement, and each belongs to a measurement or a named problem:
+#
+#   memory, processors
+#     Worth capping only when the host is measurably starved. Look at what
+#     Windows actually has free under real load before choosing a number; with
+#     autoMemoryReclaim on, a memory ceiling matters less than it used to.
+#
+#   networkingMode=mirrored, dnsTunneling
+#     Frequently what makes a corporate VPN interoperate with WSL, and equally
+#     a change to how the network behaves. Adopt them to fix a connectivity
+#     problem you can describe, not as a default.
+#
+#   kernelCommandLine, swap, swapFile, localhostForwarding, nestedVirtualization
+#     Same rule. A specific need, or leave the default alone.
+
+[experimental]
 
 # Return page-cache memory to Windows.
 #
@@ -32,19 +55,3 @@ autoMemoryReclaim=gradual
 # distributions used as container storage, where image churn is routine and can
 # leave tens of gigabytes committed to a distribution that is not even running.
 sparseVhd=true
-
-# Deliberately not set. Each of these is a behaviour change rather than an
-# improvement, and each belongs to a measurement or a named problem:
-#
-#   memory, processors
-#     Worth capping only when the host is measurably starved. Look at what
-#     Windows actually has free under real load before choosing a number; with
-#     autoMemoryReclaim on, a memory ceiling matters less than it used to.
-#
-#   networkingMode=mirrored, dnsTunneling
-#     Frequently what makes a corporate VPN interoperate with WSL, and equally
-#     a change to how the network behaves. Adopt them to fix a connectivity
-#     problem you can describe, not as a default.
-#
-#   kernelCommandLine, swap, swapFile, localhostForwarding, nestedVirtualization
-#     Same rule. A specific need, or leave the default alone.

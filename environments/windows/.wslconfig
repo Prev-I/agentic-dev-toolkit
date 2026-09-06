@@ -1,0 +1,50 @@
+# .wslconfig - WSL2 virtual-machine settings. Windows-side and global.
+#
+# Copy to %USERPROFILE%\.wslconfig on the Windows host. This file is not read
+# from inside a distribution: it configures the single WSL2 virtual machine
+# that every distribution shares. Per-distribution settings belong in
+# /etc/wsl.conf instead.
+#
+# Nothing here takes effect until `wsl.exe --shutdown` and the distributions
+# restart. Deleting the file returns WSL to its defaults, which are a memory
+# ceiling of half the host RAM and all processors available.
+#
+# A template, not a managed file. The installer never writes it - see
+# README.md in this directory for why.
+
+[wsl2]
+
+# Return page-cache memory to Windows.
+#
+# The virtual machine grows its working set to cache file data and, left alone,
+# does not give it back. The symptom is a vmmemWSL process holding several
+# times more memory than the distribution reports in use, which persists until
+# the machine is shut down.
+#
+# `gradual` releases memory while the virtual machine is idle. `dropcache` is
+# more aggressive and pays for it on re-reads.
+autoMemoryReclaim=gradual
+
+# Let a virtual disk return freed space to the Windows volume.
+#
+# Without this an ext4.vhdx only ever grows: deleting data inside the
+# distribution leaves the file at its high-water mark. The effect is largest on
+# distributions used as container storage, where image churn is routine and can
+# leave tens of gigabytes committed to a distribution that is not even running.
+sparseVhd=true
+
+# Deliberately not set. Each of these is a behaviour change rather than an
+# improvement, and each belongs to a measurement or a named problem:
+#
+#   memory, processors
+#     Worth capping only when the host is measurably starved. Look at what
+#     Windows actually has free under real load before choosing a number; with
+#     autoMemoryReclaim on, a memory ceiling matters less than it used to.
+#
+#   networkingMode=mirrored, dnsTunneling
+#     Frequently what makes a corporate VPN interoperate with WSL, and equally
+#     a change to how the network behaves. Adopt them to fix a connectivity
+#     problem you can describe, not as a default.
+#
+#   kernelCommandLine, swap, swapFile, localhostForwarding, nestedVirtualization
+#     Same rule. A specific need, or leave the default alone.

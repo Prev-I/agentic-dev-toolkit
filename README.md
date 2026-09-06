@@ -45,6 +45,12 @@ The Linux installer supports **Debian/Ubuntu family** distributions; **Ubuntu un
 reference and tested environment. It uses `apt` for system packages. The `--skip-platform-check`
 flag allows running on non-Debian distributions but these are untested.
 
+WSL is configured from two files with different scopes: `/etc/wsl.conf` is per-distribution and
+lives inside it, while `%USERPROFILE%\.wslconfig` configures the WSL2 virtual machine that every
+distribution shares. `environments/windows/` holds a reviewed `.wslconfig` template and explains
+why the installer does not write it — see
+[`environments/windows/README.md`](environments/windows/README.md).
+
 ## Repository structure
 
 What a consumer copies from, rather than a full listing. The test suites,
@@ -58,6 +64,9 @@ agentic-dev-toolkit/
   environments/
     linux/
       install.sh                                   # Debian/Ubuntu workstation provisioner
+    windows/
+      .wslconfig                                   # Template: WSL2 VM settings, applied by hand
+      README.md                                    # wsl.conf vs .wslconfig, and the restart step
   instructions/
     AGENTS.md                                      # Template: canonical agent instructions
     adapters/

@@ -22,9 +22,12 @@ instructions/                   AGENTS.md pattern shipped to other projects
   adapters/{claude-code,codex,opencode}/
 models/routing/opencode/        Model-routing config bundle for OpenCode
 repository-policy/              `.repository-policy.yaml` format, schema and validator
+wsl-toolchain-doctor/           Linux-first PATH and toolchain auditor for WSL
 docs/multi-agent-workspace-guide.md
+docs/wsl-toolchain-doctor.md    Operational documentation for the doctor
 tests/install.sh                Test suite for the installer
 tests/repository-policy.sh      Test suite for the policy validator
+tests/wsl-toolchain-doctor.sh   Test suite for the doctor
 ```
 
 **`instructions/AGENTS.md` is a deliverable, not this file.** It is the template
@@ -39,13 +42,15 @@ There is no build step and no package manager.
 ```bash
 bash tests/install.sh                   # the installer suite
 bash tests/repository-policy.sh         # the policy validator suite
+bash tests/wsl-toolchain-doctor.sh      # the WSL toolchain doctor suite
 bash models/routing/opencode/eval/run-tests.sh   # the routing eval suite
 bash -n environments/linux/install.sh   # syntax check
 shellcheck environments/linux/install.sh tests/install.sh \
-  tests/repository-policy.sh repository-policy/validate.sh
+  tests/repository-policy.sh repository-policy/validate.sh \
+  wsl-toolchain-doctor/wsl-toolchain-doctor.sh tests/wsl-toolchain-doctor.sh
 ```
 
-All three suites are expected to be run and reported together; the evidence
+All four suites are expected to be run and reported together; the evidence
 documents under `models/routing/opencode/docs/` transcribe them that way.
 
 `tests/install.sh` sources the installer's functions by stripping its final
@@ -113,6 +118,32 @@ so widening the format means editing the schema, not the code.
 The validator needs a YAML parser and so is the one component here that is not
 dependency-free. It resolves an interpreter that has PyYAML and exits 2 when
 none does; it must never degrade to a skip.
+
+## The WSL toolchain doctor
+
+`wsl-toolchain-doctor/` audits and remediates a Linux-first development boundary
+inside WSL. It is diagnostic, not provisioning: the installer builds the machine,
+the doctor reports when the machine has drifted.
+
+Its policy is `interop.enabled=true` with `interop.appendWindowsPath=false` in
+`/etc/wsl.conf`, so Windows processes stay invocable while the Windows PATH is no
+longer appended to the Linux one. Rancher Desktop is the single exception, and
+only for Linux container tooling under `resources/resources/linux/bin` or
+`resources/resources/linux/docker-cli-plugins` whose final target is ELF or a
+Linux script. Managed language runtimes never receive that exception.
+
+Two design rules are load-bearing. **Mount provenance decides what is
+Windows-backed**, read from `/proc/self/mounts`, because the automount root is
+configurable and `/mnt/c` must not be hard-coded. And **profile files are parsed
+as text, never sourced or evaluated** - `fix --path` rewrites only a small,
+explicitly safe grammar of `PATH=` assignments and refuses dynamic ones rather
+than guessing.
+
+One consequence of the exit-code protocol is worth knowing before editing:
+several internal functions return non-zero deliberately, to carry `10` (restart
+WSL) and `11` (new shell) outward. Their call sites wrap the call in an `if`,
+which keeps `errexit` suspended. A bare call followed by `$?` would abort the
+script under `set -e` instead of capturing the status.
 
 ## Conventions
 

@@ -59,7 +59,22 @@ CODEX_STANDALONE_ROOT="$CODEX_HOME/packages/standalone"
 GCM_WINDOWS_PATH="${ADT_GCM_PATH:-/mnt/c/Program Files/Git/mingw64/bin/git-credential-manager.exe}"
 GIT_CREDENTIAL_WRAPPER="${GIT_CREDENTIAL_WRAPPER:-$HOME/.local/bin/git-credential-manager-wsl}"
 
-export PATH="$HOME/.local/bin:$HOME/bin:$HOME/.opencode/bin:$PATH"
+# Prepend a directory to PATH only when it exists and is not already present.
+# Ubuntu's stock ~/.profile guards $HOME/bin and $HOME/.local/bin the same way;
+# prepending them unconditionally duplicates $HOME/.local/bin and inserts
+# $HOME/bin on the many machines that do not have one.
+prepend_path() {
+  [[ -d "$1" ]] || return 0
+  case ":$PATH:" in
+    *":$1:"*) return 0 ;;
+  esac
+  PATH="$1:$PATH"
+}
+
+prepend_path "$HOME/.opencode/bin"
+prepend_path "$HOME/bin"
+prepend_path "$HOME/.local/bin"
+export PATH
 
 TEMP_PATHS=()
 DOWNLOADED_INSTALLER=""
@@ -393,7 +408,18 @@ ensure_shell_configuration() {
   cat >> "$temp_file" <<'EOF_BASHRC'
 
 # >>> agentic-dev-toolkit >>>
-export PATH="$HOME/.local/bin:$HOME/bin:$HOME/.opencode/bin:$PATH"
+adt_path_prepend() {
+  [ -d "$1" ] || return 0
+  case ":$PATH:" in
+    *":$1:"*) return 0 ;;
+  esac
+  PATH="$1:$PATH"
+}
+adt_path_prepend "$HOME/.opencode/bin"
+adt_path_prepend "$HOME/bin"
+adt_path_prepend "$HOME/.local/bin"
+unset -f adt_path_prepend
+export PATH
 export OPENCODE_ENABLE_EXA=true
 if [[ -x "$HOME/.local/bin/mise" ]]; then
   eval "$("$HOME/.local/bin/mise" activate bash)"
@@ -410,7 +436,10 @@ EOF_BASHRC
     rm -f "$temp_file"
   fi
 
-  export PATH="$HOME/.local/bin:$HOME/bin:$HOME/.opencode/bin:$PATH"
+  prepend_path "$HOME/.opencode/bin"
+  prepend_path "$HOME/bin"
+  prepend_path "$HOME/.local/bin"
+  export PATH
 }
 
 install_mise() {

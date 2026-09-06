@@ -66,9 +66,9 @@ Never run the installer itself to test a change; it mutates the machine. Use
 Targets Debian/Ubuntu. Ubuntu under WSL2 is the reference and tested platform.
 
 Key flags: `--dry-run`, `--upgrade`, `--verify-only`, `--project PATH`,
-`--repair-codex`, and `--skip-*` for each component
+`--repair-codex`, `--gcm-path PATH`, and `--skip-*` for each component
 (`runtimes`, `opencode`, `claude`, `codex`, `openspec`, `superpowers`,
-`karpathy`, `quality-tools`).
+`karpathy`, `quality-tools`, `git-credential`).
 
 Pinned defaults, each overridable by a CLI flag or an `ADT_*` environment
 variable of the same name:
@@ -119,6 +119,40 @@ so widening the format means editing the schema, not the code.
 The validator needs a YAML parser and so is the one component here that is not
 dependency-free. It resolves an interpreter that has PyYAML and exits 2 when
 none does; it must never degrade to a skip.
+
+## Git credentials on WSL
+
+`configure_git_credential_helper` generates `~/.local/bin/git-credential-manager-wsl`,
+a wrapper around the Windows Git Credential Manager, and adopts
+`credential.helper` only when nothing else owns it. It is a no-op off WSL.
+See `README.md` for the full rationale.
+
+Three rules are load-bearing.
+
+**Both halves of the boundary crossing are required.** GCM is a Windows process,
+so it reads neither this side's git config (it shells out to *Windows* git) nor
+this side's environment (WSL passes nothing in unless `WSLENV` names it).
+Exporting `GCM_INTERACTIVE` without appending it to `WSLENV` does nothing at all
+and looks like it worked. That is why the setting is generated from one place
+rather than documented as a manual step.
+
+**The terminal test is `/dev/tty` openability, not `[[ -t ]]`.** Git hands every
+credential helper pipes on stdin and stdout by protocol, so a file-descriptor
+test reports every interactive run as headless. A human who pipes git's output
+still has a controlling terminal and must keep their prompt.
+
+**Adoption is conditional.** An unset helper, or one naming
+`git-credential-manager.exe` directly, is claimed; anything else is reported and
+left alone. Where a machine's credentials come from is not the installer's
+decision to make silently.
+
+Keep the feature harness-agnostic. Per-harness configuration was rejected on
+purpose — the OpenCode config is generated and would erase it, and Claude Code's
+covers only Claude Code — so do not "simplify" it into either.
+
+Verification runs the wrapper against a stub delegate and asserts the decision,
+rather than checking that a file exists: the failure being prevented is a hang,
+and a file that is present but deciding wrongly hangs just as badly.
 
 ## The WSL toolchain doctor
 

@@ -8,7 +8,7 @@ source "$root/runtime/opencode-v1-adapter/load-routing-profile.sh"
 bundle=$(cd "$root/.." && pwd)
 profile=$(mktemp)
 trap 'rm -f "$profile"' EXIT
-load_routing_profile "$bundle/opencode.jsonc" >"$profile"
+load_routing_profile "$bundle/profiles/v1-restored-2026-09.jsonc" >"$profile"
 
 python3 - "$profile" "$root/manifests/phase-r-routing-targets.json" "$bundle" "$root" <<'PY'
 import json

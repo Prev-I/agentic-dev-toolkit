@@ -14,12 +14,12 @@ The routing policy is loaded through OpenCode's `instructions` setting; it does 
 | Role | OpenCode agent | Model | Variant |
 |---|---|---|---|
 | Planning/design | `plan` | `github-copilot/claude-opus-5` | `max` |
-| Primary build/controller | `build` | `github-copilot/claude-opus-5` | `high` |
+| Primary build/controller | `build` | `github-copilot/gpt-5.6-sol` | `high` |
 | Delegated implementation/debugging | `general` | `github-copilot/gpt-5.6-terra` | `high` |
 | Local codebase exploration | `explore` | `github-copilot/gpt-5.6-luna` | `medium` |
 | External/upstream research | `scout` | `github-copilot/gpt-5.6-luna` | `low` |
-| Independent review | `reviewer` | `github-copilot/gpt-5.6-sol` | `high` |
-| Escalation-only expert | `expert` | `openai/gpt-5.6-sol` | `xhigh` |
+| Independent review | `reviewer` | `github-copilot/claude-opus-5` | `high` |
+| Escalation-only expert | `expert` | `openai/gpt-6-astra` | `xhigh` |
 | Human-only breakglass | `breakglass` | `openai/gpt-5.6-sol` | `max` |
 | Context compaction | `compaction` | `github-copilot/gpt-5.6-terra` | `medium` |
 | Session title | `title` | `github-copilot/gpt-5.6-luna` | `low` |
@@ -34,13 +34,21 @@ permissions and non-routing metadata only; they carry no `model` or `variant`.
 can delegate. `hidden` is not treated as a security property anywhere in this
 bundle.
 
-Reviewer and Expert both run GPT-5.6 Sol at different providers and efforts.
-The configuration must never install Reviewer Sol `high` together with Expert
-Sol `high`; the Expert bump lands atomically with the Reviewer move.
+Build and Reviewer use different model families. Expert stays on the existing
+direct OpenAI subscription connection; normal work stays on Copilot. Plan still
+shares Opus with Reviewer. All permissions and Breakglass remain unchanged.
+
+The [2026-09-07 user selection](docs/decisions/2026-09-07-routing-selection.md)
+supersedes the restored role assignments for current use. It is an explicit
+preference, not a benchmark promotion. `eval/manifests/current-routing-targets.json`
+declares the current targets; the default model follows Build (Copilot Sol).
+This selection explicitly uses configuration-only activation with no new paid
+calls. Direct OpenAI Astra inference and Expert-role fitness remain unverified;
+this is an exception to the usual capability-probe prerequisite below.
 
 ## Routing migration
 
-The current OpenCode V1 multi-model routing restoration is governed by:
+The historical OpenCode V1 multi-model routing restoration was governed by:
 
 - [Approved routing plan](docs/decisions/2026-09-02-multi-model-routing-v3.4.3.md)
 - [First implementation actions](docs/runbooks/2026-09-02-migration-first-actions.md)
@@ -71,8 +79,8 @@ runs remain inadmissible for quality adjudication. Phase R instead gates
 Reviewer's *operational integration* (model resolution, routing,
 permissions, successful dispatch, adapter/output-path traversal, no
 security regression), fully evidenced without any new live dispatch. The
-routing profile is restored and active on the real, user-global OpenCode
-configuration (`operational_state: active`) and **is** now the
+routing profile was restored and activated on the real, user-global OpenCode
+configuration and became the historical
 `canonical_quality_reference` — meaning restoration-quality, not a claim
 that every role's model is optimal for its role.
 
@@ -82,11 +90,11 @@ Two hypothesis-driven Build challenger experiments have completed against
 the restored baseline — Opus 5 high vs Sonnet 5 high
 (`docs/decisions/2026-09-04-phase3-build-ab-result.md`) and Opus 5 high vs
 GPT-5.6 Sol high (`docs/decisions/2026-09-04-phase3-build-gpt-result.md`) —
-both concluding **KEEP_OPUS**. **Build remains `github-copilot/claude-opus-5`
-high; Reviewer remains `github-copilot/gpt-5.6-sol` high; neither role
-changed.** The Reviewer-inversion path these experiments gated is
+both concluding **KEEP_OPUS**. At that closure, Build remained Opus 5 high and
+Reviewer remained Copilot Sol high. The Reviewer-inversion path those experiments gated was
 **NOT_TRIGGERED** (its prerequisite, a Build Sol win, did not occur) and is
-not pre-registered or executed. Full closure record, including the scoped
+not pre-registered or executed. The later user selection is separate from those
+benchmark decisions and does not rewrite their results. Full closure record, including the scoped
 Sol conclusion, preserved budget history, and the observation-driven policy
 now governing future experiments:
 [Phase-3 Build optimization cycle closure](docs/decisions/2026-09-04-phase3-build-optimization-closure.md).
@@ -94,8 +102,8 @@ now governing future experiments:
 ## Restored reference profile
 
 [`profiles/v1-restored-2026-09.jsonc`](profiles/v1-restored-2026-09.jsonc) is
-the canonical restored V1 baseline and the forward reference for
-hypothesis-driven Phase-3 optimization — see the header comment in that
+the historical canonical restored V1 baseline, not the current selection.
+It remains the reference for the recorded Phase-3 experiments; see the header in that
 file for the full amended-gate provenance.
 
 [`profiles/baseline-2026-08.jsonc`](profiles/baseline-2026-08.jsonc) remains
@@ -226,6 +234,7 @@ github-copilot/gpt-5.6-terra
 github-copilot/gpt-5.6-luna
 github-copilot/gpt-5.6-sol
 openai/gpt-5.6-sol
+openai/gpt-6-astra
 ```
 
 Variant availability can depend on the provider/model catalog exposed to your installation. Verify `high`, `xhigh`, and `max` before merging. If a requested variant is not exposed, use the highest available variant for that model without changing the role mapping.
@@ -264,7 +273,10 @@ alignment check inspects:
 .opencode/model-routing.md   -> ~/.config/opencode/model-routing.md
 ```
 
-`reviewer` is independent and read-only. `expert` is hidden, read-only, cannot spawn subagents, and is capped at six agentic steps. GPT-5.6 Sol is not confined to `expert`: `reviewer` runs it through Copilot at `high`, `expert` runs it direct on OpenAI at `xhigh`, and `breakglass` runs it direct on OpenAI at `max` as a human-selected primary.
+`reviewer` is independent and read-only on Copilot Opus 5/high. `expert` uses
+direct OpenAI Astra/xhigh, is hidden, read-only, cannot spawn subagents, and is
+capped at six agentic steps. Build uses Copilot Sol/high; Breakglass retains
+direct OpenAI Sol/max as a human-selected primary.
 
 These are copies. After installing them — and after any later change to
 either side — [the alignment check](#alignment-check--is-the-installed-configuration-still-this-bundle)
@@ -280,12 +292,12 @@ The fragment pins all eleven roles as follows:
 
 ```text
 plan       -> Claude Opus 5 (Copilot)     max
-build      -> Claude Opus 5 (Copilot)     high
+build      -> GPT-5.6 Sol (Copilot)       high
 general    -> GPT-5.6 Terra (Copilot)     high
 explore    -> GPT-5.6 Luna (Copilot)      medium
 scout      -> GPT-5.6 Luna (Copilot)      low
-reviewer   -> GPT-5.6 Sol (Copilot)       high
-expert     -> GPT-5.6 Sol (direct OpenAI) xhigh
+reviewer   -> Claude Opus 5 (Copilot)     high
+expert     -> GPT-6 Astra (direct OpenAI) xhigh
 breakglass -> GPT-5.6 Sol (direct OpenAI) max
 compaction -> GPT-5.6 Terra (Copilot)     medium
 title      -> GPT-5.6 Luna (Copilot)      low
@@ -302,8 +314,8 @@ permission blocks and at the top level.
 
 ```text
 Superpowers implementation subagent -> general    -> GPT-5.6 Terra high (Copilot)
-Superpowers review / re-review       -> reviewer   -> GPT-5.6 Sol high (Copilot)
-high-risk / disputed judgment        -> expert     -> GPT-5.6 Sol xhigh (direct OpenAI)
+Superpowers review / re-review       -> reviewer   -> Claude Opus 5 high (Copilot)
+high-risk / disputed judgment        -> expert     -> GPT-6 Astra xhigh (direct OpenAI)
 ```
 
 This layer is still an instruction to the controller, not a hard-coded Superpowers dispatcher. The deterministic parts are the agent-to-model mapping. If future observation shows Superpowers repeatedly dispatching review to the wrong subagent, the next escalation is a minimal Superpowers dispatch override rather than adding more prompt rules.

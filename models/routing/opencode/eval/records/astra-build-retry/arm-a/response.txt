@@ -1,0 +1,16 @@
+I’ll continue with the pending regression tests, then apply the guards. The tests will source the installer without its final `main "$@"` call and isolate all profile writes under disposable HOME directories.
+
+The new test fails at bootstrap as expected: it adds all three managed directories even though none exists. I’ll replace each unconditional prepend with directory and exact-entry checks, processing directories in reverse order to preserve the existing priority.
+
+The PATH regressions and syntax checks pass, but the full suite hit an isolation issue: verification inherited WSL detection and looked for a credential wrapper in the disposable HOME. I’ll make non-credential tests explicitly use the non-WSL branch; the credential tests already select their own platform branch.
+
+Updated all three PATH sites to prepend only existing directories absent as exact colon-delimited entries. Preserved priority, existing entries, activation hooks, markers, backups, and dry-run behavior.
+
+Added regression coverage for missing directories, files, spaces, similar paths, existing duplicates, and repeated activation. Only the two requested files changed; `main "$@"` remains the installer’s final line.
+
+Verification:
+- Regression failed before the fix as expected.
+- `setsid bash tests/install.sh < /dev/null`: passed.
+- `bash -n environments/linux/install.sh tests/install.sh`: passed.
+
+The installer itself was not run; tests used disposable HOME directories.

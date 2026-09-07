@@ -1,0 +1,150 @@
+ok - clean interop config exits zero
+ok - clean interop config reports enabled
+ok - clean interop config reports appendWindowsPath disabled
+ok - missing appendWindowsPath fails policy
+ok - missing appendWindowsPath identifies effective true default
+ok - duplicate interop section is configuration error
+ok - duplicate interop section is explicit
+ok - non-WSL environment is unsupported
+ok - non-WSL error is explicit
+ok - generic Windows-backed PATH fails
+ok - generic Windows-backed PATH is identified
+ok - non-default DrvFs root still fails
+ok - non-default DrvFs root is detected from mounts
+ok - Rancher Linux bin PATH exception is allowed
+ok - Rancher Linux bin PATH exception is explicit
+ok - Rancher Linux bin is not generic DrvFs failure
+ok - Windows PE runtime candidate fails
+ok - Windows PE runtime is classified by magic
+ok - Windows PE runtime finding names dotnet.exe
+ok - Linux-path symlink escaping to Windows PE fails
+ok - symlink escape is detected from final target
+ok - symlink report includes resolved Windows target
+ok - managed runtime in Rancher path still fails
+ok - managed runtime cannot use Rancher exception
+ok - Rancher Linux ELF container tool is allowed
+ok - Rancher container exception checks ELF
+ok - explain with two Linux candidates succeeds
+ok - explain lists first candidate
+ok - explain lists shadowed candidate
+ok - explain identifies script format
+ok - suspicious Linux wrapper is warning only
+ok - managed wrapper Windows reference is surfaced
+ok - script with Windows shebang interpreter fails
+ok - Windows shebang interpreter is explicit
+ok - profile that reintroduces Windows PATH fails
+ok - profile contamination has dedicated code
+ok - profile contamination reports file and line
+ok - profile may explicitly add Rancher Linux bin
+ok - profile Rancher allowance is visible
+ok - fix returns restart-required exit code
+ok - fix reports backup
+ok - fix reports restart requirement
+ok - fix preserves unrelated comment
+ok - fix preserves boot section
+ok - fix sets interop enabled
+ok - fix disables Windows PATH append
+ok - fix preserves network section
+ok - fix creates exactly one backup
+ok - fix adds missing interop section and requires restart
+ok - missing interop section is added
+ok - new interop section enables interop
+ok - new interop section disables Windows PATH append
+ok - fix refuses duplicate interop sections
+ok - fix refusal explains ambiguity
+ok - ambiguous config remains untouched
+ok - fix reports unresolved persistent profile contamination
+ok - fix still reports restart required when config changed
+ok - fix leaves profile remediation to user
+ok - fix does not rewrite profile
+ok - clean JSON audit exits zero
+ok - JSON audit exposes schema version
+ok - JSON audit exposes v0.3.0 tool version
+ok - JSON audit exposes action
+ok - JSON audit exposes PASS status
+ok - JSON audit contains finding code
+ok - JSON output has no human fixed-width prefix
+ok - JSON audit with literal quote now fails PATH hygiene
+ok - JSON audit reports literal quote
+ok - JSON escapes quotes in subjects
+ok - JSON fix keeps restart-required exit code
+ok - JSON fix exposes restart-required status
+ok - JSON fix includes restart finding
+ok - JSON explain succeeds for Linux command
+ok - JSON explain exposes action
+ok - JSON explain exposes script format in message
+ok - Rancher profile exception does not mask generic Windows segment
+ok - mixed Rancher and Windows line reports contamination
+ok - profile finding is emitted once
+ok - tool finding is emitted once
+ok - tool reports v0.3.0
+ok - version string is exactly 0.3.0
+ok - duplicate PATH entries are warnings only
+ok - textual duplicate PATH is detected
+ok - canonical duplicate PATH is detected
+ok - unsafe PATH shape fails
+ok - current directory PATH is rejected
+ok - relative PATH is reported
+ok - file PATH entry fails
+ok - missing PATH entry warns
+ok - raw Windows PATH syntax fails
+ok - Windows drive syntax is detected before colon split
+ok - Windows semicolon separator is detected
+ok - excessive backslash escaping is detected
+ok - literal quote and variables in effective PATH fail
+ok - literal quote is detected
+ok - literal variable is detected
+ok - control character in PATH fails
+ok - control character is detected
+ok - PATH dry-run does not require new shell
+ok - PATH dry-run reports proposal
+ok - PATH dry-run is byte-for-byte non-mutating
+ok - safe PATH remediation requires new shell
+ok - safe PATH remediation reports modification
+ok - safe PATH remediation keeps first Linux entry
+ok - safe PATH remediation removes Windows entry
+ok - safe PATH remediation removes duplicate
+ok - safe PATH remediation creates one sibling backup
+ok - dynamic PATH remediation remains blocking
+ok - dynamic PATH assignment is refused
+ok - dynamic PATH assignment remains unchanged
+ok - missing static PATH entry is preserved by default
+ok - missing source is preserved without drop flag
+ok - drop-missing PATH remediation requires new shell
+ok - drop-missing removes static missing source
+ok - absence of mise is informational
+ok - absence of mise does not create required Java failure
+ok - mise-managed Linux binding passes
+ok - mise executable is trusted as Linux
+ok - mise configured tool is visible
+ok - mise PATH binding matches
+ok - configured mise tool need not be exposed in current shell
+ok - non-activated shell is informational
+ok - Windows PATH shadowing mise target fails
+ok - Windows mise shadowing has dedicated finding
+ok - Windows-backed mise is rejected
+ok - Windows-backed mise has dedicated finding
+ok - different Linux binding without activation is informational
+ok - different Linux binding without activation is explicit
+ok - different Linux binding with activation fails
+ok - active mise binding shadowed by Linux is explicit
+ok - combined remediation prefers restart exit code
+ok - combined remediation changes wsl.conf
+ok - combined remediation changes PATH source
+ok - a tool pinned to two versions is configured once
+ok - a tool pinned to two versions is bound once
+ok - the deduplicated tool is still audited
+ok - the editor launcher directory is allowlisted
+ok - the editor launcher directory does not fail
+ok - an unlisted Windows directory still fails
+ok - an unlisted Windows directory is not allowlisted
+ok - a single WTD_PATH_ALLOW entry is honoured
+ok - the allowlisted directory no longer fails
+ok - a later WTD_PATH_ALLOW entry with padding is honoured
+ok - the directory is still allowlisted
+ok - a PE inside an allowlisted directory still fails
+ok - a PE inside an allowlisted directory fails the run
+ok - remediation kept the allowlisted launcher directory
+ok - remediation dropped the unlisted Windows directory
+
+148 passed, 0 failed

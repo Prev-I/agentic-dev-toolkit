@@ -1,0 +1,27 @@
+I'll start by looking at the existing code.
+Tests already exist and define the contract. Let me confirm the acceptance test fails first (red).
+Red confirmed. Implementing `reverse` in pure bash, matching the existing style.
+Both green. Extra sanity checks on edge cases:
+Done. Added `reverse` to `lib/strings.sh:9`.
+
+**Implementation**
+```bash
+reverse() {
+  local s=$1 out='' i
+  for (( i = ${#s} - 1; i >= 0; i-- )); do
+    out+=${s:i:1}
+  done
+  printf '%s\n' "$out"
+}
+```
+
+**Verification** (evidence, not assertion):
+- `tests/acceptance.sh` — failed with exit 1 before the change, exits 0 after.
+- `tests/regression.sh` — exits 0 (`upper` untouched).
+- Edge cases spot-checked: empty string, single char, embedded spaces, palindrome, and multibyte UTF-8 (`héllo→` → `→olléh`).
+
+**Notes on choices**
+- Used pure-bash parameter expansion rather than the external `rev` binary, to match `upper`'s style and avoid a dependency. It also iterates *characters*, not bytes, so UTF-8 reverses correctly.
+- No `local -r`/arg-count guard added: with the file's `set -u`, calling `reverse` with no args errors out the same way `upper` already does. Keeping behavior consistent rather than introducing a divergent contract.
+
+**Scope respected:** `README.md` and `upper` were not modified. The two test files already existed and defined the contract, so I ran them as the red/green cycle instead of writing new ones.

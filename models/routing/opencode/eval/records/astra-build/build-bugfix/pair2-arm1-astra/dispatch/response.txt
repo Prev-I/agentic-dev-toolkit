@@ -1,0 +1,7 @@
+Using systematic debugging and test-driven development to reproduce the zero case, make a minimal fix, and verify it without changing `README.md` or `is_blank`.
+
+The existing acceptance test reproduces the bug: `is_positive` uses `>= 0`. I’ll change it to `> 0`, leaving the integer-format check and `is_blank` untouched.
+
+Updated `lib/validate.sh:7` from `>= 0` to `> 0`, so zero is no longer accepted as positive.
+
+`README.md` and `is_blank` are unchanged. Acceptance, regression, syntax, and additional boundary-input checks all passed.

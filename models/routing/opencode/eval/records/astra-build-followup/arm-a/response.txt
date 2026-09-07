@@ -1,0 +1,3 @@
+Using systematic-debugging and test-driven-development to check all three PATH sites and reproduce the bug before fixing it. I’ll keep changes limited to the two requested files and run tests with disposable HOME directories.
+
+All three sites use the same unconditional prepend. I’ll add tests that exercise bootstrap, current-process refresh, and the emitted Bash block independently, covering exact entry matching, missing directories, spaces, existing duplicates, and repeated activation.

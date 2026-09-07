@@ -1,0 +1,10 @@
+Continue the already approved PATH-guard implementation task from your current
+context and workspace. The previous run was externally interrupted by the
+evaluation budget monitor, not by a task failure or a request for approval.
+The budget has now been increased. No implementation feedback is being given.
+
+All original requirements and scope restrictions remain unchanged, including
+the explicit waiver of further brainstorming/design approval for this task.
+Proceed with the pending test-first implementation and verification; do not
+restart discovery unnecessarily or wait for approval. Do not delegate. Finish
+with actual test results and a concise change summary.

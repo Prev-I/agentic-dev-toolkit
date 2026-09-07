@@ -1,0 +1,18 @@
+{
+  "experiment_id": "astra-path-guards-resume-500-20260907",
+  "approval": "User: retry it with more budget. let's move to 500 credits. Interpret as total ceiling, not 500 additional.",
+  "total_cap": 500,
+  "previous_recorded_credits": 292.657475,
+  "retry_allowance": 207.342525,
+  "per_arm_completed_step_stop": 90,
+  "reporting_lag_reserve": 27.342525,
+  "order": [
+    {"arm": "arm-b", "model": "github-copilot/claude-opus-5", "variant": "high", "session": "ses_f849fc11effelWHp94Nv55pulW", "workspace": "/tmp/opencode/path-eval-b"},
+    {"arm": "arm-a", "model": "github-copilot/gpt-6-astra", "variant": "high", "session": "ses_f84a09904ffeUMDgnaTQcOBdzh", "workspace": "/tmp/opencode/path-eval-a"}
+  ],
+  "method": "Resume both interrupted sessions with identical continuation text and no coding feedback; same original task, skills, model variants, oracle and scope. Reverse original order. Retain all earlier evidence unchanged. No fresh capability checks or new fixtures. Compare completed work, report combined original+continuation cost/time, not fresh-run latency.",
+  "session_check": "opencode session list confirms IDs and directories; both workspaces byte-identical to saved snapshots. opencode export produced truncated invalid JSON, so no complete exported context is claimed.",
+  "budget": "Existing dispatcher behind experiment-local wrapper injecting --session. Monitor only newly emitted raw step_finish costs, stop at >=90 credits per arm; post-step reporting can overshoot and interrupted requests may have unreported costs. Admit 180 before pair, 90 before each arm. Parent orchestration usage excluded because unavailable.",
+  "timeout_seconds": 480,
+  "scoring": "Use preceding follow-up protocol's behavioral oracle, immutable original suite, candidate suite, syntax, scope and mutation sensitivity. Approval pauses are protocol blocks, cost stops inconclusive, not coding failures. No model promotion based on one paired fixture; production routing unchanged."
+}

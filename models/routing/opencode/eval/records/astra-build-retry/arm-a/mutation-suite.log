@@ -1,0 +1,3 @@
+FAIL: bootstrap: missing entries (activation 1): expected '/usr/bin:/bin', got '/tmp/tmp.VxibMHRqHa/path-bootstrap-missing/home [a]* space/.local/bin:/tmp/tmp.VxibMHRqHa/path-bootstrap-missing/home [a]* space/bin:/tmp/tmp.VxibMHRqHa/path-bootstrap-missing/home [a]* space/.opencode/bin:/usr/bin:/bin'
+
+ERROR: setup failed near line 186 (exit code 1).

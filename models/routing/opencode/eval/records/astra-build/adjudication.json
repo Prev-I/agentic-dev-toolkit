@@ -1,0 +1,28 @@
+{
+  "experiment_id": "build-opus5-vs-gpt6-astra-high-20260907",
+  "preflight": "eval/manifests/astra-build-preflight.json",
+  "status": "COMPLETE_CLOSED",
+  "decision": "KEEP_OPUS",
+  "decision_scope": "Existing non-interactive, single-shot Build fixture contract only; not a general coding-ability ranking.",
+  "decisive_criterion": "correctness_task_success",
+  "reason": "Astra stopped for brainstorming approval on build-feature and did not implement reverse; Opus passed both workloads. Astra passed build-bugfix.",
+  "live_dispatches": 6,
+  "capability_dispatches": 2,
+  "workload_dispatches": 4,
+  "replacement_pairs": 0,
+  "approved_cap_credits": 300,
+  "observed_dispatch_credits": 146.658125,
+  "capability_credits": 22.857975,
+  "workload_credits": 123.80015,
+  "remaining_credits_closed": 153.341875,
+  "cost_scope": "Six recorded evaluation dispatches only, derived from raw step_finish costs using the existing ledger. Parent orchestration/review session usage is not exposed by this harness and is not included. Not a billing-UI reconciliation.",
+  "workloads": [
+    {"fixture": "build-feature", "arm": "opus", "classification": "VALID_SUCCESS", "oracle_passed": true, "regression_passed": true, "wall_clock_ms": 54965, "credits": 24.876775, "steps": 9},
+    {"fixture": "build-feature", "arm": "astra", "classification": "VALID_CONTROLLER_FAILURE", "oracle_passed": false, "regression_passed": true, "wall_clock_ms": 42497, "credits": 31.50435, "steps": 8},
+    {"fixture": "build-bugfix", "arm": "astra", "classification": "VALID_SUCCESS", "oracle_passed": true, "regression_passed": true, "wall_clock_ms": 84613, "credits": 45.10585, "steps": 10},
+    {"fixture": "build-bugfix", "arm": "opus", "classification": "VALID_SUCCESS", "oracle_passed": true, "regression_passed": true, "wall_clock_ms": 37020, "credits": 22.313175, "steps": 8}
+  ],
+  "production_routing_changed": false,
+  "interpretation": "Astra's feature stop follows the loaded brainstorming approval gate. The harness does not supply approval. Opus completed without invoking that skill. Task completion here must not be equated with superior instruction compliance.",
+  "recommendation": "Keep current routing. A separate explicitly pre-approved implementation or interactive evaluation is needed to distinguish coding capability from approval-gate behavior. Do not silently rerun or replace this valid failure."
+}

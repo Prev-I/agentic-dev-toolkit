@@ -1,0 +1,21 @@
+{
+  "caps": {
+    "followup": 153.341875
+  },
+  "entries": [
+    {
+      "timestamp": "2026-09-07T12:18:02.173049+02:00",
+      "account": "followup",
+      "label": "arm-a",
+      "provider": "github-copilot",
+      "credits": 72.24820000000001
+    },
+    {
+      "timestamp": "2026-09-07T12:20:23.727141+02:00",
+      "account": "followup",
+      "label": "arm-b",
+      "provider": "github-copilot",
+      "credits": 73.75115000000001
+    }
+  ]
+}

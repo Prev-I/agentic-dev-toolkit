@@ -1,0 +1,27 @@
+{
+  "experiment_id": "astra-build-preapproved-path-guards-20260907",
+  "status_at_freeze": "APPROVED_BEFORE_DISPATCH",
+  "authorization": "User asked to proceed with the pre-approved follow-up and explicitly said approval-gate behavior should not block this kind of test. After an unanswered new-versus-remaining-budget clarification, interpret proceed conservatively as using only the original remaining allowance.",
+  "original_total_cap": 300,
+  "previous_recorded_spend": 146.658125,
+  "followup_cap": 153.341875,
+  "previous_evidence": "eval/records/astra-build",
+  "fixture_base_commit": "7605022b86dd9f4040f272cca59224f2e568a943",
+  "known_good_commit": "55da937fb7233717c9924aa59c1e36773afbde29",
+  "snapshot_files": ["environments/linux/install.sh", "tests/install.sh", "instructions/adapters/claude-code/CLAUDE.md"],
+  "task": "Real historical installer PATH-guard bugfix across bootstrap, generated managed Bash block, and current-process refresh; add regression coverage.",
+  "prompt": "prompt.txt, identical bytes for both arms; explicit waiver of design approval only, no delegation",
+  "order": [
+    {"label": "arm-a", "model": "github-copilot/gpt-6-astra", "variant": "high"},
+    {"label": "arm-b", "model": "github-copilot/claude-opus-5", "variant": "high"}
+  ],
+  "sample": "One paired task, narrowed from the suggested larger-task set to fit the original remaining budget. No capability reruns, automatic retries, or replacements.",
+  "runtime": "1.18.29; same installed global configuration and Superpowers v6.3.0 for both arms",
+  "isolation": "Fresh neutral-named external sandboxes, no Git history, only three snapshot files; no task-specific model configuration edits. Work products retained. Not an OS security sandbox or full blinding.",
+  "budget_control": "Admit 130 credits before the pair, 65 before each arm; monitor raw completed-step costs during each dispatch and stop at 65 credits per arm. Equal per-arm stop threshold leaves 23.341875 credits beyond both thresholds for in-flight reporting lag. Timeout 480 seconds per arm. Completed-step monitoring is not a provider-side hard cap; unknown billing lag remains. Parent orchestration/review usage is not observable in the dispatch ledger.",
+  "oracle": "oracle.sh exercises independent behavioral checks in temporary HOME directories. Must fail on the base and pass on the known-good implementation before dispatch. Run original immutable tests against each candidate separately from candidate-authored tests; check syntax and scope. Candidate-authored tests must also fail on the historical broken installer to demonstrate regression sensitivity.",
+  "criteria": ["independent correctness and original regression preservation", "scope and safety", "candidate regression-test quality", "completion without human correction", "convergence", "wall-clock and credits (descriptive only)"],
+  "decision": "No promotion from one paired task. Both passing makes Astra a viable candidate for broader testing. Correctness difference is task-specific evidence only. Approval stop is PROTOCOL_BLOCKED, not coding failure. Budget stop, invalid environment, or incomplete pair is INCONCLUSIVE. Do not apply the historical latency threshold to this new fixture.",
+  "production_routing": "Unchanged regardless of outcome",
+  "historical_bias": "The real historical fix was co-authored by Opus 5. Candidates receive neither Git history nor its patch; prior training/exposure cannot be excluded. The evaluator has seen the reference patch; oracle assertions target stated behavior, not helper names or patch identity."
+}

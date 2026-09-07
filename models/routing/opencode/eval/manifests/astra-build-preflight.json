@@ -1,0 +1,31 @@
+{
+  "experiment_id": "build-opus5-vs-gpt6-astra-high-20260907",
+  "frozen": "2026-09-07",
+  "approval": "User approved proceeding with a new 300-credit ceiling, including capability checks.",
+  "approved_cap_credits": 300,
+  "account": "astra_build",
+  "source_commit": "eca1f81ee689cead79a2a6d140a9eab3b417f27b",
+  "runtime_version": "1.18.29",
+  "plugin": "superpowers@git+https://github.com/obra/superpowers.git#v6.3.0",
+  "incumbent": {"model": "github-copilot/claude-opus-5", "variant": "high"},
+  "challenger": {"model": "github-copilot/gpt-6-astra", "variant": "high"},
+  "capability_checks": ["astra", "opus"],
+  "capability_timeout_seconds": 120,
+  "workload_timeout_seconds": 480,
+  "sequence": [
+    {"fixture": "build-feature", "label": "pair1-arm1-opus", "model": "github-copilot/claude-opus-5"},
+    {"fixture": "build-feature", "label": "pair1-arm2-astra", "model": "github-copilot/gpt-6-astra"},
+    {"fixture": "build-bugfix", "label": "pair2-arm1-astra", "model": "github-copilot/gpt-6-astra"},
+    {"fixture": "build-bugfix", "label": "pair2-arm2-opus", "model": "github-copilot/claude-opus-5"}
+  ],
+  "runner": "eval/runtime/opencode-v1-adapter/run-phase3-build-fixture.sh",
+  "fixtures_modified": false,
+  "isolation": "Fresh per-arm sandboxes under /tmp/opencode/astra-build-20260907, outside all Git repositories. Same installed global OpenCode configuration and skills for both arms. No production configuration edits.",
+  "budget_control": "Sequential dispatches; ledger_admit before each capability check (20 credits projected) and workload (75 credits projected); reconcile after each dispatch; stop on missing cost or inadequate reserve. These are conservative admission estimates, not provider-side hard limits; in-flight cost is only reported on completed model steps. No automatic retries or replacement pairs.",
+  "pricing": "Standard catalog rates, USD per million tokens: Astra input/output/cache-read 10/50/1; Opus 5/25/0.5. Credits derived using existing dispatcher: summed step_finish costs in USD multiplied by 100. Not independently verified against the billing UI.",
+  "criteria_ordered": ["correctness_task_success", "invariant_preservation", "scope_plan_adherence", "human_correction_required", "convergence_retries", "wall_clock_time", "steady_state_cost"],
+  "decision_rule": "Reuse phase3-build-gpt-preflight.json final_adoption_rule, substituting Astra for Sol. Any functional regression keeps Opus; a functional improvement follows the earliest differentiating criterion across workloads. A functional tie requires Astra to be faster on BOTH workloads with (max-min)/mean strictly greater than 0.378885. Cost is observational only. Missing valid evidence is inconclusive, keeping Opus operationally.",
+  "invalid_attempt_policy": "Retain valid controller failures, including approval stops. INVALID_ENVIRONMENT invalidates the pair; no replacement is automatically authorized by this four-run protocol. Fixture defects stop adjudication.",
+  "activation": "No production routing change regardless of outcome. A win is evidence for further evaluation; GPT Build with the existing GPT reviewer needs a separate family-separation decision.",
+  "limitations": ["Two tiny Bash workloads, one dispatch per model per workload; screening only.", "Timing threshold is inherited from a different fixture family, not a statistical significance threshold.", "Non-interactive single-shot contract includes installed skills and their approval gates.", "Same variant label does not establish equal reasoning compute.", "Global skills and runtime differ from historical runs; compare the contemporaneous arms, not historical wall-clock figures."]
+}

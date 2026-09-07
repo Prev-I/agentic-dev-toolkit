@@ -174,6 +174,17 @@ as text, never sourced or evaluated** - `fix --path` rewrites only a small,
 explicitly safe grammar of `PATH=` assignments and refuses dynamic ones rather
 than guessing.
 
+`CONTAINER_TOOL_UNREACHABLE` is the one check that fires on a tool being
+*absent*, and **its evidence gate is load-bearing**. Every other toolchain check
+inspects names it finds on PATH, so a CLI missing entirely produces no finding
+at all - which is how a machine can have a running daemon, a mounted socket and
+a clean audit while `docker` is not a command in any shell. The check reports
+that, but only once a socket or `DOCKER_HOST` proves a runtime is actually
+reachable. Do not make it unconditional: a machine that runs no containers is
+not drifting, and telling it to install a runtime is provisioning, which this
+tool does not do. It is a `WARN` for the same reason - a `FAIL` would give a
+deliberately container-free machine exit 1.
+
 One consequence of the exit-code protocol is worth knowing before editing:
 several internal functions return non-zero deliberately, to carry `10` (restart
 WSL) and `11` (new shell) outward. Their call sites wrap the call in an `if`,

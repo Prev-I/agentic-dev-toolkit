@@ -62,6 +62,13 @@ run_doctor() {
   # reference workstation activates mise from .bashrc, so without this the
   # non-activated cases pass or fail according to the shell that happened to
   # launch the suite -- green from a script, two failures from a terminal.
+  #
+  # DOCKER_HOST is pinned for the same reason. This is `env`, not `env -i`, so
+  # the caller's environment passes straight through, and a developer who has
+  # DOCKER_HOST exported for their own daemon would otherwise turn every
+  # no-evidence container case into a false positive. Both container overrides
+  # default to empty, so the container-runtime check stays silent unless a test
+  # asks for it.
   LAST_OUT="$(env \
     -u MISE_SHELL \
     -u MISE_SESSION \
@@ -75,6 +82,8 @@ run_doctor() {
     WTD_MISE_BIN="${WTD_TEST_MISE_BIN:-}" \
     WTD_MISE_ACTIVATED="${WTD_TEST_MISE_ACTIVATED:-}" \
     WTD_FAKE_MISE_JAVA="${WTD_FAKE_MISE_JAVA:-}" \
+    WTD_DOCKER_SOCKET="${WTD_TEST_DOCKER_SOCKET:-}" \
+    DOCKER_HOST="${WTD_TEST_DOCKER_HOST:-}" \
     HOME="$TMP_ROOT/home" \
     bash "$SCRIPT" "$@" 2>&1)"
   LAST_RC=$?
@@ -232,6 +241,115 @@ MOUNTS
 WTD_TEST_SCAN_PATH="$RANCHER_BIN" run_doctor audit
 assert_eq "Rancher Linux ELF container tool is allowed" "$LAST_RC" "0"
 assert_contains "Rancher container exception checks ELF" "$LAST_OUT" "CONTAINER_TOOL_RANCHER_LINUX"
+teardown_fixture
+
+# Container runtime reachability.
+#
+# The audit's tool checks only inspect names they find on PATH, so a container
+# CLI that is missing entirely produces no finding at all and the audit exits
+# clean. That is the exact shape of the Rancher Desktop drift this check exists
+# for: its WSL integration mounts the daemon socket and writes ~/.docker/config.json
+# but never touches PATH, leaving a reachable runtime no shell can drive.
+#
+# The check is evidence-gated on purpose. "No container CLI" is not by itself a
+# defect -- plenty of machines have no runtime and want none, and telling them
+# to install one would be provisioning advice, which this tool does not give.
+# Only a runtime that is demonstrably reachable while no CLI can reach it is
+# drift, so a socket or DOCKER_HOST must be present before anything is said.
+
+# Creates a real AF_UNIX socket. The production check is `-S`, not `-e`, and
+# proving that requires an actual socket -- which bash cannot create. python3 is
+# the only interpreter this repository already assumes elsewhere (the policy
+# validator requires one, and the installer pins Python 3.12), and a hard
+# failure here is deliberate: a skip would report green while leaving the one
+# positive socket case unproven.
+make_unix_socket() {
+  local path=$1
+  if ! command -v python3 >/dev/null 2>&1; then
+    fail "make_unix_socket requires python3" "python3 not found; cannot create an AF_UNIX socket fixture"
+    return 1
+  fi
+  python3 -c 'import socket,sys; s=socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.bind(sys.argv[1])' "$path"
+}
+
+setup_fixture
+if make_unix_socket "$TMP_ROOT/docker.sock"; then
+  WTD_TEST_DOCKER_SOCKET="$TMP_ROOT/docker.sock" run_doctor audit
+  assert_contains "reachable socket with no container CLI is reported" "$LAST_OUT" "CONTAINER_TOOL_UNREACHABLE"
+  assert_contains "unreachable runtime names the evidence" "$LAST_OUT" "$TMP_ROOT/docker.sock"
+  assert_contains "unreachable runtime is a warning, not a failure" "$LAST_OUT" "WARN  CONTAINER_TOOL_UNREACHABLE"
+  assert_eq "unreachable runtime does not fail the audit" "$LAST_RC" "0"
+  UNREACHABLE_COUNT="$(grep -c 'CONTAINER_TOOL_UNREACHABLE' <<< "$LAST_OUT" | tr -d ' ')"
+  assert_eq "unreachable runtime is reported once, not per tool name" "$UNREACHABLE_COUNT" "1"
+fi
+teardown_fixture
+
+setup_fixture
+if make_unix_socket "$TMP_ROOT/docker.sock"; then
+  printf '\177ELFfake-docker\n' > "$TMP_ROOT/linux/bin/docker"
+  chmod +x "$TMP_ROOT/linux/bin/docker"
+  WTD_TEST_DOCKER_SOCKET="$TMP_ROOT/docker.sock" run_doctor audit
+  assert_not_contains "reachable socket with docker on PATH is silent" "$LAST_OUT" "CONTAINER_TOOL_UNREACHABLE"
+  assert_eq "reachable runtime with a CLI exits zero" "$LAST_RC" "0"
+fi
+teardown_fixture
+
+# nerdctl counts: Rancher ships it beside docker and it drives the same
+# containers, so a shell holding only nerdctl is not stranded.
+setup_fixture
+if make_unix_socket "$TMP_ROOT/docker.sock"; then
+  printf '\177ELFfake-nerdctl\n' > "$TMP_ROOT/linux/bin/nerdctl"
+  chmod +x "$TMP_ROOT/linux/bin/nerdctl"
+  WTD_TEST_DOCKER_SOCKET="$TMP_ROOT/docker.sock" run_doctor audit
+  assert_not_contains "nerdctl alone satisfies runtime reachability" "$LAST_OUT" "CONTAINER_TOOL_UNREACHABLE"
+fi
+teardown_fixture
+
+# kubectl and helm are in CONTAINER_TOOL_NAMES but neither drives a container
+# runtime, so neither may suppress the finding.
+setup_fixture
+if make_unix_socket "$TMP_ROOT/docker.sock"; then
+  printf '\177ELFfake-kubectl\n' > "$TMP_ROOT/linux/bin/kubectl"
+  chmod +x "$TMP_ROOT/linux/bin/kubectl"
+  WTD_TEST_DOCKER_SOCKET="$TMP_ROOT/docker.sock" run_doctor audit
+  assert_contains "kubectl does not satisfy runtime reachability" "$LAST_OUT" "CONTAINER_TOOL_UNREACHABLE"
+fi
+teardown_fixture
+
+setup_fixture
+run_doctor audit
+assert_not_contains "no runtime evidence stays silent" "$LAST_OUT" "CONTAINER_TOOL_UNREACHABLE"
+assert_eq "no runtime evidence exits zero" "$LAST_RC" "0"
+teardown_fixture
+
+# A regular file at the socket path is not a runtime. This pins the check to
+# `-S` and stops it degrading to a bare existence test.
+setup_fixture
+: > "$TMP_ROOT/not-a-socket"
+WTD_TEST_DOCKER_SOCKET="$TMP_ROOT/not-a-socket" run_doctor audit
+assert_not_contains "a regular file at the socket path is not evidence" "$LAST_OUT" "CONTAINER_TOOL_UNREACHABLE"
+teardown_fixture
+
+setup_fixture
+WTD_TEST_DOCKER_SOCKET="$TMP_ROOT/absent.sock" run_doctor audit
+assert_not_contains "a missing socket path is not evidence" "$LAST_OUT" "CONTAINER_TOOL_UNREACHABLE"
+teardown_fixture
+
+# DOCKER_HOST is the second evidence source, and needs no filesystem: a daemon
+# reached over TCP or a non-default socket is just as unreachable from a shell
+# with no CLI.
+setup_fixture
+WTD_TEST_DOCKER_HOST="tcp://127.0.0.1:2375" run_doctor audit
+assert_contains "DOCKER_HOST with no container CLI is reported" "$LAST_OUT" "CONTAINER_TOOL_UNREACHABLE"
+assert_contains "DOCKER_HOST evidence is named in the finding" "$LAST_OUT" "tcp://127.0.0.1:2375"
+assert_eq "DOCKER_HOST evidence does not fail the audit" "$LAST_RC" "0"
+teardown_fixture
+
+setup_fixture
+printf '\177ELFfake-docker\n' > "$TMP_ROOT/linux/bin/docker"
+chmod +x "$TMP_ROOT/linux/bin/docker"
+WTD_TEST_DOCKER_HOST="tcp://127.0.0.1:2375" run_doctor audit
+assert_not_contains "DOCKER_HOST with docker on PATH is silent" "$LAST_OUT" "CONTAINER_TOOL_UNREACHABLE"
 teardown_fixture
 
 setup_fixture

@@ -32,8 +32,8 @@ if ! live_config=$(select_activation_target "$live_root"); then
 fi
 
 check_alignment \
-  --profile "$bundle/profiles/v1-restored-2026-09.jsonc" \
-  --targets "$root/manifests/phase-r-routing-targets.json" \
+  --profile "$bundle/opencode.jsonc" \
+  --targets "$root/manifests/current-routing-targets.json" \
   --bundle-root "$bundle/.opencode" \
   --live-config "$live_config" \
   --live-support-root "$live_root" \

@@ -12,7 +12,7 @@ OpenCode V1 runtime. This is runtime capability evidence, not a routing change.
 
 `github-copilot/gpt-5.3-codex` resolved in discovery at the recorded capability
 check. Moving away from Codex — including the reviewer role, previously part
-of the Codex family and now routed to GPT-5.6 Sol on Copilot — was an explicit
+of the Codex family and migrated to GPT-5.6 Sol during Phase R — was an explicit
 migration-risk decision, not a claim that Codex was retired or unavailable.
 
 Evidence has a strict hierarchy: documentation and policy provide candidate
@@ -23,14 +23,16 @@ state, not runtime capability state.
 
 ## Model Family Assignments
 
-Four model families divide the workload by cognitive profile:
+The user-selected profile of 2026-09-07 assigns these roles. These assignments
+are preferences, not claims of benchmark superiority:
 
 | Family | Strengths | Assigned Roles |
 |--------|-----------|----------------|
-| **Claude Opus 5** | Deep reasoning, nuanced code generation, architectural judgment | plan, build |
+| **Claude Opus 5** | Planning and independent review | plan, reviewer (Copilot) |
 | **GPT-5.6 Terra** | Efficient bounded execution and summarization | general, compaction |
 | **GPT-5.6 Luna** | Fast retrieval and broad pattern matching | explore, scout, title, summary |
-| **GPT-5.6 Sol** | Deep analytical review and escalation | reviewer (Copilot), expert and breakglass (direct OpenAI) |
+| **GPT-5.6 Sol** | Implementation and human-only recovery | build (Copilot), breakglass (direct OpenAI) |
+| **GPT-6 Astra** | Escalation-only advice | expert (direct OpenAI subscription) |
 
 Role-to-model assignment lives in `opencode.jsonc`. This document assigns work
 to roles; it never assigns a model.
@@ -41,10 +43,11 @@ Placing the reviewer on a separate model family from the implementers (build, ge
 heuristic intended to introduce a more independent analytical perspective. It may reduce the risk of
 shared blind spots, but it does not guarantee better review quality.
 
-Reviewer and Expert both run GPT-5.6 Sol, on different providers and at
-different reasoning efforts. Provider diversity is operational diversity, not
-cognitive independence; this correlated-reasoning risk is tracked as
-`R-EXPERT-CORRELATED-REASONING`.
+Build and General use GPT models; Reviewer uses Claude. Plan and Reviewer still
+share Opus, so this does not provide independent-family review of planning.
+Expert uses Astra through direct OpenAI, preserving provider/quota separation
+from Copilot. Build and Expert remain within the broader GPT family; provider
+diversity does not guarantee cognitive independence.
 
 ## Role Descriptions
 
@@ -93,8 +96,8 @@ When Superpowers skills dispatch sub-agents, the following mapping applies:
 | Skill context | Dispatched role |
 |---------------|-----------------|
 | Implementation work (brainstorming, TDD, parallel agents) | **general** |
-| Code review (requesting-code-review, receiving-code-review) | **reviewer** (Copilot Sol high) |
-| Escalation beyond reviewer confidence | **expert** (direct OpenAI Sol xhigh) |
+| Code review (requesting-code-review, receiving-code-review) | **reviewer** (Copilot Opus 5 high) |
+| Escalation beyond reviewer confidence | **expert** (direct OpenAI Astra xhigh) |
 
 ## Escalation to Expert
 

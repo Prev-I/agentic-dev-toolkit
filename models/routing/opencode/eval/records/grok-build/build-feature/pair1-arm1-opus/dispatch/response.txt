@@ -1,0 +1,30 @@
+I'll start by exploring the sandbox to understand the existing code.
+Requirements are unambiguous and already encoded as executable tests (`tests/acceptance.sh` asserts `reverse abc == cba`), so I'll implement directly against them.
+Added `reverse` to `lib/strings.sh:9`:
+
+```bash
+reverse() {
+  local input=$1 output='' i
+  for (( i = ${#input} - 1; i >= 0; i-- )); do
+    output+=${input:i:1}
+  done
+  printf '%s\n' "$output"
+}
+```
+
+Verification (actual output, not assumption):
+
+- `bash -n lib/strings.sh` → syntax OK
+- `bash tests/acceptance.sh` → PASS (`reverse abc` == `cba`)
+- `bash tests/regression.sh` → PASS (`upper` unchanged)
+- `shellcheck lib/strings.sh tests/*.sh` → clean
+- Edge cases: empty → empty, single char, embedded spaces preserved, UTF-8 (`héllo` → `olléh`), glob metacharacters (`*?[a]` → `]a[?*]`) all handled — no word splitting or globbing leaks.
+
+Scope respected: only `lib/strings.sh` was touched; `README.md` and `upper` are byte-identical.
+
+Two implementation notes worth stating rather than hiding:
+
+- I used a character loop instead of `rev` deliberately — `rev` is from `util-linux` and is not guaranteed present, and the repo convention favors pure Bash with no external dependencies. The loop is also multibyte-correct under a UTF-8 locale, since `${#s}` and `${s:i:1}` operate on characters, not bytes.
+- Multibyte correctness depends on the locale. Under `LC_ALL=C` this reverses bytes and would mangle non-ASCII input. That matches how the rest of the file behaves (`${1^^}` is likewise locale-dependent), so I did not add locale forcing — but flag it in case you want ASCII-only guarantees made explicit.
+
+I skipped the brainstorming skill here: the requirement was fully specified and already encoded as an executable acceptance test, leaving no design question to explore. TDD was effectively pre-satisfied — the failing test existed before the implementation, and I confirmed it drove the result.

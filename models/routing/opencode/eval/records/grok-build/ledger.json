@@ -1,0 +1,49 @@
+{
+  "caps": {
+    "grok_build": 300
+  },
+  "entries": [
+    {
+      "timestamp": "2026-09-07T15:09:17.810543+02:00",
+      "account": "grok_build",
+      "label": "preflight-grok",
+      "provider": "github-copilot",
+      "credits": 2.2568
+    },
+    {
+      "timestamp": "2026-09-07T15:09:38.074033+02:00",
+      "account": "grok_build",
+      "label": "preflight-opus",
+      "provider": "github-copilot",
+      "credits": 9.455375
+    },
+    {
+      "timestamp": "2026-09-07T15:10:59.552995+02:00",
+      "account": "grok_build",
+      "label": "pair1-arm1-opus",
+      "provider": "github-copilot",
+      "credits": 30.25965
+    },
+    {
+      "timestamp": "2026-09-07T15:12:09.680038+02:00",
+      "account": "grok_build",
+      "label": "pair1-arm2-grok",
+      "provider": "github-copilot",
+      "credits": 18.8982
+    },
+    {
+      "timestamp": "2026-09-07T15:12:58.195956+02:00",
+      "account": "grok_build",
+      "label": "pair2-arm1-grok",
+      "provider": "github-copilot",
+      "credits": 16.915399999999998
+    },
+    {
+      "timestamp": "2026-09-07T15:13:51.875025+02:00",
+      "account": "grok_build",
+      "label": "pair2-arm2-opus",
+      "provider": "github-copilot",
+      "credits": 29.960175000000007
+    }
+  ]
+}

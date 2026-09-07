@@ -1,0 +1,39 @@
+{
+  "experiment": "grok-build",
+  "date": "2026-09-07",
+  "protocol": "protocol.md",
+  "incumbent": "github-copilot/claude-opus-5",
+  "challenger": "github-copilot/grok-4.6",
+  "variant": "high",
+  "capability_checks_passed": 2,
+  "workload_dispatches": 4,
+  "oracle_passes": 4,
+  "regression_passes": 4,
+  "retries": 0,
+  "human_corrections": 0,
+  "functional_result": "TIE",
+  "timing_threshold": 0.378885,
+  "timing_relative_range": {
+    "build-feature": 0.132018,
+    "build-bugfix": 0.197809
+  },
+  "timing_replacement_criterion_met": false,
+  "workload_credits": {
+    "grok": 35.8136,
+    "opus": 60.219825,
+    "total": 96.033425
+  },
+  "capability_credits": 11.712175,
+  "total_credits": 107.7456,
+  "approved_allowance_credits": 300,
+  "unused_credits": 192.2544,
+  "cost_basis": "Sum of all runtime step_finish costs in USD multiplied by 100; excludes parent orchestration and review; not billing reconciled",
+  "decision": "KEEP_OPUS",
+  "routing_changed": false,
+  "limitations": [
+    "One run per model per workload; not a reliability estimate",
+    "Final sandboxes deleted by the unchanged runner after scoring",
+    "Raw events do not independently attest model identity",
+    "Costs are not normalized for caching"
+  ]
+}

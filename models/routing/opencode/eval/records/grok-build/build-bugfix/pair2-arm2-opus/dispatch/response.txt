@@ -1,0 +1,18 @@
+I'll start by looking at the file.
+Small, well-defined bugfix. Let me confirm the failing test first.
+Fixed with a one-character change in `lib/validate.sh:7`:
+
+```diff
+-  (( $1 >= 0 ))
++  (( $1 > 0 ))
+```
+
+Verification:
+- `bash tests/acceptance.sh` → exit 0 (was exit 1 on `is_positive(0) must be false` before the fix)
+- `bash tests/regression.sh` → exit 0
+- `bash -n lib/validate.sh` and `shellcheck lib/validate.sh` → clean
+- Spot check: `0`, `-1`, `-3`, `abc`, `""`, `1x` → false; `1`, `42` → true
+
+`README.md` and `is_blank` were left untouched.
+
+One pre-existing issue I noticed but deliberately did not change, since it's outside the stated scope: the regex accepts leading zeros, so `is_positive 08` hits bash's octal parsing in `(( ))` and errors out rather than returning a clean false. Say the word if you want that hardened too.

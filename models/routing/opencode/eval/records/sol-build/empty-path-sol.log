@@ -1,0 +1,3 @@
+FAIL empty PATH: bootstrap expected </tmp/tmp.rDcFwWQMbj/home/.local/bin:/tmp/tmp.rDcFwWQMbj/home/bin:/tmp/tmp.rDcFwWQMbj/home/.opencode/bin:>, got </tmp/tmp.rDcFwWQMbj/home/.local/bin:/tmp/tmp.rDcFwWQMbj/home/bin:/tmp/tmp.rDcFwWQMbj/home/.opencode/bin>
+FAIL empty PATH: generated expected </tmp/tmp.rDcFwWQMbj/home/.local/bin:/tmp/tmp.rDcFwWQMbj/home/bin:/tmp/tmp.rDcFwWQMbj/home/.opencode/bin:>, got </tmp/tmp.rDcFwWQMbj/home/.local/bin:/tmp/tmp.rDcFwWQMbj/home/bin:/tmp/tmp.rDcFwWQMbj/home/.opencode/bin>
+FAIL empty PATH: refresh expected </tmp/tmp.rDcFwWQMbj/home/.local/bin:/tmp/tmp.rDcFwWQMbj/home/bin:/tmp/tmp.rDcFwWQMbj/home/.opencode/bin:>, got </tmp/tmp.rDcFwWQMbj/home/.local/bin:/tmp/tmp.rDcFwWQMbj/home/bin:/tmp/tmp.rDcFwWQMbj/home/.opencode/bin>

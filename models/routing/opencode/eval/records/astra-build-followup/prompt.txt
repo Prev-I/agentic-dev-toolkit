@@ -1,0 +1,40 @@
+# Implementation Task: Managed PATH Guards
+
+Implementation is explicitly approved. This is a non-interactive implementation
+evaluation: do not stop to request design approval or clarification. For this
+task only, skip any brainstorming/design-approval pause required by a skill;
+the user explicitly authorizes this exception. All other safety, testing, and
+scope rules still apply. If something minor is ambiguous, state a reasonable
+assumption and proceed. Do not delegate this task to another model.
+
+Fix the workstation installer's managed PATH setup in
+`environments/linux/install.sh`. It currently prepends `$HOME/.local/bin`,
+`$HOME/bin`, and `$HOME/.opencode/bin` unconditionally. Existing shell profiles
+may already include these directories, and some directories may not exist.
+
+Approved design and contract:
+- Prepend each managed directory only if it exists as a directory and is not
+  already present as a complete, exact colon-delimited PATH entry.
+- Apply the behavior at all three sites: installer bootstrap, the managed
+  Bash block emitted by `ensure_shell_configuration`, and that function's
+  refresh of the current process PATH.
+- When all three directories are newly added, preserve the existing priority:
+  `.local/bin`, then `bin`, then `.opencode/bin`, then the original PATH.
+- Do not remove, reorder, canonicalize, or deduplicate pre-existing entries.
+  Repeated activation must not add further duplicates. Paths with spaces must
+  work. Preserve mise/direnv activation, the managed-block markers, backup
+  behavior, and dry-run non-mutation.
+- Use small Bash changes consistent with the installer. Do not introduce
+  external dependencies or change unrelated installation behavior.
+- Add focused behavioral regression coverage to `tests/install.sh`. Preserve
+  existing tests and keep `main "$@"` as the installer's final line.
+
+Only those two files may change. The adapter is supporting test data. This is
+a standalone snapshot without Git history; do not search outside it for a fix
+or for evaluation results. Global skills may still be loaded as needed.
+
+Do not run the installer itself or mutate the real HOME/machine configuration.
+Source only its functions as the existing tests do, and use disposable HOME
+directories for tests. Run `setsid bash tests/install.sh < /dev/null` (the
+credential tests require no controlling terminal), and syntax-check both files.
+Finish with a concise summary of the change and actual verification results.

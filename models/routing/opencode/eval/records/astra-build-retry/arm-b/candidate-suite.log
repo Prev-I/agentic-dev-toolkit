@@ -1,0 +1,1 @@
+FAIL: a managed directory that does not exist must not be added to PATH: expected '/tmp/tmp.m59u2M252j/path-missing-dirs/home/.local/bin:/usr/bin:/bin', got '/tmp/tmp.m59u2M252j/path-missing-dirs/home/.local/bin:/tmp/tmp.m59u2M252j/path-missing-dirs/home/bin:/tmp/tmp.m59u2M252j/path-missing-dirs/home/.opencode/bin:/usr/bin:/bin'

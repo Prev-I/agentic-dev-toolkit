@@ -1,0 +1,20 @@
+{
+  "experiment_id": "sol-high-path-guards-20260907",
+  "approval": "User requested the same analysis for GPT-5.6 Sol high against Opus 5 and GPT-6, approving the same budget as the last run. New independent 500-credit ceiling; no previous unused allowance reused.",
+  "approved_credits": 500,
+  "model": "github-copilot/gpt-5.6-sol",
+  "variant": "high",
+  "runtime": "1.18.29",
+  "task_source": "eval/records/astra-build-followup/prompt.txt, identical bytes",
+  "snapshot_source": "eval/records/astra-build-followup/base-snapshot, identical bytes, originally commit 7605022b86dd9f4040f272cca59224f2e568a943",
+  "oracle_source": "eval/records/astra-build-followup/oracle.sh, unchanged",
+  "workspace": "/tmp/opencode/path-eval-c",
+  "global_configuration": "Same installed global profile and Superpowers v6.3.0; no routing or permission changes. Direct model override, no delegation, no Git history in sandbox.",
+  "dispatches": "One fresh uninterrupted role attempt, 480-second timeout. No separate capability probe; successful role execution establishes capability. No automatic retry or continuation.",
+  "budget_control": "ledger_admit checks 400 projected credits before dispatch. Wrapper monitors new completed-step costs once per second and stops at >=400 credits, leaving 100 for reporting lag. Not a provider-enforced hard cap. Interrupted in-flight charges may be unreported; orchestration/review usage is not exposed by this ledger.",
+  "checks": ["independent five-scenario PATH oracle at all three sites", "immutable original suite against submitted installer", "candidate-authored suite", "candidate tests against historical broken installer", "syntax and scope review", "independent code review including preservation of test coverage"],
+  "comparison": "Compare with saved Astra/Opus PATH-task totals, not tiny-fixture runs. Astra completed with a WSL test-coverage finding; Opus was budget-stopped before implementation. Those arms were interrupted/resumed and had smaller cost stops. Sol gets no solution or review feedback. This is an observational extension, not equal-budget or randomized fresh three-way trial. No general superiority or automatic routing promotion.",
+  "decision_rules": "Approval pause is PROTOCOL_BLOCKED; cost/time stop or invalid environment is INCONCLUSIVE rather than coding failure. A completed submission is evaluated for requested behavior, regressions, scope and test quality. A single task can establish contender evidence, not a production default decision.",
+  "production_routing_changed": false,
+  "historical_bias": "Historical reference fix co-authored by Opus; evaluator has seen it, candidates do not receive it. Training/prior exposure unknown."
+}

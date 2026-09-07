@@ -1,0 +1,64 @@
+PASS: activation routing-owned merge
+PASS: alignment check (drift vs stale, user-owned keys never flagged)
+PASS: Breakglass runtime boundaries
+PASS: Breakglass invariant
+PASS: Phase R budget ledger
+PASS: Phase 0 budget decision
+PASS: deterministic Build fixture oracle
+PASS: Build gate state machine
+PASS: Phase-3 Build fixtures (build-feature, build-bugfix) are genuinely dispatchable
+PASS: build restoration gate runner
+PASS: Phase R capability preflight
+PASS: Compaction ground truth
+PASS: compaction gate runner
+PASS: continuous thresholds
+PASS: count rules
+PASS: decimal pagination semantics
+PASS: shared fixture dispatch primitive
+PASS: effective routing verification
+PASS: Explore ground truth
+PASS: explore gate runner
+PASS: fixture integrity (clean zero-defect, one-defect-per-case)
+PASS: quality fixtures
+PASS: Phase 0 eval layout
+PASS: resolved permission semantics
+PASS: Phase-R scope amendment (quality threshold unchanged, not a restoration gate)
+PASS: Phase R targets and activation contract
+PASS: Phase-3 Build A/B preflight manifest is internally consistent
+PASS: Phase-3 Build A/B result is independently re-derivable from raw evidence
+PASS: Phase-3 Build Opus-vs-Sol preflight manifest is internally consistent
+PASS: Phase-3 Build Opus-vs-Sol result is independently re-derivable from raw evidence
+PASS: Phase-3 Build optimization cycle closure is factually grounded
+PASS: OpenCode probe adapter
+PASS: provenance and manifest
+PASS: R-API public-contract observability
+PASS: Phase 0 readiness matrix
+reviewer_structured_gate: R-CONCURRENCY has no all_reported/files evidence -- falling back to trusting its top-level severity directly
+reviewer_structured_gate: R-AUTH has no all_reported/files evidence -- falling back to trusting its top-level severity directly
+reviewer_structured_gate: R-API has no all_reported/files evidence -- falling back to trusting its top-level severity directly
+reviewer_structured_gate: R-BOUNDARY has no all_reported/files evidence -- falling back to trusting its top-level severity directly
+reviewer_structured_gate: R-ERROR has no all_reported/files evidence -- falling back to trusting its top-level severity directly
+PASS: reviewer scorer attribution
+reviewer_structured_gate: R-CONCURRENCY has no all_reported/files evidence -- falling back to trusting its top-level severity directly
+reviewer_structured_gate: R-AUTH has no all_reported/files evidence -- falling back to trusting its top-level severity directly
+reviewer_structured_gate: R-API has no all_reported/files evidence -- falling back to trusting its top-level severity directly
+reviewer_structured_gate: R-BOUNDARY has no all_reported/files evidence -- falling back to trusting its top-level severity directly
+reviewer_structured_gate: R-ERROR has no all_reported/files evidence -- falling back to trusting its top-level severity directly
+reviewer_structured_gate: R-CONCURRENCY has no all_reported/files evidence -- falling back to trusting its top-level severity directly
+reviewer_structured_gate: R-AUTH has no all_reported/files evidence -- falling back to trusting its top-level severity directly
+reviewer_structured_gate: R-API has no all_reported/files evidence -- falling back to trusting its top-level severity directly
+reviewer_structured_gate: R-BOUNDARY has no all_reported/files evidence -- falling back to trusting its top-level severity directly
+reviewer_structured_gate: R-CONCURRENCY has no all_reported/files evidence -- falling back to trusting its top-level severity directly
+reviewer_structured_gate: R-AUTH has no all_reported/files evidence -- falling back to trusting its top-level severity directly
+reviewer_structured_gate: R-API has no all_reported/files evidence -- falling back to trusting its top-level severity directly
+reviewer_structured_gate: R-BOUNDARY has no all_reported/files evidence -- falling back to trusting its top-level severity directly
+reviewer_structured_gate: R-ERROR has no all_reported/files evidence -- falling back to trusting its top-level severity directly
+PASS: Reviewer ground truth
+PASS: reviewer gate runner
+reviewer_structured_gate: R-BOUNDARY's witness is an empty string -- an empty substring matches anything, treating as invalid and failing closed
+PASS: witness-based scorer attribution
+PASS: JSONC routing loader
+PASS: Phase R routing restoration invariants (11 agents)
+PASS: self-variance runner
+candidate results are forbidden
+PASS: measured self-variance ordering

@@ -1,0 +1,4 @@
+PASS bootstrap all
+PASS refresh and dry-run all
+
+ERROR: setup failed near line 47 (exit code 1).

@@ -1,0 +1,24 @@
+Using test-driven development to reproduce the PATH defects before changing the installer, and the Karpathy guidelines to keep the fix surgical. I’ll inspect the two allowed files, add focused failing behavioral tests, implement the smallest Bash change at all three sites, then run the exact test and syntax-check commands.
+The three unconditional assignments are exactly at bootstrap, generated `.bashrc`, and process refresh. The regression tests will execute each real context with a disposable `HOME` containing spaces, literal expected PATH strings, existing exact entries, near-match entries, missing directories, repeated activation, and dry-run non-mutation; the production change that makes them pass is conditional reverse-order prepending.
+I’m adding the regression coverage now, without production changes. The tests source the installer/functions in subprocesses and source the generated managed block directly, so they validate behavior while never invoking `main` or touching the real home directory.
+The new suite fails at the bootstrap assertion for the intended reason: it adds the nonexistent `$HOME/bin` and duplicates the exact existing `.opencode/bin`. I’ll replace the two installer-process assignments with one small reverse-order helper and emit equivalent self-contained logic in the managed Bash block.
+Using verification-before-completion to require fresh evidence for the full suite and both syntax checks. I’ll also inspect the final two-file diff and confirm `main "$@"` remains the installer’s last line.
+The syntax checks passed, but the full suite exposed a test-harness issue rather than a product failure: the bootstrap subprocess intentionally replaced `PATH` with entries that omitted core utilities, so the installer’s existing EXIT cleanup could not run `rm`. I’m correcting the fixture to retain `/usr/bin:/bin` while preserving the exact PATH assertions, then I’ll rerun all verification.
+The same harness constraint also applies to the current-process refresh test, which called `ensure_shell_configuration` after replacing `PATH` with synthetic-only entries. I’m retaining real utility directories there as well; this does not weaken any ordering, duplicate-preservation, or exact-entry assertion.
+Implemented managed PATH guards in `environments/linux/install.sh`:
+
+- Adds only existing managed directories.
+- Matches exact colon-delimited PATH entries.
+- Preserves priority: `.local/bin`, `bin`, `.opencode/bin`.
+- Preserves existing order and duplicates.
+- Handles spaces and repeated activation safely.
+- Applies during bootstrap, managed Bash activation, and current-process refresh.
+- Preserves dry-run behavior, activation hooks, markers, backups, and final `main "$@"`.
+
+Added focused behavioral coverage in `tests/install.sh`.
+
+Verification:
+
+- `setsid bash tests/install.sh < /dev/null` → `PASS: installer compatibility tests`
+- `bash -n environments/linux/install.sh && bash -n tests/install.sh` → passed
+- The installer itself was not executed.

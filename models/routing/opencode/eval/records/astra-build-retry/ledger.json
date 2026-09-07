@@ -1,0 +1,21 @@
+{
+  "caps": {
+    "retry": 207.342525
+  },
+  "entries": [
+    {
+      "timestamp": "2026-09-07T12:38:10.165719+02:00",
+      "account": "retry",
+      "label": "arm-b",
+      "provider": "github-copilot",
+      "credits": 95.76622499999999
+    },
+    {
+      "timestamp": "2026-09-07T12:40:29.051585+02:00",
+      "account": "retry",
+      "label": "arm-a",
+      "provider": "github-copilot",
+      "credits": 85.44704999999999
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "caps": {
+    "astra_build": 300
+  },
+  "entries": [
+    {
+      "timestamp": "2026-09-07T11:44:43.115909+02:00",
+      "account": "astra_build",
+      "label": "preflight-astra",
+      "provider": "github-copilot",
+      "credits": 13.4076
+    },
+    {
+      "timestamp": "2026-09-07T11:45:06.218207+02:00",
+      "account": "astra_build",
+      "label": "preflight-opus",
+      "provider": "github-copilot",
+      "credits": 9.450375
+    },
+    {
+      "timestamp": "2026-09-07T11:46:17.321829+02:00",
+      "account": "astra_build",
+      "label": "pair1-arm1-opus",
+      "provider": "github-copilot",
+      "credits": 24.876775000000002
+    },
+    {
+      "timestamp": "2026-09-07T11:47:16.152519+02:00",
+      "account": "astra_build",
+      "label": "pair1-arm2-astra",
+      "provider": "github-copilot",
+      "credits": 31.504350000000002
+    },
+    {
+      "timestamp": "2026-09-07T11:48:57.536779+02:00",
+      "account": "astra_build",
+      "label": "pair2-arm1-astra",
+      "provider": "github-copilot",
+      "credits": 45.10585
+    },
+    {
+      "timestamp": "2026-09-07T11:49:55.700858+02:00",
+      "account": "astra_build",
+      "label": "pair2-arm2-opus",
+      "provider": "github-copilot",
+      "credits": 22.313175
+    }
+  ]
+}

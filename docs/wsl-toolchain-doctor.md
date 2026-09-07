@@ -321,6 +321,31 @@ A pathname merely containing `Rancher Desktop` has never been enough, and still 
 
 The Docker CLI is not the Docker daemon. Tools that speak the Docker API over `/var/run/docker.sock` — Testcontainers, for instance — are unaffected by PATH policy entirely, because that socket is served from a Linux `tmpfs` mount rather than DrvFs. Tools that shell out to the `docker` binary, such as the devcontainer CLI, need the CLI on `PATH` and therefore need the allowlist entry.
 
+## Container runtime reachability
+
+The split above has a failure mode the allowlist cannot express, because it is about a directory that is *absent* from PATH rather than one that is present.
+
+Rancher Desktop's WSL integration mounts the daemon socket into the distro and writes `~/.docker/config.json`, but it does not touch `PATH`; adding its Linux bin directory is left to a shell profile. Skip that step and the distro reaches a state where the daemon is running and serving — Testcontainers works, containers start — while `docker` reports `command not found` in every shell.
+
+Every other toolchain check inspects names it finds on PATH, so this state produces no finding at all and the audit exits clean. `CONTAINER_TOOL_UNREACHABLE` closes that gap:
+
+- `CONTAINER_TOOL_UNREACHABLE` — warning; a container runtime is reachable but no CLI on the scanned PATH can drive it.
+
+It is reported once, with the evidence as its subject, and it is a warning rather than a failure so that a machine which deliberately runs no container CLI does not start failing its audit.
+
+The check is evidence-gated. "No container CLI" is not a defect on its own — a machine that runs no containers is not drifting, and recommending an install would be provisioning advice, which this tool does not give. Something must first show a runtime is actually reachable:
+
+| Signal | Default | Override |
+| --- | --- | --- |
+| Runtime socket | `/var/run/docker.sock`, tested with `-S` | `WTD_DOCKER_SOCKET` |
+| Daemon address | unset | `DOCKER_HOST`, honoured when non-empty |
+
+`WTD_DOCKER_SOCKET` is expanded with `-` rather than `:-`, so setting it to the empty string asserts that the machine has no socket instead of falling back to the default.
+
+Only `docker` and `nerdctl` — plus their Windows spellings — count as able to drive a runtime. `kubectl` and `helm` address a Kubernetes API server, and `docker-compose` orchestrates through a client that must already be present, so none of the three suppresses the finding even though all three appear on the container collision watchlist.
+
+Both signals are vendor-neutral by design. Probing for Rancher Desktop's installation directory instead was considered and rejected: Rancher also installs per-user under `%LOCALAPPDATA%\Programs`, which a `Program Files` probe misses, and an installed-but-stopped Rancher offers no runtime to reach, so reporting it would again be provisioning rather than drift.
+
 ## JSON mode
 
 Examples:

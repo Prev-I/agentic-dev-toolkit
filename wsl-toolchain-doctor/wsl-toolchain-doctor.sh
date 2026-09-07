@@ -8,6 +8,15 @@ WSL_CONF="${WTD_WSL_CONF:-/etc/wsl.conf}"
 MOUNTS_FILE="${WTD_MOUNTS_FILE:-/proc/self/mounts}"
 WSL_INTEROP_FILE="${WTD_WSL_INTEROP_FILE:-/proc/sys/fs/binfmt_misc/WSLInterop}"
 SCAN_PATH="${WTD_SCAN_PATH:-${PATH:-}}"
+# The Unix socket a local container runtime listens on.
+#
+# Expanded with `-` rather than `:-` so that an explicitly empty
+# WTD_DOCKER_SOCKET means "this machine has no socket" instead of falling back
+# to the default. The test suite needs to assert that the reachability check
+# stays silent, and with `:-` an empty override would silently re-adopt
+# /var/run/docker.sock and make those cases pass or fail according to whether
+# the developer running them happens to have a runtime installed.
+DOCKER_SOCKET="${WTD_DOCKER_SOCKET-/var/run/docker.sock}"
 JSON_MODE=0
 CURRENT_ACTION=""
 EXEC_ERROR=0
@@ -374,6 +383,21 @@ CONTAINER_TOOL_NAMES=(
   nerdctl nerdctl.exe kubectl kubectl.exe helm helm.exe
 )
 
+# The subset of CONTAINER_TOOL_NAMES that can actually drive a container
+# runtime. kubectl and helm talk to a Kubernetes API server and docker-compose
+# is an orchestrator over a client that must already be present, so none of the
+# three proves a shell can reach the runtime and none may suppress the
+# reachability finding. nerdctl does qualify: Rancher Desktop ships it beside
+# docker and it manages the same containers.
+#
+# The .exe spellings are deliberate. A PE docker.exe on PATH is already reported
+# by classify_tool_candidate as TOOL_WINDOWS_PE, which is the more precise
+# diagnosis; counting it here keeps the two checks from both firing about one
+# binary.
+CONTAINER_RUNTIME_CLI_NAMES=(
+  docker docker.exe nerdctl nerdctl.exe
+)
+
 tool_kind() {
   local name=$1 item
   for item in "${MANAGED_TOOL_NAMES[@]}"; do
@@ -495,6 +519,61 @@ audit_toolchains() {
       classify_tool_candidate "$name" "$candidate"
     done < <(enumerate_command_candidates "$name")
   done
+}
+
+# Evidence that a container runtime is reachable from this distro, printed so
+# the finding can name what triggered it.
+#
+# Both signals are vendor-neutral, which is the point: an earlier draft of this
+# check looked for Rancher Desktop's installation directory through mount
+# provenance, and that is both narrower and less accurate. Rancher also installs
+# per-user under %LOCALAPPDATA%\Programs, so a "Program Files" probe misses it,
+# and an installed-but-stopped Rancher offers nothing to reach, so reporting it
+# would be provisioning advice rather than drift.
+#
+# The socket test is `-S`, not `-e`. A stale regular file left at the socket
+# path is not a runtime, and treating it as one would send a reader hunting for
+# a PATH problem they do not have.
+container_runtime_evidence() {
+  if [[ -n "$DOCKER_SOCKET" && -S "$DOCKER_SOCKET" ]]; then
+    printf '%s' "$DOCKER_SOCKET"
+    return 0
+  fi
+  # A daemon on TCP or a non-default socket is just as unreachable from a shell
+  # that has no client, and needs no filesystem to detect.
+  if [[ -n "${DOCKER_HOST:-}" ]]; then
+    printf '%s' "$DOCKER_HOST"
+    return 0
+  fi
+  return 1
+}
+
+# Reports a container runtime that nothing on PATH can drive.
+#
+# This is the one toolchain check that fires on a tool's absence, and it needs
+# to be: classify_tool_candidate only inspects names it finds, so a CLI that is
+# missing entirely produces no finding and the audit exits clean. Rancher
+# Desktop's WSL integration reaches exactly that state -- it mounts the daemon
+# socket and writes ~/.docker/config.json, but never adds its Linux bin
+# directory to PATH.
+#
+# Gated on evidence because "no container CLI" is not a defect on its own. A
+# machine that runs no containers is not drifting, and telling it to install a
+# runtime would be provisioning, which this tool does not do. Only a runtime
+# that is demonstrably reachable while no CLI can reach it is drift.
+#
+# WARN, not FAIL: result_exit_code turns any FAIL into exit 1, and a machine
+# that deliberately runs no container CLI must not start failing its audit.
+audit_container_reachability() {
+  local evidence name candidate
+  evidence="$(container_runtime_evidence)" || return 0
+  for name in "${CONTAINER_RUNTIME_CLI_NAMES[@]}"; do
+    while IFS= read -r candidate; do
+      [[ -n "$candidate" ]] || continue
+      return 0
+    done < <(enumerate_command_candidates "$name")
+  done
+  add_finding WARN CONTAINER_TOOL_UNREACHABLE "$evidence" "A container runtime is reachable at $evidence but no container CLI (docker, nerdctl) is on the scanned PATH; the runtime cannot be driven from this shell."
 }
 
 
@@ -1160,6 +1239,7 @@ run_audit() {
     audit_wsl_conf
     (( EXEC_ERROR == 0 )) && audit_path_entries
     (( EXEC_ERROR == 0 )) && audit_toolchains
+    (( EXEC_ERROR == 0 )) && audit_container_reachability
     (( EXEC_ERROR == 0 )) && audit_mise
     (( EXEC_ERROR == 0 )) && audit_shell_profiles
   fi

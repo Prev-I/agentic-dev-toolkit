@@ -31,16 +31,25 @@ cat >"$config_root/opencode.jsonc" <<'JSONC'
 JSONC
 
 activate_profile --repo-profile "$root/../opencode.jsonc" \
-                 --targets "$root/manifests/phase-r-routing-targets.json" \
+                 --targets "$root/manifests/current-routing-targets.json" \
                  --config-root "$config_root" --backup-root "$backup_root" >"$workspace/out.txt"
 
 assert_contains "$(<"$workspace/out.txt")" "$config_root/opencode.jsonc"
 backup_dir=$(grep '^backup_dir=' "$workspace/out.txt" | cut -d= -f2-)
 assert_file "$backup_dir/opencode.jsonc"
 assert_file "$backup_dir/manifest.json"
-assert_contains "$(basename "$backup_dir")" 'phase-r-'
+assert_contains "$(basename "$backup_dir")" 'routing-'
+python3 - "$backup_dir/manifest.json" "$root/../opencode.jsonc" <<'PY'
+import hashlib
+import json
+import sys
+manifest = json.load(open(sys.argv[1], encoding="utf-8"))
+assert manifest["source_profile_sha256"] == hashlib.sha256(open(sys.argv[2], "rb").read()).hexdigest()
+assert manifest["source_commit_is_complete_provenance"] is False
+assert "Phase R" not in manifest["purpose"]
+PY
 
-python3 - "$config_root/opencode.jsonc" "$root/manifests/phase-r-routing-targets.json" \
+python3 - "$config_root/opencode.jsonc" "$root/manifests/current-routing-targets.json" \
          "$backup_dir/opencode.jsonc" "$root/runtime/opencode-v1-adapter/load-routing-profile.sh" <<'PY'
 import json
 import re
@@ -90,13 +99,13 @@ assert "claude-opus-4.6" in original
 
 # A provenance header is written into the activated file.
 activated_text = open(activated_path, encoding="utf-8").read()
-assert re.search(r"//\s*profile_id:\s*v1-restored-2026-09", activated_text), activated_text[:400]
+assert f"// profile_id: {targets['profile_id']}" in activated_text, activated_text[:400]
 PY
 
 # Ambiguous root must block, per the committed activation contract.
 touch "$config_root/opencode.json"
 if activate_profile --repo-profile "$root/../opencode.jsonc" \
-                    --targets "$root/manifests/phase-r-routing-targets.json" \
+                    --targets "$root/manifests/current-routing-targets.json" \
                     --config-root "$config_root" --backup-root "$backup_root" >/dev/null 2>&1; then
   fail "activated against an ambiguous config root"
 fi
@@ -105,7 +114,7 @@ rm "$config_root/opencode.json"
 # Dry run must not modify anything.
 before=$(sha256sum "$config_root/opencode.jsonc" | cut -d' ' -f1)
 activate_profile --repo-profile "$root/../opencode.jsonc" \
-                 --targets "$root/manifests/phase-r-routing-targets.json" \
+                 --targets "$root/manifests/current-routing-targets.json" \
                  --config-root "$config_root" --backup-root "$backup_root" --dry-run >/dev/null
 assert_eq "$before" "$(sha256sum "$config_root/opencode.jsonc" | cut -d' ' -f1)"
 
@@ -113,7 +122,7 @@ assert_eq "$before" "$(sha256sum "$config_root/opencode.jsonc" | cut -d' ' -f1)"
 # not the caller's cwd. Prove it by invoking from inside an unrelated git
 # repository with absolute paths.
 repo_profile_abs=$(cd "$root/.." && pwd)/opencode.jsonc
-targets_abs="$root/manifests/phase-r-routing-targets.json"
+targets_abs="$root/manifests/current-routing-targets.json"
 expected_commit=$(git -C "$(dirname "$repo_profile_abs")" rev-parse HEAD)
 [[ -n "$expected_commit" ]] || fail "could not resolve expected repo commit"
 
@@ -157,7 +166,7 @@ printf '{ this is not valid JSON or JSONC at all' >"$malformed_config_root/openc
 before_malformed=$(sha256sum "$malformed_config_root/opencode.jsonc" | cut -d' ' -f1)
 
 if activate_profile --repo-profile "$root/../opencode.jsonc" \
-                    --targets "$root/manifests/phase-r-routing-targets.json" \
+                    --targets "$root/manifests/current-routing-targets.json" \
                     --config-root "$malformed_config_root" --backup-root "$malformed_backup_root" >/dev/null 2>&1; then
   fail "activate_profile reported success while merging a malformed existing config"
 fi

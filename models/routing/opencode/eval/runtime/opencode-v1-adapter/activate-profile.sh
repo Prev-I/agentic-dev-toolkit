@@ -19,7 +19,7 @@ activate_profile() {
   done
   [[ -n "$repo_profile" && -n "$targets" && -n "$config_root" && -n "$backup_root" ]] || return 2
 
-  local target stamp backup_dir before_hash after_hash commit
+  local target stamp backup_dir before_hash after_hash commit source_hash
   target=$(select_activation_target "$config_root") || {
     printf 'activate_profile: ambiguous activation root — both opencode.json and opencode.jsonc exist\n' >&2
     return 1
@@ -27,9 +27,10 @@ activate_profile() {
   [[ -f "$target" ]] || { printf 'activate_profile: no existing global config at %s\n' "$target" >&2; return 1; }
 
   stamp=$(date +%Y%m%dT%H%M%S%z)
-  backup_dir="$backup_root/phase-r-$stamp"
+  backup_dir="$backup_root/routing-$stamp"
   before_hash=$(sha256sum "$target" | cut -d' ' -f1)
   commit=$(git -C "$(dirname "$repo_profile")" rev-parse HEAD 2>/dev/null || printf unknown)
+  source_hash=$(sha256sum "$repo_profile" | cut -d' ' -f1)
 
   if (( dry_run )); then
     printf 'dry_run=1\ntarget=%s\nbefore_sha256=%s\n' "$target" "$before_hash"
@@ -44,7 +45,7 @@ activate_profile() {
   merged=$(mktemp "$(dirname "$target")/.activate-profile.XXXXXX")
   if ! REPO_JSON=$(load_routing_profile "$repo_profile") \
   GLOBAL_JSON=$(load_routing_profile "$target") \
-  TARGETS="$targets" COMMIT="$commit" STAMP="$stamp" \
+  TARGETS="$targets" COMMIT="$commit" STAMP="$stamp" SOURCE_HASH="$source_hash" \
     python3 - "$merged" <<'PY'
 import datetime
 import json
@@ -66,17 +67,19 @@ for role in roles:
 
 undeclared = sorted(set(document["agent"]) - set(roles))
 header = [
-    "// OpenCode V1 routing — ACTIVATED BY PHASE R. Generated file.",
+    "// OpenCode V1 routing - activated profile. Generated file.",
     "//",
     f"// profile_id: {targets['profile_id']}",
     f"// source_commit: {os.environ['COMMIT']}",
+    f"// source_profile_sha256: {os.environ['SOURCE_HASH']}",
+    "// source_commit is context only; the digest identifies possibly uncommitted source.",
     f"// activated_at: {datetime.datetime.now().astimezone().isoformat()}",
     f"// activation_stamp: {os.environ['STAMP']}",
     "//",
     "// Routing-owned keys (model, permission.task, and the eleven agent rows)",
     "// come from the repository profile. Every other setting was preserved from",
     "// the previous user-global configuration. The pre-activation file, with its",
-    "// original comments, is retained verbatim in the Phase-R backup directory.",
+    "// original comments, is retained verbatim in the routing backup directory.",
 ]
 if undeclared:
     header += ["//", f"// NOTE: undeclared agent rows preserved unchanged: {', '.join(undeclared)}"]
@@ -95,7 +98,7 @@ PY
   after_hash=$(sha256sum "$target" | cut -d' ' -f1)
 
   BACKUP_DIR="$backup_dir" TARGET="$target" BEFORE="$before_hash" AFTER="$after_hash" \
-    COMMIT="$commit" python3 - "$backup_dir/manifest.json" <<'PY'
+    COMMIT="$commit" SOURCE_HASH="$source_hash" python3 - "$backup_dir/manifest.json" <<'PY'
 import datetime
 import json
 import os
@@ -103,12 +106,14 @@ import sys
 
 document = {
     "created_at": datetime.datetime.now().astimezone().isoformat(),
-    "purpose": "Phase R operational safety copy — not a supported rollback strategy",
+    "purpose": "Routing activation safety copy - not a supported rollback strategy",
     "backup_dir": os.environ["BACKUP_DIR"],
     "activation_target": os.environ["TARGET"],
     "pre_activation_sha256": os.environ["BEFORE"],
     "post_activation_sha256": os.environ["AFTER"],
     "source_commit": os.environ["COMMIT"],
+    "source_profile_sha256": os.environ["SOURCE_HASH"],
+    "source_commit_is_complete_provenance": False,
     "committed_to_repository": False,
 }
 with open(sys.argv[1], "w", encoding="utf-8") as handle:

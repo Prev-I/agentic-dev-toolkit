@@ -1,0 +1,37 @@
+{
+  "profile_id": "v1-user-selected-2026-09-07",
+  "activated_at": "2026-09-07T22:16:34+02:00",
+  "verified_at": "2026-09-07T22:17:34.879856+02:00",
+  "runtime_version": "1.18.29",
+  "source_profile": "opencode.jsonc",
+  "source_profile_sha256": "c9d8ddabe274cd53a903a45e13c8ceff19d870861bb99633e5dff6b3673cb033",
+  "source_worktree_uncommitted": true,
+  "activation_target": "~/.config/opencode/opencode.jsonc",
+  "backup_directory": "~/.config/opencode/backups/routing-20260907T221634+0200",
+  "backed_up_files": ["opencode.jsonc", "model-routing.md"],
+  "pre_activation_sha256": "bd96c94db65c6a6bfe2d401a3f58485f91deb3b38405d0e53c5f39f53908b30e",
+  "post_activation_sha256": "386698f1a6a2d03845b6d32494f410011a33b76aadfc54f34becfd7e6c3b9abe",
+  "alignment_status": "ALIGNED",
+  "effective_routing_status": "PASS",
+  "effective_roles_verified": 11,
+  "project_overrides": [],
+  "changed_roles": {
+    "build": {"model": "github-copilot/gpt-5.6-sol", "variant": "high"},
+    "reviewer": {"model": "github-copilot/claude-opus-5", "variant": "high"},
+    "expert": {"model": "openai/gpt-6-astra", "variant": "xhigh"}
+  },
+  "default_model": "github-copilot/gpt-5.6-sol",
+  "verification": {
+    "mechanism": "Fresh opencode debug agent in neutral and toolkit project directories; changed roles also checked in the invoking project",
+    "global_parsed_diff": "Only approved three role model values and default changed",
+    "permissions_and_unrelated_configuration_preserved": true,
+    "installer_suite": "PASS",
+    "repository_policy_suite": "PASS",
+    "doctor_suite": "148 passed, 0 failed",
+    "routing_suite": "PASS"
+  },
+  "paid_model_calls": 0,
+  "inference_verified": false,
+  "full_global_config_committed": false,
+  "restart_required": true
+}

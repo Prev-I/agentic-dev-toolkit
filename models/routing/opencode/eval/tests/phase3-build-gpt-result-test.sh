@@ -83,11 +83,13 @@ assert manifest["final_decision"] == adj["final_decision"]
 assert abs(manifest["credits_consumed"] - adj["budget"]["consumed_credits"]) < 1e-6
 '
 
-# --- production routing files were never touched by this experiment ---
-# 'profiles/' (not just the one named snapshot file) so any profile, present
-# or future, is covered -- not only the canonical restored baseline.
-git -C "$root/.." diff --name-only main -- \
-  'profiles/' 'opencode.jsonc' | \
-  grep -q . && fail "experiment touched a production routing file" || true
+# Check the experiment's own commit, not later authorized routing changes.
+experiment_commit=811b721438efe2a5cc99a804e4561f8d4db4076f
+if git -C "$root/.." cat-file -e "${experiment_commit}^" 2>/dev/null; then
+  git -C "$root/.." diff --quiet "${experiment_commit}^" "$experiment_commit" -- \
+    'profiles/' 'opencode.jsonc' || fail "experiment touched a production routing file"
+else
+  printf 'NOTE: experiment commit unavailable; historical scope assertion not evaluated\n' >&2
+fi
 
 printf 'PASS: Phase-3 Build Opus-vs-Sol result is independently re-derivable from raw evidence\n'

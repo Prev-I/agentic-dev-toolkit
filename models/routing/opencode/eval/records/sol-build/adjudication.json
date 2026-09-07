@@ -1,0 +1,37 @@
+{
+  "experiment_id": "sol-high-path-guards-20260907",
+  "status": "COMPLETE",
+  "decision": "SOL_COMPLETED_WITH_CONTRACT_DEFECT; NO_ROUTING_PROMOTION",
+  "model": "github-copilot/gpt-5.6-sol",
+  "variant": "high",
+  "session": "ses_f843c26f4ffeeo7u4WIspfE171",
+  "dispatch_classification": "OK",
+  "dispatches": 1,
+  "completed_steps": 18,
+  "observed_credits": 98.64568,
+  "approved_cap": 500,
+  "unused_credits_closed": 401.35432,
+  "wall_clock_ms": 216400,
+  "frozen_oracle": "PASS",
+  "original_suite": "PASS",
+  "candidate_suite": "PASS",
+  "historical_mutation": "DETECTED",
+  "syntax": "PASS",
+  "scope": "Only installer and tests changed; adapter unchanged; no delegation or approval pause.",
+  "post_review_diagnostic": "Entirely empty PATH loses its empty/current-directory entry at bootstrap, generated block and refresh. FAIL on Sol, PASS on saved Astra and known-good reference. This diagnostic was added after review, not part of frozen oracle.",
+  "review_findings": [
+    {"severity": "important", "issue": "PATH=\"$managed_dir${PATH:+:$PATH}\" omits the delimiter when PATH is empty, contrary to preservation of existing entries. Same logic in generated block; all three sites affected. Do not adopt unchanged."},
+    {"severity": "minor", "issue": "Generated block uses and unsets _adt_path_dir, potentially clobbering a same-named existing user variable."}
+  ],
+  "test_coverage_comparison": "Sol retains existing test invocations and does not add Astra's suite-wide ADT_FORCE_WSL=0. Its own tests and frozen oracle omit entirely empty PATH, so they miss the reproduced defect.",
+  "comparison": [
+    {"model": "gpt-5.6-sol high", "task_credits": 98.64568, "active_ms": 216400, "result": "Completed fresh; frozen checks pass; empty-PATH contract defect."},
+    {"model": "gpt-6-astra high", "task_credits": 157.69525, "active_ms": 165966, "result": "Completed after resumption; production checks including empty PATH pass; WSL test-coverage regression."},
+    {"model": "claude-opus-5 high", "task_credits": 169.517375, "active_ms": 208883, "result": "Unfinished after budget stops; no completed production implementation."}
+  ],
+  "comparison_limit": "Unequal stop thresholds and fresh versus interrupted/resumed sessions. One historical task. Cost/time are descriptive, not a controlled efficiency or general quality ranking. Prior tiny-fixture results excluded from task totals.",
+  "cost_scope": "Sum raw step_finish costs multiplied by 100 using existing harness. Not billing-UI reconciliation; parent orchestration/review usage is not exposed and excluded.",
+  "candidate_repaired": false,
+  "routing_changed": false,
+  "recommendation": "Sol is a viable Build contender with explicit implementation authorization, not disqualified by earlier approval stops. It and Astra each have a different substantive finding. Preserve submissions, keep routing unchanged, and require broader completed evidence before selecting a main Build replacement."
+}

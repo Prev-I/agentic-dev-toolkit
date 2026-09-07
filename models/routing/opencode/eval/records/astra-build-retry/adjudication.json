@@ -1,0 +1,19 @@
+{
+  "experiment_id": "astra-path-guards-resume-500-20260907",
+  "status": "COMPLETE",
+  "decision": "ASTRA_COMPLETED_WITH_TEST_COVERAGE_FINDING; COMPARATIVE_QUALITY_INCONCLUSIVE",
+  "arms": [
+    {"arm": "arm-a", "model": "github-copilot/gpt-6-astra", "continuation_classification": "OK", "continuation_credits": 85.44705, "continuation_ms": 126489, "task_total_credits": 157.69525, "task_total_ms": 165966, "independent_oracle": "PASS", "original_suite": "PASS", "candidate_suite": "PASS", "historical_mutation": "DETECTED", "review": "Production behavior correct; global ADT_FORCE_WSL=0 in candidate tests weakens existing WSL verification coverage. Submission preserved, not repaired."},
+    {"arm": "arm-b", "model": "github-copilot/claude-opus-5", "continuation_classification": "BUDGET_STOP", "raw_classification": "TIMEOUT", "continuation_credits": 95.766225, "continuation_ms": 83313, "task_total_credits": 169.517375, "task_total_ms": 208883, "independent_oracle": "FAIL_UNIMPLEMENTED", "candidate_suite": "FAIL_EXPECTED_RED", "production_changed": false, "review": "Budget-stopped after adding regressions; not classified as a coding failure."}
+  ],
+  "retry_credits": 181.213275,
+  "previous_recorded_credits": 292.657475,
+  "combined_recorded_credits": 473.87075,
+  "approved_total_cap": 500,
+  "remaining_recorded_allowance": 26.12925,
+  "live_continuations": 2,
+  "cost_scope": "Only newly emitted step_finish costs summed for each continuation. Original phases added separately. Interrupted in-flight billing and parent orchestration/review usage not exposed; not billing-UI reconciliation.",
+  "recommendation": "Astra is a viable Build contender under explicit implementation authorization. Evidence favors its completion within this bounded resumed-task budget, not a general coding-quality win over unfinished Opus. No automatic routing promotion; test-isolation change needs revision before patch adoption.",
+  "routing_changed": false,
+  "candidate_repaired_by_evaluator": false
+}

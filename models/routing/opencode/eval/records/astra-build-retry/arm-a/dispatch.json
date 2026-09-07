@@ -1,0 +1,35 @@
+{
+  "timestamp": "2026-09-07T12:40:29.119747+02:00",
+  "label": "arm-a",
+  "attempt": 1,
+  "routing_profile_id": "v1-restored-2026-09",
+  "routing_profile_commit": "eca1f81ee689cead79a2a6d140a9eab3b417f27b",
+  "runtime_version": "1.18.29",
+  "eval_runner_version": "phase-r-dispatch-v1",
+  "environment": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+  "dispatch_target": "github-copilot/gpt-6-astra",
+  "variant": "high",
+  "timeout_seconds": 480,
+  "exit_status": 0,
+  "classification": "OK",
+  "failure_class": null,
+  "provider_error_text": null,
+  "provider_status_code": null,
+  "observed_cost": 0.8544704999999999,
+  "derived_credits": 85.44704999999999,
+  "normalized_steady_state_cost": null,
+  "tokens": {
+    "total": 56188,
+    "input": 244,
+    "output": 135,
+    "reasoning": 0,
+    "cache": {
+      "write": 0,
+      "read": 55809
+    }
+  },
+  "wall_clock_ms": 126489,
+  "retry_count": 0,
+  "raw_evidence": "raw.jsonl",
+  "decides_gate_outcome": false
+}

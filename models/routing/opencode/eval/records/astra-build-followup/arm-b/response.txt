@@ -1,0 +1,4 @@
+I'll start by exploring the snapshot to understand the current state.
+Using test-driven-development to drive this change. Let me read the files.
+Now the test suite.
+Now I have a clear picture. Let me plan the work.

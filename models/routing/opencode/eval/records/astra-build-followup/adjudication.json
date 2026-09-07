@@ -1,0 +1,21 @@
+{
+  "experiment_id": "astra-build-preapproved-path-guards-20260907",
+  "status": "COMPLETE_BUDGET_LIMITED",
+  "decision": "INCONCLUSIVE",
+  "approval_protocol": "Both models proceeded to implementation planning without asking for approval; neither was stopped by brainstorming.",
+  "arms": [
+    {"label": "arm-a", "model": "github-copilot/gpt-6-astra", "classification": "BUDGET_STOP", "raw_dispatch_classification": "TIMEOUT", "credits": 72.2482, "wall_clock_ms": 39477, "completed_steps": 5, "files_changed": 0, "implementation_completed": false},
+    {"label": "arm-b", "model": "github-copilot/claude-opus-5", "classification": "BUDGET_STOP", "raw_dispatch_classification": "TIMEOUT", "credits": 73.75115, "wall_clock_ms": 125570, "completed_steps": 6, "files_changed": 0, "implementation_completed": false}
+  ],
+  "classification_reason": "Each raw stream ends with EVAL_BUDGET_STOP. The wrapper terminates at the first observed completed-step total >=65 credits; the existing dispatcher classifies all exit-143 terminations as TIMEOUT. Neither run reached its 480-second time limit. Preserve raw metadata; use BUDGET_STOP for adjudication.",
+  "followup_dispatches": 2,
+  "followup_credits": 145.99935,
+  "previous_dispatch_credits": 146.658125,
+  "combined_dispatch_credits": 292.657475,
+  "original_cap_credits": 300,
+  "remaining_credits": 7.342525,
+  "cost_scope": "Sum of completed step_finish costs multiplied by 100 using the existing harness, not billing-UI verification. Interrupted in-flight work may not emit a cost record. Parent orchestration/review usage is not exposed and not included.",
+  "functional_conclusion": "No coding-quality comparison possible: both were terminated during inspection/planning, before tests or edits. Unchanged work products retain the historical defect; that is not classified as model coding failure.",
+  "routing_changed": false,
+  "further_paid_runs": "Stopped. Do not use the small remaining reserve for another dispatch."
+}

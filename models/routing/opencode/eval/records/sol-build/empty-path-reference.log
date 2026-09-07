@@ -1,0 +1,3 @@
+PASS empty PATH: bootstrap preserves trailing empty entry
+PASS empty PATH: generated preserves trailing empty entry
+PASS empty PATH: refresh preserves trailing empty entry

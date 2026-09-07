@@ -1,0 +1,14 @@
+{
+  "caps": {
+    "sol_build": 500
+  },
+  "entries": [
+    {
+      "timestamp": "2026-09-07T14:10:43.288434+02:00",
+      "account": "sol_build",
+      "label": "sol-path-guards",
+      "provider": "github-copilot",
+      "credits": 98.64568
+    }
+  ]
+}

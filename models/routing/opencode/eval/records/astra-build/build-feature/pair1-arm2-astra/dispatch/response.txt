@@ -1,0 +1,5 @@
+Using brainstorming to scope this bounded change. I’ll inspect the string helpers and tests, then present a short design without changing `README.md` or `upper`.
+
+I’ll add `reverse` using a Bash loop to reverse the entire argument, preserving whitespace and printing a trailing newline like `upper`. Only `lib/strings.sh` will change; `upper` and `README.md` will remain untouched.
+
+I’ll run both existing tests and check empty strings, spaces, and embedded newlines. Approve this approach?

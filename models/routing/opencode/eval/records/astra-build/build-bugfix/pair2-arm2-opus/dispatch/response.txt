@@ -1,0 +1,18 @@
+I'll start by looking at the file.
+Bug confirmed at `lib/validate.sh:7` — `>= 0` should be `> 0`. Let me verify the failure first.
+Failure reproduced. Applying the one-character fix:
+Both suites pass. Quick extra sanity check on edge inputs:
+Fixed.
+
+**Change:** `lib/validate.sh:7` — `(( $1 >= 0 ))` → `(( $1 > 0 ))`
+
+The regex guard on line 6 already rejects non-integers; the comparison was simply using the wrong operator, letting `0` through as positive.
+
+**Verification:**
+- `tests/acceptance.sh` — failed before (`is_positive(0) must be false`), passes now
+- `tests/regression.sh` — passes (`is_blank` untouched)
+- Spot-checked edge inputs: `0`, `-1`, `-3`, `abc`, `""`, `1.5`, `+2` all reject; `1`, `42` accept
+
+Scope respected: `README.md` and `is_blank` unmodified.
+
+One thing I noticed but deliberately left alone as out of scope: the regex permits leading zeros, so an input like `08` would trip a bash octal-arithmetic error rather than returning false. That's a pre-existing quirk unrelated to this bug — worth a separate fix (`10#$1`) if you want it hardened.

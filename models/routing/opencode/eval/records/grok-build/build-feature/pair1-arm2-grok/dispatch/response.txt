@@ -1,0 +1,5 @@
+I'll load the relevant skills first, then implement `reverse` in `lib/strings.sh`.
+This looks bounded. I'll inspect the existing string helpers, then add `reverse` via TDD without touching `README.md` or `upper`.
+Using TDD. Acceptance already expects `reverse abc` → `cba`. Running it first to confirm red.
+RED confirmed. Adding a minimal `reverse` next to `upper`.
+Added `reverse` to `lib/strings.sh`. Acceptance and regression tests pass.

@@ -1,0 +1,5 @@
+I'll load the debugging and TDD skills first, then fix `is_positive` so it rejects `0`.
+Using systematic debugging and TDD. I'll inspect `is_positive` and its tests first.
+Root cause is `(( $1 >= 0 ))` treating zero as positive. I'll confirm the existing test fails, then apply a surgical fix.
+Existing test fails as expected. Applying the one-line comparison fix.
+Fixed. `is_positive` now uses `(( $1 > 0 ))`, so `0` is rejected. Acceptance and regression tests pass.

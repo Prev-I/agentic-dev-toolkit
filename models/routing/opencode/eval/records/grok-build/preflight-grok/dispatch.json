@@ -1,0 +1,35 @@
+{
+  "timestamp": "2026-09-07T15:09:17.868905+02:00",
+  "label": "preflight-grok",
+  "attempt": 1,
+  "routing_profile_id": "v1-restored-2026-09",
+  "routing_profile_commit": "baf8678c15df3bffffd9887da3fb08b57ecc7036",
+  "runtime_version": "1.18.29",
+  "eval_runner_version": "phase-r-dispatch-v1",
+  "environment": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+  "dispatch_target": "github-copilot/grok-4.6",
+  "variant": "high",
+  "timeout_seconds": 120,
+  "exit_status": 0,
+  "classification": "OK",
+  "failure_class": null,
+  "provider_error_text": null,
+  "provider_status_code": null,
+  "observed_cost": 0.022568,
+  "derived_credits": 2.2568,
+  "normalized_steady_state_cost": null,
+  "tokens": {
+    "total": 11918,
+    "input": 10299,
+    "output": 4,
+    "reasoning": 207,
+    "cache": {
+      "write": 0,
+      "read": 1408
+    }
+  },
+  "wall_clock_ms": 10162,
+  "retry_count": 0,
+  "raw_evidence": "raw.jsonl",
+  "decides_gate_outcome": false
+}

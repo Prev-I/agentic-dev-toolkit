@@ -26,6 +26,8 @@ repository-policy/              `.repository-policy.yaml` format, schema and val
 wsl-toolchain-doctor/           Linux-first PATH and toolchain auditor for WSL
 docs/multi-agent-workspace-guide.md
 docs/wsl-toolchain-doctor.md    Operational documentation for the doctor
+docs/opencode-service.md        Running OpenCode as a persistent service, and
+                                optionally reaching it over HTTPS from the LAN
 tests/install.sh                Test suite for the installer
 tests/repository-policy.sh      Test suite for the policy validator
 tests/wsl-toolchain-doctor.sh   Test suite for the doctor

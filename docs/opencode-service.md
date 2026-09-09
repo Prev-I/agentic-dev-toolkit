@@ -65,24 +65,56 @@ credentials, tool versions and home directory.
 [Unit]
 Description=OpenCode persistent server
 After=network-online.target
+Wants=network-online.target
+
+# These two belong in [Unit], not [Service]. systemd ignores
+# StartLimitIntervalSec in [Service] with an "Unknown key name" warning, while
+# tolerating StartLimitBurst there — so a template that puts both in [Service]
+# keeps a burst with a defaulted 10s window and reads as protected while being
+# inert. Check with `systemd-analyze --user verify` rather than by eye.
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
+WorkingDirectory=%h
 EnvironmentFile=%h/.config/opencode-runtime/secrets.env
+
+# A plugin that keeps its own configuration or control directory outside the
+# OpenCode config directory has to be told where they are. Left unset, it
+# resolves them against whichever config directory it finds and relocates its
+# workspace to an empty scaffold: the server starts, the plugin loads, and none
+# of its state is there. Drop these two lines only if no plugin needs them.
+Environment="OPENCODE_GATEWAY_CONFIG=%h/.config/opencode-gateway/opencode/opencode-gateway.toml"
+Environment="OPENCODE_GATEWAY_CONTROL_DIR=%h/.config/opencode-gateway/opencode/control"
+
 ExecStart=%h/.opencode/bin/opencode web --hostname 127.0.0.1 --port 4096
 ExecStartPost=%h/.local/libexec/opencode/opencode-startup-ready
-Restart=on-failure
-RestartSec=5
-StartLimitIntervalSec=60
-StartLimitBurst=5
+
+Restart=always
+RestartSec=3
+
+# Must exceed the readiness probe's own window, or systemd kills the start
+# before the probe can report which half failed.
+TimeoutStartSec=120
+TimeoutStopSec=20
 
 [Install]
 WantedBy=default.target
 ```
 
-`--hostname 127.0.0.1` is the load-bearing argument. Bounded restart limits
-matter: without them a persistently failing server becomes an invisible tight
-restart loop instead of an obvious stopped unit.
+`--hostname 127.0.0.1` is the load-bearing argument.
+
+`Restart=always` rather than `on-failure`: a clean exit is still an absent
+server, and `on-failure` leaves it stopped.
+
+Bounded restart limits matter, and the window has to be wider than
+`RestartSec` × `StartLimitBurst` or it can never be reached. With
+`RestartSec=3` and a burst of 5, consecutive starts land at t = 0, 3, 6, 9, 12,
+so a 60s window catches the fifth and a persistent failure ends in a visible
+`failed` state. systemd's own default is 10s, which the same sequence outruns —
+the more dangerous state, because the unit then restarts for ever while
+appearing to have a limit configured.
 
 ```bash
 systemctl --user daemon-reload
@@ -137,6 +169,132 @@ plugins have registered, then logs a line per check. Without it, `systemctl
 start` returns as soon as the process exists, and the next command in a script
 races a server that is listening but not ready. Anything that polls the health
 endpoint and the plugin surface, then exits non-zero on timeout, is sufficient.
+
+`opencode-service/opencode-startup-ready.sh` in this repository is one such
+probe. Copy it to the path the unit names:
+
+```bash
+install -D -m 755 opencode-service/opencode-startup-ready.sh \
+  ~/.local/libexec/opencode/opencode-startup-ready
+```
+
+Two things it gets right that are easy to miss. It checks **both** health and
+the registered plugin surface, because a server answers 200 while a plugin that
+failed to initialise is absent — and the server's *declared* configuration
+still lists that plugin, so configuration is not a usable signal. And it never
+calls anything external, so an outage at a message channel a plugin talks to
+cannot fail a start and have systemd restart a healthy server.
+
+Whatever probe you use, keep `TimeoutStartSec` above its window. Left at the
+default the start is killed first, and the probe's own diagnosis — which half
+failed — is what you lose.
+
+### Restarts requested by a plugin
+
+Skip this unless a plugin offers a restart tool — one that reloads skills,
+agents or configuration by replacing the server. The tool cannot do the work
+itself: it lives inside the process that has to be replaced. Plugins in that
+position write a request into a control directory and rely on whatever
+supervises the server to carry it out.
+
+Under `systemd --user` there is no such supervisor. The plugin vendor's own
+launcher normally fills that role, but adopting it here would mean giving up
+`opencode web` for whatever the launcher spawns, and letting it own the config
+directory. So systemd becomes the executor instead, and the missing consumer is
+a path-activated unit.
+
+**Do not simply set the plugin's managed flag.** Whatever variable makes the
+tool believe a supervisor exists, setting it alone is worse than leaving it
+unset: the tool then reports a restart as scheduled and nothing ever performs
+one. The flag and the consumer go in together.
+
+The contract is the control directory, and it is the plugin's, not yours:
+
+```text
+restart-request.json   {requestedAtMs, requestedBy}      written by the plugin
+restart-status.json    {state, requestedAtMs, startedAtMs,
+                        completedAtMs, lastError}         the shared record
+state ∈ pending | restarting | idle | failed
+```
+
+Install the consumer and the pair that triggers it:
+
+```bash
+install -D -m 755 opencode-service/opencode-gateway-restart.sh \
+  ~/.local/libexec/opencode/opencode-gateway-restart
+```
+
+`~/.config/systemd/user/opencode-gateway-restart.service`:
+
+```ini
+[Unit]
+Description=Consume the plugin's restart request and restart the server
+
+# No dependency on the server unit in either direction, deliberately. This unit
+# restarts that one; an edge between them is only a way for the two to deadlock.
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/opencode-runtime/secrets.env
+Environment="OPENCODE_GATEWAY_CONTROL_DIR=%h/.config/opencode-gateway/opencode/control"
+Environment="RESTART_TARGET_UNIT=opencode.service"
+ExecStart=%h/.local/libexec/opencode/opencode-gateway-restart
+
+# `systemctl restart` blocks on the target's start job, which runs the readiness
+# probe, and the idle wait happens before that.
+TimeoutStartSec=600
+```
+
+`~/.config/systemd/user/opencode-gateway-restart.path`:
+
+```ini
+[Unit]
+Description=Watch for a plugin restart request
+
+[Path]
+# The plugin's own trigger, written when a queued turn ends. PathExists is
+# self-healing: systemd re-checks once the consumer goes inactive, so a request
+# arriving mid-restart is not lost.
+PathExists=%h/.config/opencode-gateway/opencode/control/restart-request.json
+
+# The interactive case. The tool records the intent immediately but defers the
+# request file to the next completed queued turn, which for an attached terminal
+# session may never arrive. Edge-triggered, so an intent landing while the
+# consumer already runs can be missed; re-asking is one tool call.
+PathModified=%h/.config/opencode-gateway/opencode/control/restart-status.json
+
+Unit=opencode-gateway-restart.service
+
+[Install]
+WantedBy=default.target
+```
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now opencode-gateway-restart.path
+```
+
+Three properties are worth understanding before trusting it.
+
+**It waits for idle.** The request file appearing proves the *asking* turn
+ended, not that a concurrent one has, so the server is polled until it reports
+no active session — and the target is never restarted while mid-start, which
+would cut off a readiness probe already running. An unanswered poll counts as
+idle: nothing is in flight through an API that is not answering.
+
+**It writes nothing when it finds no work.** The consumer is path-activated on
+files it also writes, so that silence is what stops the trigger chain. Any
+change to it has to preserve that.
+
+**It consumes the request even when it refuses.** A request left in place
+re-triggers the unit for ever. After the idle wait expires the request is
+removed and the reason recorded in `lastError`, where the plugin's own status
+tool will show it.
+
+The contract above is read from a specific plugin release, not from a published
+specification. Re-read it when the plugin is upgraded — and note that the state
+file is shared, so a malformed write surfaces as a broken plugin rather than as
+an absent file. That is why the consumer writes it atomically.
 
 ### On-host clients use loopback
 
@@ -219,6 +377,25 @@ curl -so /dev/null -w '%{http_code}\n' http://127.0.0.1:4096/global/health   # 4
 
 Then restart the machine (or `systemctl --user restart`) and confirm the server
 returns on its own.
+
+If you installed the restart consumer, verify it end to end rather than by
+inspection — write a request of the shape the plugin writes, and watch systemd
+do the rest:
+
+```bash
+CONTROL=~/.config/opencode-gateway/opencode/control
+printf '{"requestedAtMs": %s000, "requestedBy": "test"}\n' "$(date +%s)" \
+  > "$CONTROL/restart-request.json"
+
+systemctl --user show -p MainPID --value opencode.service   # note it, expect a change
+journalctl --user -u opencode-gateway-restart.service -f    # accepted, then restarted
+jq . "$CONTROL/restart-status.json"                         # state=idle, lastError=null
+ls "$CONTROL"                                               # the request is gone
+```
+
+The plugin's own status tool should then report the restart as supported and
+managed. If it reports a restart as scheduled but nothing happens, the managed
+flag is set and the consumer is not.
 
 ## Part 2 — optional TLS LAN edge
 
@@ -472,6 +649,9 @@ reach them.
 - **Verification never uses a bypass flag.** A check that passes only with
   verification disabled has tested nothing.
 - **Credentials pass by environment file, never by argument.**
+- **A capability the server advertises has to work.** A restart tool that
+  reports success and restarts nothing is worse than one that refuses: the
+  refusal is a fact the caller can act on, and the false success is not.
 
 ## References
 
@@ -479,3 +659,9 @@ reach them.
   which Part 1's lingering step depends on.
 - `docs/wsl-toolchain-doctor.md` — PATH and toolchain auditing, for when the
   installed `opencode` is not the one a shell resolves.
+- `opencode-service/opencode-startup-ready.sh` — the readiness probe the unit's
+  `ExecStartPost` runs.
+- `opencode-service/opencode-gateway-restart.sh` — the restart consumer that
+  makes systemd the executor for a plugin-requested restart.
+- `tests/opencode-service.sh` — the suite for both, which stubs `systemctl` and
+  `curl` and needs neither a user manager nor a server.

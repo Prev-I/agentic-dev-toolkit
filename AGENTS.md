@@ -24,6 +24,8 @@ instructions/                   AGENTS.md pattern shipped to other projects
 models/routing/opencode/        Model-routing config bundle for OpenCode
 repository-policy/              `.repository-policy.yaml` format, schema and validator
 wsl-toolchain-doctor/           Linux-first PATH and toolchain auditor for WSL
+opencode-service/               Scripts a persistent OpenCode server's units run:
+                                a readiness probe and a restart consumer
 docs/multi-agent-workspace-guide.md
 docs/wsl-toolchain-doctor.md    Operational documentation for the doctor
 docs/opencode-service.md        Running OpenCode as a persistent service, and
@@ -31,6 +33,7 @@ docs/opencode-service.md        Running OpenCode as a persistent service, and
 tests/install.sh                Test suite for the installer
 tests/repository-policy.sh      Test suite for the policy validator
 tests/wsl-toolchain-doctor.sh   Test suite for the doctor
+tests/opencode-service.sh       Test suite for the service scripts
 ```
 
 **`instructions/AGENTS.md` is a deliverable, not this file.** It is the template
@@ -46,14 +49,17 @@ There is no build step and no package manager.
 bash tests/install.sh                   # the installer suite
 bash tests/repository-policy.sh         # the policy validator suite
 bash tests/wsl-toolchain-doctor.sh      # the WSL toolchain doctor suite
+bash tests/opencode-service.sh          # the service scripts suite
 bash models/routing/opencode/eval/run-tests.sh   # the routing eval suite
 bash -n environments/linux/install.sh   # syntax check
 shellcheck environments/linux/install.sh tests/install.sh \
   tests/repository-policy.sh repository-policy/validate.sh \
-  wsl-toolchain-doctor/wsl-toolchain-doctor.sh tests/wsl-toolchain-doctor.sh
+  wsl-toolchain-doctor/wsl-toolchain-doctor.sh tests/wsl-toolchain-doctor.sh \
+  opencode-service/opencode-startup-ready.sh \
+  opencode-service/opencode-gateway-restart.sh tests/opencode-service.sh
 ```
 
-All four suites are expected to be run and reported together; the evidence
+All five suites are expected to be run and reported together; the evidence
 documents under `models/routing/opencode/docs/` transcribe them that way.
 
 `tests/install.sh` sources the installer's functions by stripping its final

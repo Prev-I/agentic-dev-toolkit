@@ -300,6 +300,34 @@ Two such directories are load-bearing on a WSL development machine, and disablin
 
 Without the editor entry, `code .` works only inside VS Code's own integrated terminal, where the server exports `VSCODE_IPC_HOOK_CLI` and its bundled `remote-cli/code` shim resolves. From a plain WSL terminal there is no such shim, and the version-hashed server path is not stable enough to put on `PATH`.
 
+### Putting an allowlisted directory back on PATH
+
+The allowlist decides what the audit tolerates; it does not add anything. Nothing on the Linux side puts these directories on `PATH` once `appendWindowsPath` is off — Rancher Desktop's WSL integration mounts the daemon socket and writes `~/.docker/config.json` but never touches `PATH`, and VS Code only injects its shim inside its own integrated terminal. That step is the machine's, and its shape is the same for both:
+
+```bash
+# >>> vscode >>>
+__vscode_bin='/mnt/c/Program Files/Microsoft VS Code/bin'
+if [ -d "$__vscode_bin" ]; then
+  case ":$PATH:" in
+    *":$__vscode_bin:"*) ;;
+    *) PATH="$PATH:$__vscode_bin" ;;
+  esac
+fi
+unset __vscode_bin
+export PATH
+# <<< vscode <<<
+```
+
+Three properties are deliberate, and all three are what the audit expects to see:
+
+- **appended, never prepended** — a DrvFs segment early in `PATH` slows every command lookup in the shell, and a launcher is not worth that;
+- **guarded on `-d`** — an uninstall, or a per-user install at a different location, leaves no dangling entry and no `PATH_ENTRY_MISSING`;
+- **idempotent** — the `case` re-source guard keeps a second `source ~/.bashrc` from growing `PATH`, which would otherwise show up as `PATH_DUPLICATE`.
+
+Keep such a block *outside* any installer-managed region of the profile: `environments/linux/install.sh` rewrites its own `# >>> agentic-dev-toolkit >>>` block wholesale and does not own these paths, so a block placed inside it is lost on the next install.
+
+The profile audit reads these lines as text and reports `SHELL_PROFILE_ALLOWLISTED_PATH` when it can see an allowlisted directory literally on a `PATH=` line. A block like the one above assigns through a variable, so no finding is emitted for it either way — the entry is still checked, on the live `PATH`, as `PATH_ALLOWLISTED_WINDOWS`.
+
 Extend the list for a single machine with `WTD_PATH_ALLOW`, colon-separated, matched as case-insensitive path substrings so a non-default install location still matches:
 
 ```bash

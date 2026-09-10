@@ -56,6 +56,7 @@ INTERVAL="${RESTART_IDLE_INTERVAL:-3}"
 HOST="${READY_HOST:-127.0.0.1}"
 PORT="${READY_PORT:-4096}"
 
+readonly SCRIPT_VERSION="0.1.0"
 readonly REQUEST="$CONTROL_DIR/restart-request.json"
 readonly STATUS="$CONTROL_DIR/restart-status.json"
 readonly BASE="http://${HOST}:${PORT}"
@@ -145,6 +146,11 @@ wait_until_idle() {
 }
 
 main() {
+  if [[ "${1:-}" == "--version" ]]; then
+    printf '%s\n' "$SCRIPT_VERSION"
+    exit 0
+  fi
+
   local requested started message
 
   requested="$(find_work)" || return 0

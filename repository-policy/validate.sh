@@ -19,6 +19,7 @@ IFS=$'\n\t'
 
 COMPONENT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly COMPONENT_ROOT
+readonly SCRIPT_VERSION="0.1.0"
 readonly SCHEMA="$COMPONENT_ROOT/schema/repository-policy.v1.schema.json"
 readonly DEFAULT_POLICY_FILE=".repository-policy.yaml"
 
@@ -68,6 +69,10 @@ main() {
       -h|--help)
         usage
         exit 2
+        ;;
+      --version)
+        printf '%s\n' "$SCRIPT_VERSION"
+        exit 0
         ;;
       -*)
         printf 'unknown option: %s\n' "$argument" >&2

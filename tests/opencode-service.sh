@@ -436,6 +436,37 @@ test_shipped_scripts_are_executable_and_syntactically_valid() {
   done
 }
 
+test_service_helpers_declare_and_print_their_versions() {
+  local script
+  for script in "$CONSUMER" "$READY"; do
+    grep -qE '^readonly SCRIPT_VERSION="[0-9]+\.[0-9]+\.[0-9]+"$' "$script" \
+      || fail "$script must declare a semantic SCRIPT_VERSION"
+
+    local output status
+    set +e
+    output="$(bash "$script" --version 2>&1)"
+    status=$?
+    set -e
+
+    assert_equal "$status" "0" "$script --version must exit 0"
+    assert_equal "$output" "0.1.0" "$script --version must print the version"
+  done
+}
+
+test_service_helpers_survive_no_arguments_under_set_u() {
+  # The systemd units invoke these with no arguments at all. The --version
+  # guard must not dereference an unset $1, and its false path must not
+  # terminate the script under set -e.
+  local script output
+  for script in "$CONSUMER" "$READY"; do
+    output="$(bash "$script" 2>&1 || true)"
+    [[ "$output" != *"unbound variable"* ]] \
+      || fail "$script must not dereference an unset \$1"
+    [[ "$output" != *"--version"* ]] \
+      || fail "$script must not print version output with no arguments"
+  done
+}
+
 TEMP_DIR="$(mktemp -d)"
 install_stubs
 test_no_work_writes_nothing
@@ -454,5 +485,7 @@ test_server_readiness_accepts_an_explicit_plugin_marker
 test_telegram_readiness_requires_polling_and_opencode
 test_telegram_readiness_requires_systemd_invocation_id
 test_shipped_scripts_are_executable_and_syntactically_valid
+test_service_helpers_declare_and_print_their_versions
+test_service_helpers_survive_no_arguments_under_set_u
 
 printf 'PASS: opencode service tests\n'

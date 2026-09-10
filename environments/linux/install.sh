@@ -9,75 +9,11 @@ readonly CODEX_INSTALL_URL="https://chatgpt.com/codex/install.sh"
 readonly SUPERPOWERS_PLUGIN_BASE='superpowers@git+https://github.com/obra/superpowers.git'
 readonly KARPATHY_RAW_BASE='https://raw.githubusercontent.com/multica-ai/andrej-karpathy-skills'
 readonly KARPATHY_SKILL_PATH='skills/karpathy-guidelines/SKILL.md'
-readonly KARPATHY_DEFAULT_REF='2c606141936f1eeef17fa3043a72095b4765b9c2'
-readonly KARPATHY_DEFAULT_SHA256='6e22cc54cb02a5e98ae42d06d9d7292db0c1b43894831b32879beb0166b2aea7'
-
-DRY_RUN=0
-UPGRADE=0
-VERIFY_ONLY=0
-SKIP_PLATFORM_CHECK=0
-REMOVE_APT_NODE=0
-REPAIR_CODEX=0
-PROJECT_PATH=""
-
-SKIP_RUNTIMES=0
-SKIP_OPENCODE=0
-SKIP_CLAUDE=0
-SKIP_CODEX=0
-SKIP_OPENSPEC=0
-SKIP_SUPERPOWERS=0
-SKIP_KARPATHY=0
-SKIP_QUALITY_TOOLS=0
-SKIP_GIT_CREDENTIAL=0
-
-JAVA_21_VERSION="${ADT_JAVA_21_VERSION:-temurin-21}"
-JAVA_17_VERSION="${ADT_JAVA_17_VERSION:-temurin-17}"
-DOTNET_10_VERSION="${ADT_DOTNET_10_VERSION:-10}"
-DOTNET_8_VERSION="${ADT_DOTNET_8_VERSION:-8}"
-PYTHON_VERSION="${ADT_PYTHON_VERSION:-3.12}"
-NODE_VERSION="${ADT_NODE_VERSION:-24}"
-BUN_VERSION="${ADT_BUN_VERSION:-1}"
-MAVEN_VERSION="${ADT_MAVEN_VERSION:-3.9.16}"
-DOTNET_EF_VERSION="${ADT_DOTNET_EF_VERSION:-latest}"
-UV_VERSION="${ADT_UV_VERSION:-latest}"
-OPENSPEC_VERSION="${ADT_OPENSPEC_VERSION:-1.9.0}"
-SUPERPOWERS_REF="${ADT_SUPERPOWERS_REF:-v6.3.0}"
-KARPATHY_REF="${ADT_KARPATHY_REF:-$KARPATHY_DEFAULT_REF}"
-KARPATHY_SHA256="${ADT_KARPATHY_SHA256:-}"
-OPENSPEC_TOOLS="${ADT_OPENSPEC_TOOLS:-opencode,claude,codex}"
-SHELLCHECK_VERSION="${ADT_SHELLCHECK_VERSION:-latest}"
-GITLEAKS_VERSION="${ADT_GITLEAKS_VERSION:-latest}"
-PYYAML_VERSION="${ADT_PYYAML_VERSION:-latest}"
-
-XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
-XDG_CONFIG_HOME="${XDG_CONFIG_HOME%/}"
-MISE_BIN="${MISE_BIN:-$HOME/.local/bin/mise}"
-MISE_TOOLCHAIN_CONFIG="${MISE_TOOLCHAIN_CONFIG:-$XDG_CONFIG_HOME/mise/conf.d/agentic-dev-toolkit.toml}"
-OPENCODE_CONFIG="${OPENCODE_CONFIG:-$XDG_CONFIG_HOME/opencode/opencode.json}"
-CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
-CODEX_STANDALONE_ROOT="$CODEX_HOME/packages/standalone"
-GCM_WINDOWS_PATH="${ADT_GCM_PATH:-/mnt/c/Program Files/Git/mingw64/bin/git-credential-manager.exe}"
-GIT_CREDENTIAL_WRAPPER="${GIT_CREDENTIAL_WRAPPER:-$HOME/.local/bin/git-credential-manager-wsl}"
-
-# Prepend a directory to PATH only when it exists and is not already present.
-# Ubuntu's stock ~/.profile guards $HOME/bin and $HOME/.local/bin the same way;
-# prepending them unconditionally duplicates $HOME/.local/bin and inserts
-# $HOME/bin on the many machines that do not have one.
-prepend_path() {
-  [[ -d "$1" ]] || return 0
-  case ":$PATH:" in
-    *":$1:"*) return 0 ;;
-  esac
-  PATH="$1:$PATH"
-}
-
-prepend_path "$HOME/.opencode/bin"
-prepend_path "$HOME/bin"
-prepend_path "$HOME/.local/bin"
-export PATH
-
-TEMP_PATHS=()
-DOWNLOADED_INSTALLER=""
+# The installer's own version, declared with the other constants for parity
+# with the repository's other versioned scripts. Nothing reads it yet, hence
+# the unused-variable exemption below.
+# shellcheck disable=SC2034
+readonly SCRIPT_VERSION="0.1.0"
 
 log() {
   printf '\n==> %s\n' "$*"
@@ -95,6 +31,53 @@ die() {
   printf 'ERROR: %s\n' "$*" >&2
   exit 1
 }
+
+TEMP_PATHS=()
+DOWNLOADED_INSTALLER=""
+
+quote_command() {
+  printf '+'
+  printf ' %q' "$@"
+  printf '\n'
+}
+
+run() {
+  quote_command "$@"
+  if (( DRY_RUN == 0 )); then
+    "$@"
+  fi
+}
+
+run_sudo() {
+  quote_command sudo "$@"
+  if (( DRY_RUN == 0 )); then
+    sudo "$@"
+  fi
+}
+
+cleanup() {
+  local path
+  for path in "${TEMP_PATHS[@]:-}"; do
+    [[ -n "$path" ]] && rm -f -- "$path" 2>/dev/null || true
+  done
+}
+
+on_error() {
+  local exit_code=$?
+  local line_no="${BASH_LINENO[0]:-unknown}"
+  printf '\nERROR: setup failed near line %s (exit code %s).\n' "$line_no" "$exit_code" >&2
+  exit "$exit_code"
+}
+
+trap cleanup EXIT
+trap on_error ERR
+
+# Diagnostics and traps are defined above this point on purpose: resolving the
+# root is I/O and can fail, and a failure there must be reportable.
+ADT_INSTALL_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)" ||
+  die "cannot resolve the toolkit root from ${BASH_SOURCE[0]}"
+readonly ADT_INSTALL_ROOT
+ADT_CATALOG_FILE="${ADT_CATALOG_FILE:-$ADT_INSTALL_ROOT/catalog/software-catalog.env}"
 
 # CATALOG_LINES, CATALOG_ORDER and CATALOG_ERROR are populated by name
 # through load_kv_file's namerefs; shellcheck cannot trace that indirection.
@@ -202,42 +185,98 @@ catalog_value() {
   printf '%s' "${CATALOG[$1]:?missing catalog key: $1}"
 }
 
-quote_command() {
-  printf '+'
-  printf ' %q' "$@"
-  printf '\n'
+# Called directly in this shell. Never inside a command substitution, pipeline
+# or subshell: the arrays are populated through namerefs and would die with it,
+# leaving an empty catalog behind a zero exit status.
+if ! load_kv_file "$ADT_CATALOG_FILE" CATALOG CATALOG_LINES CATALOG_ORDER CATALOG_ERROR; then
+  die "$CATALOG_ERROR"
+fi
+
+# validate_kv reads these three by name through its namerefs.
+# shellcheck disable=SC2034
+CATALOG_REQUIRED=(
+  java-17 java-21 dotnet-10 dotnet-8 python node bun maven
+  dotnet-ef uv shellcheck gitleaks pyyaml openspec superpowers
+  karpathy-ref karpathy-sha256
+)
+# shellcheck disable=SC2034
+declare -gA CATALOG_NO_LISTS=() CATALOG_NO_MEMBERS=()
+validate_kv "$ADT_CATALOG_FILE" CATALOG CATALOG_LINES CATALOG_ORDER \
+  CATALOG_REQUIRED CATALOG_NO_LISTS CATALOG_NO_MEMBERS
+
+JAVA_21_VERSION="${ADT_JAVA_21_VERSION:-$(catalog_value java-21)}"
+JAVA_17_VERSION="${ADT_JAVA_17_VERSION:-$(catalog_value java-17)}"
+DOTNET_10_VERSION="${ADT_DOTNET_10_VERSION:-$(catalog_value dotnet-10)}"
+DOTNET_8_VERSION="${ADT_DOTNET_8_VERSION:-$(catalog_value dotnet-8)}"
+PYTHON_VERSION="${ADT_PYTHON_VERSION:-$(catalog_value python)}"
+NODE_VERSION="${ADT_NODE_VERSION:-$(catalog_value node)}"
+BUN_VERSION="${ADT_BUN_VERSION:-$(catalog_value bun)}"
+MAVEN_VERSION="${ADT_MAVEN_VERSION:-$(catalog_value maven)}"
+DOTNET_EF_VERSION="${ADT_DOTNET_EF_VERSION:-$(catalog_value dotnet-ef)}"
+UV_VERSION="${ADT_UV_VERSION:-$(catalog_value uv)}"
+OPENSPEC_VERSION="${ADT_OPENSPEC_VERSION:-$(catalog_value openspec)}"
+SUPERPOWERS_REF="${ADT_SUPERPOWERS_REF:-$(catalog_value superpowers)}"
+OPENSPEC_TOOLS="${ADT_OPENSPEC_TOOLS:-opencode,claude,codex}"
+SHELLCHECK_VERSION="${ADT_SHELLCHECK_VERSION:-$(catalog_value shellcheck)}"
+GITLEAKS_VERSION="${ADT_GITLEAKS_VERSION:-$(catalog_value gitleaks)}"
+PYYAML_VERSION="${ADT_PYYAML_VERSION:-$(catalog_value pyyaml)}"
+
+# The mapping is deliberately asymmetric. The catalog digest is the default of
+# KARPATHY_DEFAULT_SHA256 only: KARPATHY_SHA256, the user override, still
+# defaults to empty. Were the digest its default, a custom ref would silently
+# acquire the digest of a different artefact and the refusal to install an
+# unverified ref would never fire.
+KARPATHY_DEFAULT_REF="$(catalog_value karpathy-ref)"
+readonly KARPATHY_DEFAULT_REF
+KARPATHY_DEFAULT_SHA256="$(catalog_value karpathy-sha256)"
+readonly KARPATHY_DEFAULT_SHA256
+KARPATHY_REF="${ADT_KARPATHY_REF:-$KARPATHY_DEFAULT_REF}"
+KARPATHY_SHA256="${ADT_KARPATHY_SHA256:-}"
+
+DRY_RUN=0
+UPGRADE=0
+VERIFY_ONLY=0
+SKIP_PLATFORM_CHECK=0
+REMOVE_APT_NODE=0
+REPAIR_CODEX=0
+PROJECT_PATH=""
+
+SKIP_RUNTIMES=0
+SKIP_OPENCODE=0
+SKIP_CLAUDE=0
+SKIP_CODEX=0
+SKIP_OPENSPEC=0
+SKIP_SUPERPOWERS=0
+SKIP_KARPATHY=0
+SKIP_QUALITY_TOOLS=0
+SKIP_GIT_CREDENTIAL=0
+
+XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+XDG_CONFIG_HOME="${XDG_CONFIG_HOME%/}"
+MISE_BIN="${MISE_BIN:-$HOME/.local/bin/mise}"
+MISE_TOOLCHAIN_CONFIG="${MISE_TOOLCHAIN_CONFIG:-$XDG_CONFIG_HOME/mise/conf.d/agentic-dev-toolkit.toml}"
+OPENCODE_CONFIG="${OPENCODE_CONFIG:-$XDG_CONFIG_HOME/opencode/opencode.json}"
+CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+CODEX_STANDALONE_ROOT="$CODEX_HOME/packages/standalone"
+GCM_WINDOWS_PATH="${ADT_GCM_PATH:-/mnt/c/Program Files/Git/mingw64/bin/git-credential-manager.exe}"
+GIT_CREDENTIAL_WRAPPER="${GIT_CREDENTIAL_WRAPPER:-$HOME/.local/bin/git-credential-manager-wsl}"
+
+# Prepend a directory to PATH only when it exists and is not already present.
+# Ubuntu's stock ~/.profile guards $HOME/bin and $HOME/.local/bin the same way;
+# prepending them unconditionally duplicates $HOME/.local/bin and inserts
+# $HOME/bin on the many machines that do not have one.
+prepend_path() {
+  [[ -d "$1" ]] || return 0
+  case ":$PATH:" in
+    *":$1:"*) return 0 ;;
+  esac
+  PATH="$1:$PATH"
 }
 
-run() {
-  quote_command "$@"
-  if (( DRY_RUN == 0 )); then
-    "$@"
-  fi
-}
-
-run_sudo() {
-  quote_command sudo "$@"
-  if (( DRY_RUN == 0 )); then
-    sudo "$@"
-  fi
-}
-
-cleanup() {
-  local path
-  for path in "${TEMP_PATHS[@]:-}"; do
-    [[ -n "$path" ]] && rm -f -- "$path" 2>/dev/null || true
-  done
-}
-
-on_error() {
-  local exit_code=$?
-  local line_no="${BASH_LINENO[0]:-unknown}"
-  printf '\nERROR: setup failed near line %s (exit code %s).\n' "$line_no" "$exit_code" >&2
-  exit "$exit_code"
-}
-
-trap cleanup EXIT
-trap on_error ERR
+prepend_path "$HOME/.opencode/bin"
+prepend_path "$HOME/bin"
+prepend_path "$HOME/.local/bin"
+export PATH
 
 usage() {
   cat <<EOF_USAGE

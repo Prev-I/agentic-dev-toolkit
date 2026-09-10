@@ -170,10 +170,18 @@ the doctor reports when the machine has drifted.
 
 Its policy is `interop.enabled=true` with `interop.appendWindowsPath=false` in
 `/etc/wsl.conf`, so Windows processes stay invocable while the Windows PATH is no
-longer appended to the Linux one. Rancher Desktop is the single exception, and
-only for Linux container tooling under `resources/resources/linux/bin` or
-`resources/resources/linux/docker-cli-plugins` whose final target is ELF or a
-Linux script. Managed language runtimes never receive that exception.
+longer appended to the Linux one. The exception is a narrow allowlist of
+Windows-backed launcher directories whose contents are Linux ELF or Linux
+scripts: Rancher Desktop's container tooling under `resources/resources/linux/bin`
+and `resources/resources/linux/docker-cli-plugins`, and VS Code's `bin` for the
+`code` launcher. The allowlist governs the PATH *entry* only - tool
+classification runs independently, so a PE target still fails, only known
+container tooling may resolve from the Rancher directories, and managed language
+runtimes never receive any exception. Putting those directories back on `PATH`
+is the machine's job, not the doctor's: it reports an entry as allowlisted and
+`fix --path` preserves one, but neither creates it. The profile side is one
+guarded block per directory, kept *outside* the installer-managed block, because
+the installer rewrites its own block wholesale and does not own these paths.
 
 Two design rules are load-bearing. **Mount provenance decides what is
 Windows-backed**, read from `/proc/self/mounts`, because the automount root is

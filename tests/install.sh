@@ -1009,6 +1009,219 @@ test_git_credential_wrapper_is_valid_shell_and_rewritten_on_change() {
   teardown_credential_sandbox "$original_home"
 }
 
+readonly CATALOG_FILE="$REPOSITORY_ROOT/catalog/software-catalog.env"
+
+kv_fixture() {
+  # kv_fixture NAME CONTENT  -> prints the fixture path
+  local path="$TEMP_DIR/kv-$1.env"
+  printf '%s' "$2" > "$path"
+  printf '%s' "$path"
+}
+
+test_reader_loads_a_valid_file_in_source_order() {
+  local -A values=() lines=()
+  local -a order=()
+  local err="sentinel"
+
+  local path
+  path="$(kv_fixture valid '# comment
+alpha=1
+
+beta=two
+')"
+
+  load_kv_file "$path" values lines order err \
+    || fail "a valid file must load: $err"
+
+  assert_equal "$err" "" "success must clear the caller error scalar"
+  assert_equal "${values[alpha]}" "1" "alpha must load"
+  assert_equal "${values[beta]}" "two" "beta must load"
+  assert_equal "${lines[beta]}" "4" "beta must record its source line"
+  assert_equal "${order[0]}" "alpha" "order must follow the source"
+  assert_equal "${order[1]}" "beta" "order must follow the source"
+}
+
+test_reader_keeps_a_final_line_with_no_newline() {
+  local -A values=() lines=()
+  local -a order=()
+  local err=""
+  local path
+  path="$(kv_fixture nonewline 'alpha=1')"
+
+  load_kv_file "$path" values lines order err || fail "must load: $err"
+  assert_equal "${values[alpha]}" "1" "an unterminated final line must survive"
+}
+
+test_reader_normalizes_crlf() {
+  local -A values=() lines=()
+  local -a order=()
+  local err=""
+  local path
+  path="$(kv_fixture crlf $'alpha=1\r\nbeta=2\r\n')"
+
+  load_kv_file "$path" values lines order err || fail "must load: $err"
+  assert_equal "${values[alpha]}" "1" "CRLF must parse as LF"
+  assert_equal "${values[beta]}" "2" "CRLF must parse as LF"
+}
+
+test_reader_reports_a_missing_separator_with_a_line_number() {
+  local -A values=() lines=()
+  local -a order=()
+  local err=""
+  local path
+  path="$(kv_fixture nosep 'alpha=1
+garbage
+')"
+
+  ! load_kv_file "$path" values lines order err \
+    || fail "a line with no '=' must be rejected"
+  [[ "$err" == *":2: missing '=' separator" ]] \
+    || fail "the diagnostic must name file and line, got: $err"
+}
+
+test_reader_reports_a_duplicate_key_with_both_lines() {
+  local -A values=() lines=()
+  local -a order=()
+  local err=""
+  local path
+  path="$(kv_fixture dup 'alpha=1
+alpha=2
+')"
+
+  ! load_kv_file "$path" values lines order err \
+    || fail "a duplicate key must be rejected"
+  [[ "$err" == *":2: duplicate key: alpha (first seen at line 1)" ]] \
+    || fail "the diagnostic must name both lines, got: $err"
+}
+
+test_reader_reports_an_unreadable_file() {
+  local -A values=() lines=()
+  local -a order=()
+  local err=""
+
+  ! load_kv_file "$TEMP_DIR/does-not-exist.env" values lines order err \
+    || fail "a missing file must be rejected"
+  [[ "$err" == "cannot read "* ]] || fail "unexpected diagnostic: $err"
+}
+
+test_shipped_catalog_satisfies_the_complete_schema() {
+  # The fixtures could all pass while the file the installer actually loads
+  # is broken. This is the case that notices.
+  local -A values=() lines=()
+  local -a order=()
+  local err=""
+  local -A no_lists=() no_members=()
+  local -a required=(
+    java-17 java-21 dotnet-10 dotnet-8 python node bun maven
+    dotnet-ef uv shellcheck gitleaks pyyaml openspec superpowers
+    karpathy-ref karpathy-sha256
+  )
+
+  load_kv_file "$CATALOG_FILE" values lines order err \
+    || fail "the shipped catalog must load: $err"
+  assert_equal "${#values[@]}" "17" "the catalog must carry seventeen keys"
+  validate_kv "$CATALOG_FILE" values lines order required no_lists no_members
+}
+
+test_validator_rejects_a_missing_required_key_without_a_line_number() {
+  local -A values=([alpha]=1) lines=([alpha]=1)
+  local -a order=(alpha)
+  local -a required=(alpha beta gamma)
+  local -A no_lists=() no_members=()
+  local output
+
+  output="$( ( validate_kv f values lines order required no_lists no_members ) 2>&1 || true )"
+  [[ "$output" == *"f: missing required key: beta"* ]] \
+    || fail "must report the FIRST missing key, with no line: $output"
+  [[ "$output" != *"gamma"* ]] || fail "must stop at the first missing key"
+}
+
+test_validator_rejects_an_empty_and_a_malformed_scalar_with_line_numbers() {
+  local -A values=([alpha]="") lines=([alpha]=7)
+  local -a order=(alpha)
+  local -a required=()
+  local -A no_lists=() no_members=()
+  local output
+
+  output="$( ( validate_kv f values lines order required no_lists no_members ) 2>&1 || true )"
+  [[ "$output" == *"f:7: empty value for key: alpha"* ]] \
+    || fail "unexpected empty-value diagnostic: $output"
+
+  values[alpha]="has space"
+  output="$( ( validate_kv f values lines order required no_lists no_members ) 2>&1 || true )"
+  [[ "$output" == *"f:7: malformed value for key: alpha"* ]] \
+    || fail "unexpected malformed-value diagnostic: $output"
+}
+
+test_validator_enforces_list_syntax_duplicates_and_membership() {
+  local -A values=() lines=([skipped]=3)
+  local -a order=(skipped)
+  local -a required=()
+  # validate_kv reads these by name through its namerefs.
+  # shellcheck disable=SC2034
+  local -A lists=([skipped]=1)
+  # shellcheck disable=SC2034
+  local -A members=([node]=1 [python]=1)
+  # shellcheck disable=SC2034
+  local -A empty_members=()
+  local output
+
+  values[skipped]=""
+  validate_kv f values lines order required lists members \
+    || fail "an empty list must be valid"
+
+  values[skipped]="node,python"
+  validate_kv f values lines order required lists members \
+    || fail "a valid list must pass"
+
+  local bad
+  for bad in ",node" "node," "node,,python"; do
+    values[skipped]="$bad"
+    output="$( ( validate_kv f values lines order required lists members ) 2>&1 || true )"
+    [[ "$output" == *"f:3: malformed list for key: skipped"* ]] \
+      || fail "'$bad' must be rejected as malformed: $output"
+  done
+
+  values[skipped]="node,node"
+  output="$( ( validate_kv f values lines order required lists members ) 2>&1 || true )"
+  [[ "$output" == *"f:3: duplicate element in skipped: node"* ]] \
+    || fail "a duplicate element must be rejected: $output"
+
+  values[skipped]="node,nonsense"
+  output="$( ( validate_kv f values lines order required lists members ) 2>&1 || true )"
+  [[ "$output" == *"f:3: unknown catalog key in skipped: nonsense"* ]] \
+    || fail "an unknown member must be rejected: $output"
+
+  # With no catalog in hand, syntax and duplicates still apply, membership
+  # does not. This is the doctor's standalone case.
+  values[skipped]="node,nonsense"
+  validate_kv f values lines order required lists empty_members \
+    || fail "membership must be skipped when the member set is empty"
+
+  values[skipped]="node,node"
+  output="$( ( validate_kv f values lines order required lists empty_members ) 2>&1 || true )"
+  [[ "$output" == *"duplicate element"* ]] \
+    || fail "duplicates must still be caught without a member set: $output"
+}
+
+test_validator_reports_the_first_defect_in_source_order() {
+  # Two defects, and the answer must not move between runs.
+  local -A values=([alpha]="bad value" [beta]="also bad") lines=([alpha]=2 [beta]=9)
+  local -a order=(alpha beta)
+  # validate_kv reads these by name through its namerefs.
+  # shellcheck disable=SC2034
+  local -a required=()
+  # shellcheck disable=SC2034
+  local -A no_lists=() no_members=()
+  local first run
+
+  for run in 1 2 3; do
+    first="$( ( validate_kv f values lines order required no_lists no_members ) 2>&1 || true )"
+    [[ "$first" == *"f:2: malformed value for key: alpha"* ]] \
+      || fail "run $run must report the earliest line, got: $first"
+  done
+}
+
 TEMP_DIR="$(mktemp -d)"
 test_claude_template_resolves_after_copying_to_project_root
 load_installer_functions
@@ -1059,5 +1272,16 @@ test_git_credential_wrapper_is_not_installed_off_wsl
 test_git_credential_wrapper_is_skipped_when_requested
 test_git_credential_wrapper_dry_run_previews_without_writing
 test_git_credential_wrapper_is_valid_shell_and_rewritten_on_change
+test_reader_loads_a_valid_file_in_source_order
+test_reader_keeps_a_final_line_with_no_newline
+test_reader_normalizes_crlf
+test_reader_reports_a_missing_separator_with_a_line_number
+test_reader_reports_a_duplicate_key_with_both_lines
+test_reader_reports_an_unreadable_file
+test_shipped_catalog_satisfies_the_complete_schema
+test_validator_rejects_a_missing_required_key_without_a_line_number
+test_validator_rejects_an_empty_and_a_malformed_scalar_with_line_numbers
+test_validator_enforces_list_syntax_duplicates_and_membership
+test_validator_reports_the_first_defect_in_source_order
 
 printf 'PASS: installer compatibility tests\n'

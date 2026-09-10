@@ -96,6 +96,112 @@ die() {
   exit 1
 }
 
+# CATALOG_LINES, CATALOG_ORDER and CATALOG_ERROR are populated by name
+# through load_kv_file's namerefs; shellcheck cannot trace that indirection.
+# shellcheck disable=SC2034
+declare -gA CATALOG=() CATALOG_LINES=()
+# shellcheck disable=SC2034
+declare -ga CATALOG_ORDER=()
+# shellcheck disable=SC2034
+CATALOG_ERROR=""
+
+load_kv_file() {
+  local file=$1
+  # kv_* prefixes: a nameref whose identifier equals the caller's name is a
+  # circular reference. No caller may pass kv_values, kv_lines, kv_order or
+  # kv_errname.
+  local -n kv_values=$2
+  local -n kv_lines=$3
+  local -n kv_order=$4
+  local kv_errname=$5
+  local line key value lineno=0
+
+  printf -v "$kv_errname" '%s' ''
+
+  if [[ ! -r "$file" ]]; then
+    printf -v "$kv_errname" '%s' "cannot read $file"
+    return 1
+  fi
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    lineno=$(( lineno + 1 ))
+    line="${line%$'\r'}"
+    if [[ -z "${line//[[:space:]]/}" || "${line#"${line%%[![:space:]]*}"}" == '#'* ]]; then
+      continue
+    fi
+    if [[ "$line" != *=* ]]; then
+      printf -v "$kv_errname" '%s' "$file:$lineno: missing '=' separator"
+      return 1
+    fi
+    key="${line%%=*}"
+    value="${line#*=}"
+    value="${value%"${value##*[![:space:]]}"}"
+    if [[ ! "$key" =~ ^[a-z0-9][a-z0-9.-]*$ ]]; then
+      printf -v "$kv_errname" '%s' "$file:$lineno: malformed key: $key"
+      return 1
+    fi
+    if [[ -n "${kv_values[$key]+set}" ]]; then
+      printf -v "$kv_errname" '%s' \
+        "$file:$lineno: duplicate key: $key (first seen at line ${kv_lines[$key]})"
+      return 1
+    fi
+    kv_values["$key"]="$value"
+    kv_lines["$key"]="$lineno"
+    kv_order+=("$key")
+  done < "$file"
+}
+
+validate_kv() {
+  local file=$1
+  local -n v_values=$2 v_lines=$3 v_order=$4
+  local -n v_required=$5 v_listkeys=$6 v_members=$7
+  local key value element
+  local -a elements
+  local -A seen
+
+  for key in "${v_required[@]}"; do
+    if [[ -z "${v_values[$key]+set}" ]]; then
+      die "$file: missing required key: $key"
+    fi
+  done
+
+  for key in "${v_order[@]}"; do
+    value="${v_values[$key]}"
+
+    if [[ -n "${v_listkeys[$key]+set}" ]]; then
+      if [[ -z "$value" ]]; then
+        continue
+      fi
+      if [[ ! "$value" =~ ^[a-z0-9][a-z0-9.-]*(,[a-z0-9][a-z0-9.-]*)*$ ]]; then
+        die "$file:${v_lines[$key]}: malformed list for key: $key"
+      fi
+      IFS=, read -ra elements <<<"$value"
+      seen=()
+      for element in "${elements[@]}"; do
+        if [[ -n "${seen[$element]+set}" ]]; then
+          die "$file:${v_lines[$key]}: duplicate element in $key: $element"
+        fi
+        seen["$element"]=1
+        if (( ${#v_members[@]} > 0 )) && [[ -z "${v_members[$element]+set}" ]]; then
+          die "$file:${v_lines[$key]}: unknown catalog key in $key: $element"
+        fi
+      done
+      continue
+    fi
+
+    if [[ -z "$value" ]]; then
+      die "$file:${v_lines[$key]}: empty value for key: $key"
+    fi
+    if [[ ! "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._:+@/-]*$ ]]; then
+      die "$file:${v_lines[$key]}: malformed value for key: $key"
+    fi
+  done
+}
+
+catalog_value() {
+  printf '%s' "${CATALOG[$1]:?missing catalog key: $1}"
+}
+
 quote_command() {
   printf '+'
   printf ' %q' "$@"

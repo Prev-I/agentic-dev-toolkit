@@ -50,6 +50,12 @@ load_installer_functions() {
   unset 'installer_lines[-1]'
   printf '%s\n' "${installer_lines[@]}" > "$TEMP_DIR/install-functions.sh"
 
+  # The installer resolves its catalog relative to its own location. The copied
+  # body sits in the temporary directory, so ../.. lands in the system temporary
+  # tree rather than the repository; the seam names the repository's catalog.
+  ADT_CATALOG_FILE="${ADT_CATALOG_FILE:-$REPOSITORY_ROOT/catalog/software-catalog.env}"
+  export ADT_CATALOG_FILE
+
   # The production script performs work through main; tests load only its functions.
   # shellcheck disable=SC1091
   source "$TEMP_DIR/install-functions.sh"
@@ -243,11 +249,12 @@ test_mise_configuration_pins_bun() {
   # as a runtime, so the major it resolves to changes how a project builds and
   # what its lockfile means.
   #
-  # The default is asserted against the installer SOURCE, for the same reason
-  # the Python default is: BUN_VERSION is a global that other tests here assign
-  # to, so a rendered-output check could pass on an inherited value.
-  grep -qE '^BUN_VERSION="\$\{ADT_BUN_VERSION:-1\}"$' "$INSTALLER" \
-    || fail "installer must default BUN_VERSION to the 1 major"
+  # The default is asserted against the CATALOG, for the same reason the Python
+  # default is: BUN_VERSION is a global that other tests here assign to, so a
+  # rendered-output check could pass on an inherited value. The catalog is now
+  # where the default is declared, so that is where the assertion points.
+  grep -qxE 'bun=1' "$CATALOG_FILE" \
+    || fail "the catalog must default bun to the 1 major"
 
   # The dynamically sourced installer reads these globals.
   # shellcheck disable=SC2034
@@ -333,15 +340,15 @@ test_installer_defaults_python_to_312() {
   # Python was moved 3.14 -> 3.12 to match what the reference workstation
   # actually runs; the previous default was declared but never effective.
   #
-  # This asserts against the installer SOURCE rather than calling
+  # This asserts against the CATALOG rather than calling
   # render_mise_configuration, deliberately: PYTHON_VERSION is a global that
   # earlier tests in this file assign to, so a rendered-output check would
   # pass on a value inherited from whichever test ran before it rather than
-  # on the declared default.
-  grep -qE '^PYTHON_VERSION="\$\{ADT_PYTHON_VERSION:-3\.12\}"$' "$INSTALLER" \
-    || fail "installer must default PYTHON_VERSION to 3.12"
-  grep -qE '^DOTNET_EF_VERSION="\$\{ADT_DOTNET_EF_VERSION:-latest\}"$' "$INSTALLER" \
-    || fail "installer must default DOTNET_EF_VERSION to latest"
+  # on the declared default. The catalog is now where that default is declared.
+  grep -qxE 'python=3\.12' "$CATALOG_FILE" \
+    || fail "the catalog must default python to 3.12"
+  grep -qxE 'dotnet-ef=latest' "$CATALOG_FILE" \
+    || fail "the catalog must default dotnet-ef to latest"
 }
 
 test_mise_configuration_omits_maven_when_runtimes_skipped() {
@@ -1222,9 +1229,115 @@ test_validator_reports_the_first_defect_in_source_order() {
   done
 }
 
+run_installer_with_catalog() {
+  # run_installer_with_catalog CONTENT -> prints combined output, never fails
+  local path="$TEMP_DIR/bad-catalog.env"
+  printf '%s' "$1" > "$path"
+  ADT_CATALOG_FILE="$path" bash "$INSTALLER" --dry-run 2>&1 || true
+}
+
+# These three run the installer as a PROGRAM rather than sourcing it: the
+# refusal happens at load, before main, and sourcing a body that dies would
+# take the suite with it.
+test_installer_dies_on_a_missing_catalog() {
+  local output
+  output="$(ADT_CATALOG_FILE="$TEMP_DIR/absent.env" bash "$INSTALLER" --dry-run 2>&1 || true)"
+  [[ "$output" == *"cannot read "* ]] || fail "unexpected output: $output"
+}
+
+test_installer_dies_on_a_malformed_catalog_key() {
+  local output
+  output="$(run_installer_with_catalog 'Bad Key=1
+')"
+  [[ "$output" == *":1: malformed key: Bad Key"* ]] || fail "unexpected: $output"
+}
+
+test_installer_dies_on_a_missing_required_catalog_key() {
+  local output
+  output="$(run_installer_with_catalog 'java-17=temurin-17
+')"
+  [[ "$output" == *"missing required key: java-21"* ]] || fail "unexpected: $output"
+}
+
 TEMP_DIR="$(mktemp -d)"
 test_claude_template_resolves_after_copying_to_project_root
+
+# The load-integrity gate. Every check here reports with printf and exit rather
+# than through fail or assert_equal: fail is the thing being verified, and a
+# replacement that returns success would make every assertion about it succeed
+# too. The before snapshots must precede the loader's single call, because the
+# catalog load happens during that source.
+fail_body_before="$(declare -f fail)"
+functions_before="$(declare -F | awk '{ print $3 }' | sort)"
+
 load_installer_functions
+
+fail_body_after="$(declare -f fail)"
+functions_after="$(declare -F | awk '{ print $3 }' | sort)"
+
+if [[ "$fail_body_after" != "$fail_body_before" ]]; then
+  printf 'FAIL: installer loading replaced the test harness fail helper\n' >&2
+  exit 1
+fi
+
+marker="$TEMP_DIR/fail-fell-through"
+# Sourcing the installer body armed its ERR trap in this shell. The deliberate
+# failure below would fire it -- once inside the command substitution, whose
+# handler writes to the real stderr and exits non-zero, and once again on the
+# assignment that inherits that status -- aborting the suite before a single
+# test runs. Disarm ERR for the check and restore exactly what was there.
+err_trap="$(trap -p ERR)"
+trap - ERR
+set +e
+output="$(
+  (
+    fail "sentinel failure"
+    # Unreachable while fail behaves; reaching it is the regression the marker
+    # exists to catch, which is why shellcheck's observation is expected here.
+    # shellcheck disable=SC2317
+    : > "$marker"
+  ) 2>&1
+)"
+status=$?
+set -e
+eval "$err_trap"
+
+if (( status == 0 )); then
+  printf 'FAIL: test harness fail helper returned success\n' >&2
+  exit 1
+fi
+if [[ "$output" != FAIL:\ sentinel\ failure* ]]; then
+  printf 'FAIL: test harness fail helper lost its diagnostic contract\n' >&2
+  exit 1
+fi
+if [[ -e "$marker" ]]; then
+  printf 'FAIL: execution continued after test harness fail helper\n' >&2
+  exit 1
+fi
+
+if (( ${#CATALOG[@]} == 0 )); then
+  printf 'FAIL: catalog values did not survive installer loading\n' >&2
+  exit 1
+fi
+if (( ${#CATALOG_ORDER[@]} == 0 )); then
+  printf 'FAIL: catalog order did not survive installer loading\n' >&2
+  exit 1
+fi
+
+expected_new="$(grep -oE '^[a-zA-Z_][a-zA-Z0-9_]*\(\)' "$INSTALLER" |
+  tr -d '()' | sort -u)"
+actual_new="$(comm -13 \
+  <(printf '%s\n' "$functions_before") \
+  <(printf '%s\n' "$functions_after"))"
+unexpected="$(comm -23 \
+  <(printf '%s\n' "$actual_new") \
+  <(printf '%s\n' "$expected_new"))"
+if [[ -n "$unexpected" ]]; then
+  printf 'FAIL: installer loading leaked unexpected function(s): %s\n' \
+    "$unexpected" >&2
+  exit 1
+fi
+
 test_lttng_selector_prefers_time64_package_when_available
 test_lttng_selector_falls_back_to_legacy_package
 test_dry_run_does_not_probe_apt_package_metadata
@@ -1283,5 +1396,8 @@ test_validator_rejects_a_missing_required_key_without_a_line_number
 test_validator_rejects_an_empty_and_a_malformed_scalar_with_line_numbers
 test_validator_enforces_list_syntax_duplicates_and_membership
 test_validator_reports_the_first_defect_in_source_order
+test_installer_dies_on_a_missing_catalog
+test_installer_dies_on_a_malformed_catalog_key
+test_installer_dies_on_a_missing_required_catalog_key
 
 printf 'PASS: installer compatibility tests\n'

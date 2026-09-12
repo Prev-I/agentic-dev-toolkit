@@ -13,20 +13,25 @@ DRY_RUN=0
 JSON_MODE=0
 UNINSTALL_TOOL=0
 COMMAND=""
+UV_BIN=""
+UPTIME_FILE="${HRT_UPTIME_FILE:-/proc/uptime}"
+readonly UPTIME_FILE
 
 usage() {
-  cat <<EOF_USAGE
-Usage: headroom-runtime.sh COMMAND [options]
-
-Commands:
-  install [--dry-run]
-  audit [--json]
-  remove [--dry-run] [--uninstall-tool]
-
-Options:
-  --help                       Show this help text.
-  --version                    Show the tool version.
-EOF_USAGE
+  printf '%s\n' \
+    'Usage: headroom-runtime.sh COMMAND [options]' \
+    '' \
+    "Headroom ${HEADROOM_VERSION}, Python ${HEADROOM_PYTHON}, profile ${HEADROOM_PROFILE}, port ${HEADROOM_PORT}" \
+    "Package: ${HEADROOM_PACKAGE}" \
+    '' \
+    'Commands:' \
+    '  install [--dry-run]' \
+    '  audit [--json]' \
+    '  remove [--dry-run] [--uninstall-tool]' \
+    '' \
+    'Options:' \
+    '  --help                       Show this help text.' \
+    '  --version                    Show the tool version.'
 }
 
 die_usage() {
@@ -48,20 +53,21 @@ run() {
 }
 
 resolve_executable() {
-  local env_name="$1"
-  local default_name="$2"
+  local output_name="$1"
+  local env_name="$2"
+  local default_name="$3"
   local candidate="${!env_name:-}"
 
   if [[ -n "$candidate" ]]; then
     [[ "$candidate" == /* ]] || die_usage "$env_name must be an absolute executable path"
-    [[ -x "$candidate" ]] || die_usage "$env_name must be an absolute executable path"
+    [[ -x "$candidate" ]] || die_usage "$env_name must name an executable path"
   else
     candidate="$(command -v "$default_name" || true)"
     [[ -n "$candidate" ]] || die_usage "$default_name is required but was not found"
     candidate="$(readlink -f "$candidate")"
   fi
 
-  printf '%s\n' "$candidate"
+  printf -v "$output_name" '%s' "$candidate"
 }
 
 parse_args() {
@@ -119,8 +125,13 @@ main() {
   case "$COMMAND" in
     help) usage ;;
     version) printf '%s\n' "$SCRIPT_VERSION" ;;
-    install) UV_BIN="$(resolve_executable HRT_UV_BIN uv)" ;;
-    audit|remove) return 0 ;;
+    install)
+      resolve_executable UV_BIN HRT_UV_BIN uv
+      [[ -n "$UV_BIN" ]] || die_usage "uv is required but was not found"
+      ;;
+    audit) : "$JSON_MODE" "$UPTIME_FILE" ;;
+    remove) : "$UNINSTALL_TOOL" "$UPTIME_FILE" ;;
+    *) die_usage "unsupported command: $COMMAND" ;;
   esac
 }
 

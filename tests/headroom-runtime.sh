@@ -84,7 +84,12 @@ new_case() {
   export HRT_UPTIME_FILE="$CASE_DIR/uptime"
   export HRT_COMMAND_LOG="$CASE_DIR/commands"
   export HRT_MUTATION_LOG="$CASE_DIR/mutations"
-  unset OPENCODE_CONFIG UV_TOOL_BIN_DIR XDG_BIN_HOME XDG_DATA_HOME
+  unset OPENCODE_CONFIG UV_TOOL_BIN_DIR XDG_BIN_HOME XDG_DATA_HOME \
+    HRT_FIX_CURL_BODY HRT_FIX_CURL_STATUS HRT_FIX_EXEC_MAIN_STATUS \
+    HRT_FIX_HEADROOM_PLUGINS HRT_FIX_HEADROOM_PLUGINS_STATUS HRT_FIX_HEADROOM_VERSION \
+    HRT_FIX_MANIFEST_MODE HRT_FIX_OPENCODE_ACTIVE HRT_FIX_OPENCODE_PID \
+    HRT_FIX_SERVICE_ACTIVE HRT_FIX_SERVICE_ENABLED HRT_FIX_SS_OUTPUT HRT_FIX_SS_STATUS \
+    HRT_FIX_STAT_STATUS HRT_FIX_TOOL_LINK_TARGET
 
   install_stubs
   export HRT_UV_BIN="$CASE_DIR/bin/uv"
@@ -889,6 +894,9 @@ if [[ "$1 $2" == 'tool install' ]]; then
   /bin/mkdir -p "$tool_bin"
   /bin/cp "$HRT_HEADROOM_TEMPLATE" "$tool_bin/headroom"
   /bin/chmod 0755 "$tool_bin/headroom"
+  if [[ -n "${HRT_FIX_TOOL_LINK_TARGET:-}" ]]; then
+    /bin/ln -sf "$HRT_FIX_TOOL_LINK_TARGET" "$tool_bin/headroom"
+  fi
 fi
 STUB
   } > "$HRT_UV_BIN"
@@ -933,6 +941,7 @@ STUB
     cat <<'STUB'
 printf '%s\n' '---' "$0" "$@" >> "$HRT_COMMAND_LOG"
 printf '%s\n' 'Netid State Recv-Q Send-Q Local Address:Port Peer Address:Port Process'
+[[ "${HRT_FIX_SS_STATUS:-0}" == 0 ]] || exit "$HRT_FIX_SS_STATUS"
 if [[ -n "${HRT_FIX_SS_OUTPUT:-}" ]]; then
   printf '%s\n' "$HRT_FIX_SS_OUTPUT"
 elif [[ -f "$HRT_HOME/service-applied" ]]; then
@@ -1244,6 +1253,7 @@ test_install_final_state_and_tool_bin_regressions() {
   run_cli install --dry-run
   assert_equal "$CLI_STATUS" 0 "XDG bin home must select a tool path"
   assert_contains "$CLI_OUTPUT" "$XDG_BIN_HOME/headroom install apply" "XDG bin home must take precedence"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "XDG bin home preview must not mutate"
 
   new_installable_absent_case install-xdg-data
   export XDG_DATA_HOME="$HRT_HOME/.local/share"
@@ -1251,6 +1261,84 @@ test_install_final_state_and_tool_bin_regressions() {
   assert_equal "$CLI_STATUS" 0 "XDG data home must select the uv bin path"
   assert_contains "$CLI_OUTPUT" "$HRT_HOME/.local/bin/headroom install apply" \
     "XDG data home must derive its sibling bin directory"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "XDG data home preview must not mutate"
+}
+
+test_install_listener_classification_errors() {
+  new_installable_absent_case install-ss-failure
+  export HRT_FIX_SS_STATUS=1
+  run_cli install
+  assert_equal "$CLI_STATUS" 2 "an ss execution failure must be an inspection error"
+  assert_contains "$CLI_OUTPUT" HEADROOM_LISTENER_OWNER_AMBIGUOUS \
+    "an ss execution failure must retain its ownership finding"
+  assert_contains "$CLI_OUTPUT" 'Status: ERROR' "an ss execution failure must render ERROR"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "an ss execution failure must block every mutation"
+
+  new_installable_absent_case install-unmanaged-headroom-listener
+  /bin/mkdir -p "$HRT_HOME/.local/bin"
+  /bin/cp "$HRT_HEADROOM_TEMPLATE" "$HRT_HOME/.local/bin/headroom"
+  /bin/chmod 0755 "$HRT_HOME/.local/bin/headroom"
+  : > "$HRT_HOME/package-installed"
+  export HRT_HEADROOM_BIN="$HRT_HOME/.local/bin/headroom"
+  export HRT_FIX_SS_OUTPUT='tcp LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("headroom",pid=42,fd=3))'
+  run_cli install
+  assert_equal "$CLI_STATUS" 2 "an unmanaged Headroom listener must be ambiguous"
+  assert_contains "$CLI_OUTPUT" HEADROOM_UNMANAGED_LISTENER \
+    "an unmanaged Headroom listener must identify the ownership problem"
+  assert_contains "$CLI_OUTPUT" 'Status: ERROR' "an unmanaged Headroom listener must render ERROR"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "an unmanaged Headroom listener must block every mutation"
+}
+
+test_audit_absent_listener_is_runtime_failure() {
+  new_conforming_case audit-no-listener
+  export HRT_FIX_SS_OUTPUT=''
+  run_cli audit
+  assert_equal "$CLI_STATUS" 1 "an absent listener must fail audit"
+  assert_contains "$CLI_OUTPUT" HEADROOM_NOT_READY "an absent listener must be a runtime failure"
+  [[ "$CLI_OUTPUT" != *HEADROOM_LISTENER_OWNER_AMBIGUOUS* ]] ||
+    fail "an absent listener must not be reported as an ownership error"
+}
+
+test_install_dry_run_noops_for_conforming_states() {
+  new_conforming_case install-pass-dry-run-noop
+  printf '%s\n' '0.00 0.00' > "$HRT_UPTIME_FILE"
+  run_cli install --dry-run
+  assert_equal "$CLI_STATUS" 0 "a conforming PASS deployment dry-run must succeed"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "a conforming PASS deployment dry-run must not mutate"
+  [[ "$CLI_OUTPUT" != *'install apply'* ]] || fail "a conforming PASS dry-run must not print mutation"
+
+  new_conforming_case install-warn-dry-run-noop
+  printf '%s\n' '0.00 0.00' > "$HRT_UPTIME_FILE"
+  export HRT_FIX_EXEC_MAIN_STATUS=241
+  run_cli install --dry-run
+  assert_equal "$CLI_STATUS" 0 "a conforming WARN deployment dry-run must succeed"
+  assert_contains "$CLI_OUTPUT" HEADROOM_LIFECYCLE_EXIT_241 \
+    "a conforming WARN install must render the warning finding"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "a conforming WARN deployment dry-run must not mutate"
+  [[ "$CLI_OUTPUT" != *'install apply'* ]] || fail "a conforming WARN dry-run must not print mutation"
+}
+
+test_install_rejects_wrong_version_after_uv_without_apply() {
+  new_installable_absent_case install-post-uv-wrong-version
+  export HRT_FIX_HEADROOM_VERSION=0.36.0
+  run_cli install
+  assert_equal "$CLI_STATUS" 1 "a wrong version installed by uv must fail"
+  assert_contains "$CLI_OUTPUT" 'uv did not install the expected pinned Headroom CLI' \
+    "a wrong post-uv version must identify the failed install"
+  [[ "$(<"$HRT_MUTATION_LOG")" == *"$HRT_UV_BIN"* ]] || fail "the fixture must run uv"
+  [[ "$(<"$HRT_MUTATION_LOG")" != *$'\ninstall\napply'* ]] ||
+    fail "a wrong post-uv version must not apply the service"
+}
+
+test_install_validates_tool_bin_before_classification() {
+  new_installable_absent_case install-relative-tool-bin-conflict
+  export UV_TOOL_BIN_DIR=relative/bin
+  export HRT_FIX_SS_OUTPUT='tcp LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("other",pid=1,fd=3))'
+  run_cli install
+  assert_equal "$CLI_STATUS" 2 "a relative tool bin must fail before a classifier refusal"
+  assert_contains "$CLI_OUTPUT" 'Headroom tool bin directory must be absolute' \
+    "tool-bin validation must run in the install shell"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "an invalid tool bin must block every mutation"
 }
 
 test_install_package_only_applies_without_reinstalling() {
@@ -1325,6 +1413,19 @@ test_install_uses_configured_uv_tool_bin_after_package_install() {
   [[ -f "$HRT_HOME/service-applied" ]] || fail "the configured-bin apply must create the deployment"
 }
 
+test_install_canonicalizes_the_executable_created_by_uv() {
+  new_installable_absent_case install-canonical-post-uv-executable
+  /bin/cp "$HRT_HEADROOM_TEMPLATE" "$HRT_HOME/real-headroom"
+  /bin/chmod 0755 "$HRT_HOME/real-headroom"
+  export HRT_FIX_TOOL_LINK_TARGET="$HRT_HOME/real-headroom"
+  run_cli install
+  assert_equal "$CLI_STATUS" 0 "a symlinked Headroom executable installed by uv must work"
+  assert_contains "$(<"$HRT_MUTATION_LOG")" "$HRT_HOME/real-headroom" \
+    "apply must execute uv's canonical Headroom executable"
+  [[ "$(<"$HRT_MUTATION_LOG")" != *"$HRT_HOME/.local/bin/headroom"* ]] ||
+    fail "apply must not execute uv's symlink path"
+}
+
 JQ_BIN="$(command -v jq || true)"
 [[ -n "$JQ_BIN" ]] || fail "jq is required for Headroom runtime tests"
 JQ_BIN="$(readlink -f "$JQ_BIN")"
@@ -1357,10 +1458,16 @@ test_install_state_matrix_core_refusals
 test_install_manifest_and_listener_precedence
 test_install_core_matrix_completion
 test_install_final_state_and_tool_bin_regressions
+test_install_listener_classification_errors
+test_audit_absent_listener_is_runtime_failure
+test_install_dry_run_noops_for_conforming_states
+test_install_rejects_wrong_version_after_uv_without_apply
+test_install_validates_tool_bin_before_classification
 test_install_package_only_applies_without_reinstalling
 test_install_tool_bin_environment_validation_and_discovery
 test_install_uv_tool_bin_precedence_and_canonical_preview
 test_install_uses_configured_uv_tool_bin_after_package_install
+test_install_canonicalizes_the_executable_created_by_uv
 test_conforming_runtime_passes
 test_json_audit_has_stable_shape
 test_audit_policy_and_error_findings

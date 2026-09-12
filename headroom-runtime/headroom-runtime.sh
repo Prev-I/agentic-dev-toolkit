@@ -189,6 +189,7 @@ parse_listener() {
   local output row owners owner owner_seen local_address
   local listener_found=0 unsafe_bind=0 foreign_owner=0 ambiguous_owner=0
 
+  LISTENER_STATE=AMBIGUOUS
   if ! output="$("$SS_BIN" -ltnp "sport = :${HEADROOM_PORT}")"; then
     add_finding ERROR HEADROOM_LISTENER_OWNER_AMBIGUOUS "port ${HEADROOM_PORT}" \
       "Headroom listener ownership could not be determined."
@@ -247,6 +248,10 @@ parse_listener() {
 
 check_listener() {
   parse_listener
+  if [[ "$LISTENER_STATE" == ABSENT ]]; then
+    add_finding FAIL HEADROOM_NOT_READY "port ${HEADROOM_PORT}" \
+      "Headroom has no listener on its configured port."
+  fi
 }
 
 check_manifest() {
@@ -509,8 +514,11 @@ run_audit() {
 
 PACKAGE_STATE=""
 DEPLOYMENT_STATE=""
+INSTALL_STATE=""
+LISTENER_STATE=""
+HEADROOM_TOOL_BIN_DIR=""
 
-headroom_tool_bin_dir() {
+resolve_headroom_tool_bin_dir() {
   local bin_dir data_parent
 
   if [[ -n "${UV_TOOL_BIN_DIR:-}" ]]; then
@@ -527,14 +535,14 @@ headroom_tool_bin_dir() {
   if ! bin_dir="$(readlink -m "$bin_dir")" || [[ "$bin_dir" != /* ]]; then
     die_usage "Headroom tool bin directory could not be canonicalized"
   fi
-  printf '%s\n' "$bin_dir"
+  HEADROOM_TOOL_BIN_DIR="$bin_dir"
 }
 
 headroom_tool_path() {
-  local bin_dir candidate
+  local candidate
 
-  bin_dir="$(headroom_tool_bin_dir)"
-  candidate="$bin_dir/headroom"
+  [[ -n "$HEADROOM_TOOL_BIN_DIR" ]] || resolve_headroom_tool_bin_dir
+  candidate="$HEADROOM_TOOL_BIN_DIR/headroom"
   if [[ -x "$candidate" ]]; then
     candidate="$(readlink -f "$candidate")" || return 1
     [[ "$candidate" == /* && -x "$candidate" ]] || return 1
@@ -582,7 +590,7 @@ headroom_package_state() {
 }
 
 deployment_state() {
-  local enabled active code
+  local code
 
   if [[ -e "$MANIFEST_PATH" || -e "$SYSTEMD_USER_DIR/headroom-default.service" ]]; then
     F_SEVERITY=() F_CODE=() F_SUBJECT=() F_MESSAGE=()
@@ -603,12 +611,10 @@ deployment_state() {
         return
         ;;
       PASS|WARN)
-        if ! enabled="$("$SYSTEMCTL_BIN" --user is-enabled headroom-default.service 2>/dev/null)" ||
-          ! active="$("$SYSTEMCTL_BIN" --user is-active headroom-default.service 2>/dev/null)" ||
-          [[ "$enabled" != enabled || "$active" != active ]]; then
+        check_service_state
+        if [[ "$(status_for_findings)" == FAIL ]]; then
           DEPLOYMENT_STATE=STOPPED
         else
-          F_SEVERITY=() F_CODE=() F_SUBJECT=() F_MESSAGE=()
           check_listener
           check_generated_permissions
           check_opencode_config
@@ -633,13 +639,33 @@ deployment_state() {
     ABSENT) DEPLOYMENT_STATE=ABSENT ;;
     CONFLICT) DEPLOYMENT_STATE=CONFLICT ;;
     AMBIGUOUS) DEPLOYMENT_STATE=AMBIGUOUS ;;
-    *) DEPLOYMENT_STATE=CONFLICT ;;
+    HEADROOM)
+      add_finding ERROR HEADROOM_UNMANAGED_LISTENER "port ${HEADROOM_PORT}" \
+        "A Headroom-owned listener exists without a managed deployment."
+      DEPLOYMENT_STATE=AMBIGUOUS
+      ;;
+    NONCONFORMING) DEPLOYMENT_STATE=NONCONFORMING ;;
   esac
 }
 
 classify_install_state() {
+  local -a package_severity=() package_code=() package_subject=() package_message=()
+  local -a deployment_severity=() deployment_code=() deployment_subject=() deployment_message=()
+
   headroom_package_state
+  package_severity=("${F_SEVERITY[@]}")
+  package_code=("${F_CODE[@]}")
+  package_subject=("${F_SUBJECT[@]}")
+  package_message=("${F_MESSAGE[@]}")
   deployment_state
+  deployment_severity=("${F_SEVERITY[@]}")
+  deployment_code=("${F_CODE[@]}")
+  deployment_subject=("${F_SUBJECT[@]}")
+  deployment_message=("${F_MESSAGE[@]}")
+  F_SEVERITY=("${package_severity[@]}" "${deployment_severity[@]}")
+  F_CODE=("${package_code[@]}" "${deployment_code[@]}")
+  F_SUBJECT=("${package_subject[@]}" "${deployment_subject[@]}")
+  F_MESSAGE=("${package_message[@]}" "${deployment_message[@]}")
   if [[ "$DEPLOYMENT_STATE" == NONCONFORMING ]]; then
     INSTALL_STATE=NONCONFORMING
   elif [[ "$DEPLOYMENT_STATE" == AMBIGUOUS ]]; then
@@ -736,12 +762,8 @@ run_install() {
   resolve_executable SS_BIN HRT_SS_BIN ss
   resolve_executable CURL_BIN HRT_CURL_BIN curl
   resolve_executable STAT_BIN HRT_STAT_BIN stat
+  resolve_headroom_tool_bin_dir
   classify_install_state
-  # Deployment classification uses the shared findings arrays for its own evidence.
-  if [[ "$PACKAGE_STATE" == UNINSPECTABLE && "$(status_for_findings)" == PASS ]]; then
-    add_finding ERROR HEADROOM_VERSION_UNREADABLE headroom \
-      "Headroom CLI version could not be inspected."
-  fi
   state_findings_status="$(status_for_findings)"
   state_findings_severity=("${F_SEVERITY[@]}")
   state_findings_code=("${F_CODE[@]}")
@@ -762,6 +784,11 @@ run_install() {
   fi
   case "$INSTALL_STATE" in
     CONFORMING)
+      if [[ "$state_findings_status" == WARN ]]; then
+        F_SEVERITY=("${state_findings_severity[@]}") F_CODE=("${state_findings_code[@]}")
+        F_SUBJECT=("${state_findings_subject[@]}") F_MESSAGE=("${state_findings_message[@]}")
+        render_human "$state_findings_status"
+      fi
       printf '%s\n' 'Headroom runtime is already installed and conforming.'
       return 0
       ;;
@@ -794,7 +821,7 @@ run_install() {
   esac
   future_headroom="$(headroom_tool_path)"
   if [[ -z "$future_headroom" ]]; then
-    future_headroom="$(headroom_tool_bin_dir)/headroom"
+    future_headroom="$HEADROOM_TOOL_BIN_DIR/headroom"
   fi
   if [[ "$INSTALL_STATE" == ABSENT ]]; then
     install_package
@@ -802,8 +829,7 @@ run_install() {
       apply_deployment "$future_headroom"
       return 0
     fi
-    if [[ -x "$future_headroom" ]]; then
-      HEADROOM_BIN="$future_headroom"
+    if HEADROOM_BIN="$(headroom_tool_path)"; then
       if package_state="$("$HEADROOM_BIN" --version)" && [[ "$package_state" == "headroom ${HEADROOM_VERSION}" ]]; then
         PACKAGE_STATE=EXACT
       else

@@ -5,6 +5,8 @@ IFS=$'\n\t'
 REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly REPOSITORY_ROOT
 readonly CLI="$REPOSITORY_ROOT/headroom-runtime/headroom-runtime.sh"
+readonly CLI_PATH="headroom-runtime/headroom-runtime.sh"
+readonly TEST_PATH="tests/headroom-runtime.sh"
 
 cleanup() {
   if [[ -n "${TEMP_DIR:-}" ]]; then
@@ -40,14 +42,17 @@ install_stubs() {
 
   mkdir -p "$CASE_DIR/bin"
   for command in uv headroom systemctl curl ss uname sleep readlink; do
-    cat > "$CASE_DIR/bin/$command" <<'STUB'
-#!/bin/bash
+    {
+      printf '#!%s\n' "$BASH_BIN"
+      cat <<'STUB'
 if [[ "$0" == */readlink && "$1" == "-f" ]]; then
+  printf '%s\n' "$0" "$@" >> "$HRT_COMMAND_LOG"
   printf '%s\n' "${HRT_READLINK_TARGET:-$2}"
   exit 0
 fi
 printf '%s\n' "$0" "$@" >> "$HRT_COMMAND_LOG"
 STUB
+    } > "$CASE_DIR/bin/$command"
     chmod 0755 "$CASE_DIR/bin/$command"
   done
 }
@@ -81,8 +86,12 @@ new_case() {
 }
 
 run_cli() {
-  CLI_OUTPUT="$(PATH="$CASE_DIR/bin" "$BASH_BIN" "$CLI" "$@" 2>&1)" &&
+  CLI_OUTPUT="$(run_in_fixture_path "$BASH_BIN" "$CLI" "$@" 2>&1)" &&
     CLI_STATUS=0 || CLI_STATUS=$?
+}
+
+run_in_fixture_path() {
+  PATH="$CASE_DIR/bin" "$@"
 }
 
 source_cli_without_main() {
@@ -99,7 +108,7 @@ source_cli_without_main() {
 run_resolve_in_conditional() {
   local source_file
   source_file="$(source_cli_without_main)"
-  CLI_OUTPUT="$(PATH="$CASE_DIR/bin" HRT_UV_BIN=relative/uv "$BASH_BIN" -s "$source_file" 2>&1 <<'SCRIPT'
+  CLI_OUTPUT="$(HRT_UV_BIN=relative/uv run_in_fixture_path "$BASH_BIN" -s "$source_file" 2>&1 <<'SCRIPT'
 source "$1"
 if resolve_executable UV_BIN HRT_UV_BIN uv; then
   printf 'unexpected success\n'
@@ -112,9 +121,20 @@ SCRIPT
 read_uptime_file() {
   local source_file
   source_file="$(source_cli_without_main)"
-  CLI_OUTPUT="$(PATH="$CASE_DIR/bin" "$BASH_BIN" -s "$source_file" 2>&1 <<'SCRIPT'
+  CLI_OUTPUT="$(run_in_fixture_path "$BASH_BIN" -s "$source_file" 2>&1 <<'SCRIPT'
 source "$1"
 printf '%s\n' "$UPTIME_FILE"
+SCRIPT
+)" && CLI_STATUS=0 || CLI_STATUS=$?
+}
+
+run_install_and_print_uv() {
+  local source_file
+  source_file="$(source_cli_without_main)"
+  CLI_OUTPUT="$(run_in_fixture_path "$BASH_BIN" -s "$source_file" 2>&1 <<'SCRIPT'
+source "$1"
+main install --dry-run
+printf '%s\n' "$UV_BIN"
 SCRIPT
 )" && CLI_STATUS=0 || CLI_STATUS=$?
 }
@@ -152,6 +172,14 @@ test_relative_binary_override_is_rejected() {
     "the diagnostic must identify the unsafe seam"
 }
 
+test_install_resolves_the_fixture_uv_path() {
+  new_case install-resolves-uv
+  run_install_and_print_uv
+  assert_equal "$CLI_STATUS" "0" "install dry-run must resolve a valid fixture uv"
+  assert_equal "$CLI_OUTPUT" "$HRT_UV_BIN" \
+    "install must retain the absolute fixture uv path in UV_BIN"
+}
+
 test_invalid_override_exits_even_in_a_conditional() {
   new_case conditional-override
   run_resolve_in_conditional
@@ -177,6 +205,16 @@ test_uptime_file_defaults_to_proc_uptime() {
   assert_equal "$CLI_STATUS" "0" "loading the CLI constants must succeed"
   assert_equal "$CLI_OUTPUT" "/proc/uptime" \
     "UPTIME_FILE must default to the system uptime source"
+}
+
+test_relative_uptime_override_is_rejected() {
+  new_case relative-uptime
+  export HRT_UPTIME_FILE=relative/uptime
+  read_uptime_file
+  unset HRT_UPTIME_FILE
+  assert_equal "$CLI_STATUS" "2" "an unsafe uptime seam must be rejected"
+  assert_contains "$CLI_OUTPUT" "HRT_UPTIME_FILE must be an absolute readable path" \
+    "the uptime seam diagnostic must identify the unsafe path"
 }
 
 test_missing_uv_seam_cannot_fall_back_to_the_host() {
@@ -214,6 +252,8 @@ test_non_executable_override_is_rejected() {
 test_shipped_file_modes_and_entrypoint_are_preserved() {
   local line
   local last_line=""
+  local cli_mode
+  local test_mode
 
   [[ -x "$CLI" ]] || fail "the production CLI must be executable"
   [[ ! -x "$REPOSITORY_ROOT/tests/headroom-runtime.sh" ]] ||
@@ -222,6 +262,10 @@ test_shipped_file_modes_and_entrypoint_are_preserved() {
     last_line="$line"
   done < "$CLI"
   assert_equal "$last_line" 'main "$@"' "main must remain the final production line"
+  IFS=' ' read -r cli_mode _ < <(git ls-files -s -- "$CLI_PATH")
+  IFS=' ' read -r test_mode _ < <(git ls-files -s -- "$TEST_PATH")
+  assert_equal "$cli_mode" "100755" "the production CLI must be tracked executable"
+  assert_equal "$test_mode" "100644" "the test suite must be tracked non-executable"
 }
 
 JQ_BIN="$(command -v jq || true)"
@@ -236,9 +280,11 @@ test_version_is_exact
 test_help_lists_the_three_commands
 test_unknown_command_is_usage_error
 test_relative_binary_override_is_rejected
+test_install_resolves_the_fixture_uv_path
 test_invalid_override_exits_even_in_a_conditional
 test_uptime_file_uses_the_fixture_override
 test_uptime_file_defaults_to_proc_uptime
+test_relative_uptime_override_is_rejected
 test_missing_uv_seam_cannot_fall_back_to_the_host
 test_default_uv_resolution_rejects_a_non_executable_canonical_path
 test_non_executable_override_is_rejected

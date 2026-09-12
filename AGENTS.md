@@ -24,8 +24,8 @@ instructions/                   AGENTS.md pattern shipped to other projects
 models/routing/opencode/        Model-routing config bundle for OpenCode
 repository-policy/              `.repository-policy.yaml` format, schema and validator
 wsl-toolchain-doctor/           Linux-first PATH and toolchain auditor for WSL
-opencode-service/               Scripts a persistent OpenCode server's units run:
-                                a readiness probe and a restart consumer
+opencode-service/               Readiness probes for OpenCode and its Telegram
+                                sidecar, plus an optional plugin restart consumer
 headroom-runtime/               Opt-in standalone Headroom install, audit, and removal CLI
 docs/multi-agent-workspace-guide.md
 docs/wsl-toolchain-doctor.md    Operational documentation for the doctor
@@ -62,6 +62,7 @@ shellcheck environments/linux/install.sh tests/install.sh \
   tests/repository-policy.sh repository-policy/validate.sh \
   wsl-toolchain-doctor/wsl-toolchain-doctor.sh tests/wsl-toolchain-doctor.sh \
   opencode-service/opencode-startup-ready.sh \
+  opencode-service/opencode-telegram-ready.sh \
   opencode-service/opencode-gateway-restart.sh tests/opencode-service.sh \
   headroom-runtime/headroom-runtime.sh tests/headroom-runtime.sh
 ```

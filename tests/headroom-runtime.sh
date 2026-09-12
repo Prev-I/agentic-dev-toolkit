@@ -1095,6 +1095,8 @@ test_install_state_matrix_core_refusals() {
   export HRT_FIX_SERVICE_ACTIVE=inactive
   run_cli install
   assert_equal "$CLI_STATUS" 1 "a valid stopped deployment must be refused"
+  assert_contains "$CLI_OUTPUT" HEADROOM_SERVICE_INACTIVE \
+    "a stopped deployment must retain its service finding"
   assert_contains "$CLI_OUTPUT" 'systemctl --user start and enable' \
     "a stopped deployment must name the explicit operator action"
   assert_equal "$(<"$HRT_MUTATION_LOG")" '' "a stopped deployment must block every mutation"
@@ -1503,6 +1505,34 @@ test_audit_conforming_runtime_handles_ss_failure() {
     "an ss failure in audit must retain its listener finding"
 }
 
+test_install_unions_classification_and_preflight_evidence() {
+  new_conforming_case install-uninspectable-coupled
+  printf '%s\n' '0.00 0.00' > "$HRT_UPTIME_FILE"
+  printf '%s\n' '{"plugin":"headroom-opencode"}' > "$HRT_OPENCODE_CONFIG_DIR/opencode.json"
+  {
+    printf '#!%s\n' "$BASH_BIN"
+    printf '%s\n' 'exit 1'
+  } > "$HRT_HEADROOM_BIN"
+  chmod 0755 "$HRT_HEADROOM_BIN"
+  run_cli install
+  assert_equal "$CLI_STATUS" 2 "classification ERROR must outrank coupling FAIL"
+  assert_contains "$CLI_OUTPUT" 'Status: ERROR' "combined evidence must render ERROR"
+  assert_contains "$CLI_OUTPUT" HEADROOM_VERSION_UNREADABLE \
+    "combined evidence must retain package inspection failure"
+  assert_contains "$CLI_OUTPUT" HEADROOM_OPENCODE_CONFIG_PRESENT \
+    "combined evidence must retain OpenCode coupling failure"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "combined evidence must block every mutation"
+
+  new_installable_absent_case install-pure-coupling
+  printf '%s\n' '{"plugin":"headroom-opencode"}' > "$HRT_OPENCODE_CONFIG_DIR/opencode.json"
+  run_cli install
+  assert_equal "$CLI_STATUS" 1 "a pure OpenCode coupling must remain a policy refusal"
+  assert_contains "$CLI_OUTPUT" 'Status: FAIL' "a pure OpenCode coupling must render FAIL"
+  assert_contains "$CLI_OUTPUT" HEADROOM_OPENCODE_CONFIG_PRESENT \
+    "a pure OpenCode coupling must retain its finding"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "a pure OpenCode coupling must block every mutation"
+}
+
 JQ_BIN="$(command -v jq || true)"
 [[ -n "$JQ_BIN" ]] || fail "jq is required for Headroom runtime tests"
 JQ_BIN="$(readlink -f "$JQ_BIN")"
@@ -1550,6 +1580,7 @@ test_install_missing_tool_and_path_fallback_after_uv
 test_audit_listener_findings_are_distinct_and_ordered
 test_install_unmanaged_unsafe_headroom_listener_is_ambiguous
 test_audit_conforming_runtime_handles_ss_failure
+test_install_unions_classification_and_preflight_evidence
 test_conforming_runtime_passes
 test_json_audit_has_stable_shape
 test_audit_policy_and_error_findings

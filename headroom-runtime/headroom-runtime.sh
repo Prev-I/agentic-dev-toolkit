@@ -541,6 +541,7 @@ resolve_headroom_tool_bin_dir() {
 headroom_tool_path() {
   local candidate
 
+  # Task 4 must call resolve_headroom_tool_bin_dir before this lazy lookup.
   [[ -n "$HEADROOM_TOOL_BIN_DIR" ]] || return 1
   candidate="$HEADROOM_TOOL_BIN_DIR/headroom"
   if [[ -x "$candidate" ]]; then
@@ -630,7 +631,7 @@ deployment_state() {
             FAIL) DEPLOYMENT_STATE=NONCONFORMING ;;
             PASS|WARN) DEPLOYMENT_STATE=CONFORMING ;;
             *)
-              add_finding ERROR HEADROOM_LISTENER_OWNER_AMBIGUOUS "port ${HEADROOM_PORT}" \
+              add_finding ERROR HEADROOM_STATE_INDETERMINATE headroom-default.service \
                 "Headroom deployment state could not be determined."
               DEPLOYMENT_STATE=AMBIGUOUS
               ;;
@@ -652,8 +653,8 @@ deployment_state() {
       DEPLOYMENT_STATE=AMBIGUOUS
       ;;
     *)
-      add_finding ERROR HEADROOM_LISTENER_OWNER_AMBIGUOUS "port ${HEADROOM_PORT}" \
-        "Headroom listener ownership could not be determined."
+      add_finding ERROR HEADROOM_STATE_INDETERMINATE headroom \
+        "Headroom deployment state could not be determined."
       DEPLOYMENT_STATE=AMBIGUOUS
       ;;
   esac
@@ -758,7 +759,7 @@ wait_for_readiness() {
 }
 
 run_install() {
-  local package_state final_status future_headroom state_findings_status
+  local package_state final_status future_headroom preflight_status state_findings_status
   local -a state_findings_severity=() state_findings_code=() state_findings_subject=() state_findings_message=()
 
   resolve_executable UNAME_BIN HRT_UNAME_BIN uname
@@ -789,10 +790,18 @@ run_install() {
   if [[ "$PACKAGE_STATE" != ABSENT && "$PACKAGE_STATE" != UNINSPECTABLE ]]; then
     check_opencode_package
   fi
+  preflight_status="$(status_for_findings)"
+  F_SEVERITY=("${state_findings_severity[@]}" "${F_SEVERITY[@]}")
+  F_CODE=("${state_findings_code[@]}" "${F_CODE[@]}")
+  F_SUBJECT=("${state_findings_subject[@]}" "${F_SUBJECT[@]}")
+  F_MESSAGE=("${state_findings_message[@]}" "${F_MESSAGE[@]}")
   final_status="$(status_for_findings)"
-  if [[ "$final_status" != PASS ]]; then
+  if [[ "$final_status" == ERROR ]]; then
     render_human "$final_status"
-    [[ "$final_status" == ERROR ]] && return 2
+    return 2
+  fi
+  if [[ "$preflight_status" == FAIL ]]; then
+    render_human "$final_status"
     return 1
   fi
   case "$INSTALL_STATE" in
@@ -806,6 +815,7 @@ run_install() {
       return 0
       ;;
     STOPPED)
+      render_human "$final_status"
       printf '%s\n' 'ERROR: Headroom deployment is stopped or disabled; use systemctl --user start and enable headroom-default.service.' >&2
       return 1
       ;;
@@ -818,16 +828,12 @@ run_install() {
       return 1
       ;;
     NONCONFORMING|CONFLICT)
-      F_SEVERITY=("${state_findings_severity[@]}") F_CODE=("${state_findings_code[@]}")
-      F_SUBJECT=("${state_findings_subject[@]}") F_MESSAGE=("${state_findings_message[@]}")
-      render_human "$state_findings_status"
+      render_human "$final_status"
       printf '%s\n' "ERROR: Headroom installation is ${INSTALL_STATE,,}; implicit repair is refused." >&2
       return 1
       ;;
     AMBIGUOUS)
-      F_SEVERITY=("${state_findings_severity[@]}") F_CODE=("${state_findings_code[@]}")
-      F_SUBJECT=("${state_findings_subject[@]}") F_MESSAGE=("${state_findings_message[@]}")
-      render_human "$state_findings_status"
+      render_human "$final_status"
       printf '%s\n' 'ERROR: Headroom installation ownership could not be established.' >&2
       return 2
       ;;

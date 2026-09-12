@@ -1518,6 +1518,31 @@ run_doctor audit
 assert_contains "a receipt with no requested.* key is unreadable" "$LAST_OUT" "TOOLKIT_RECEIPT_UNREADABLE"
 teardown_fixture
 
+# Predicate 5 (list membership) and predicate 1 (at least one requested.*)
+# both fail on the same receipt: a skipped= member that is not a catalog key,
+# and no requested.* key at all. This is the ruled, deliberate order:
+# predicate 5 is validate_kv's own list-membership check, folded into the
+# single validate_kv call that also does phase 1's required-key check, so it
+# runs -- and reports -- before load_receipt's own phase-2 loop ever reaches
+# predicate 1. The spec's declared 1->2->3->4->5 numbering is conceptual;
+# this pins the actual, deterministic execution order as tested behaviour so
+# a future refactor cannot silently invert it.
+setup_fixture
+write_test_catalog "$TMP_ROOT/catalog.env"
+cat > "$TMP_ROOT/receipt.env" <<'RECEIPT'
+script-version=0.1.0
+installed-at=2026-09-09T14:22:07Z
+source-commit=1fcbb1c9a4e2b7d0f3a18c65b2e94d7f0a1c3e58
+catalog-sha256=deadbeef
+skipped=not-a-catalog-key
+overridden=
+RECEIPT
+run_doctor audit
+assert_contains "predicate 5 (list membership) is reported before predicate 1 (at least one requested.*)" \
+  "$LAST_OUT" "unknown catalog key in skipped: not-a-catalog-key"
+assert_not_contains "predicate 1's message does not also appear" "$LAST_OUT" "no requested.* key is present"
+teardown_fixture
+
 setup_fixture
 write_test_catalog "$TMP_ROOT/catalog.env"
 cat > "$TMP_ROOT/receipt.env" <<'RECEIPT'

@@ -474,19 +474,21 @@ test_audit_warning_and_non_invocation_boundaries() {
   export HRT_FIX_MANIFEST_MODE=644
   assert_audit_finding 0 HEADROOM_PERMISSIONS_BROAD
 
-  new_conforming_case tighter-permissions
-  export HRT_FIX_MANIFEST_MODE=400
-  run_cli audit
-  assert_equal "$CLI_STATUS" 0 "tighter manifest permissions must not warn"
-  [[ "$CLI_OUTPUT" != *HEADROOM_PERMISSIONS_BROAD* ]] ||
-    fail "tighter manifest permissions must not report broad permissions"
+  local mode
+  for mode in 0600 0400 0000; do
+    new_conforming_case "owner-only-permissions-$mode"
+    export HRT_FIX_MANIFEST_MODE="$mode"
+    run_cli audit
+    assert_equal "$CLI_STATUS" 0 "owner-only mode $mode must not warn"
+    [[ "$CLI_OUTPUT" != *HEADROOM_PERMISSIONS_BROAD* ]] ||
+      fail "owner-only mode $mode must not report broad permissions"
+  done
 
-  new_conforming_case compact-tighter-permissions
-  export HRT_FIX_MANIFEST_MODE=40
-  run_cli audit
-  assert_equal "$CLI_STATUS" 0 "compact tighter manifest permissions must not error"
-  [[ "$CLI_OUTPUT" != *HEADROOM_PERMISSIONS_BROAD* ]] ||
-    fail "compact tighter manifest permissions must not report broad permissions"
+  for mode in 0040 0044 0007 0440 0644 1600 2600 4600; do
+    new_conforming_case "broad-permissions-$mode"
+    export HRT_FIX_MANIFEST_MODE="$mode"
+    assert_audit_finding 0 HEADROOM_PERMISSIONS_BROAD
+  done
 
   new_conforming_case invalid-permissions
   export HRT_FIX_MANIFEST_MODE=invalid
@@ -633,6 +635,24 @@ test_audit_command_and_flag_validation() {
   export HRT_JQ_BIN="$CASE_DIR/bin/jq-failing"
   run_cli_split_streams audit --json --invalid
   assert_equal "$CLI_STATUS" 2 "a failed jq renderer must not change the usage exit code"
+
+  new_conforming_case partial-jq-renderer
+  {
+    printf '#!%s\n' "$BASH_BIN"
+    printf '%s\n' 'printf "%s\\n" '\''{"partial":true}'\'''
+    printf '%s\n' 'exit 1'
+  } > "$CASE_DIR/bin/jq-partial"
+  chmod 0755 "$CASE_DIR/bin/jq-partial"
+  export HRT_JQ_BIN="$CASE_DIR/bin/jq-partial"
+  run_cli_split_streams audit --json --invalid
+  assert_equal "$CLI_STATUS" 2 "a partial jq renderer failure must preserve the usage exit code"
+  assert_equal "$CLI_STDOUT" \
+    '{"schemaVersion":1,"toolVersion":"0.1.0","action":"audit","status":"ERROR","findings":[],"error":"audit command resolution failed"}' \
+    "a failed jq renderer must emit only the fixed JSON error envelope"
+  assert_equal "$("$JQ_BIN" -r '.status' <<<"$CLI_STDOUT")" ERROR \
+    "a partial jq renderer failure must leave stdout valid JSON"
+  assert_contains "$CLI_STDERR" 'unknown audit option' \
+    "a partial jq renderer failure must preserve detail on stderr"
 }
 
 test_version_is_exact() {

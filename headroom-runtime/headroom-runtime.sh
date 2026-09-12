@@ -173,7 +173,7 @@ check_readiness() {
 }
 
 check_listener() {
-  local output row owners owner owner_seen
+  local output row owners owner owner_seen local_address
   local listener_found=0 unsafe_bind=0 foreign_owner=0 ambiguous_owner=0
 
   if ! output="$("$SS_BIN" -ltnp "sport = :${HEADROOM_PORT}")"; then
@@ -182,9 +182,10 @@ check_listener() {
     return
   fi
   while IFS= read -r row; do
-    [[ "$row" == *":${HEADROOM_PORT}"* ]] || continue
+    IFS=' ' read -r _ _ _ local_address _ <<<"$row"
+    [[ "$local_address" == *":${HEADROOM_PORT}" ]] || continue
     listener_found=1
-    [[ "$row" == *"127.0.0.1:${HEADROOM_PORT}"* ]] || unsafe_bind=1
+    [[ "$local_address" == "127.0.0.1:${HEADROOM_PORT}" ]] || unsafe_bind=1
     if [[ "$row" != *'users:(('* ]]; then
       ambiguous_owner=1
       continue
@@ -254,7 +255,7 @@ check_manifest() {
   [[ "$telemetry" == false ]] ||
     add_finding FAIL HEADROOM_TELEMETRY_ENABLED "$MANIFEST_PATH" "Headroom telemetry is enabled."
   [[ "$telemetry_env" == off ]] ||
-    add_finding FAIL HEADROOM_TELEMETRY_ENABLED "$MANIFEST_PATH" "Headroom telemetry environment is enabled."
+    add_finding FAIL HEADROOM_TELEMETRY_ENV_ENABLED "$MANIFEST_PATH" "Headroom telemetry environment is enabled."
   [[ "$beacon" == off ]] ||
     add_finding FAIL HEADROOM_BEACON_NOT_DISABLED "$MANIFEST_PATH" "Headroom beacon is not disabled."
   [[ "$update_check" == off ]] ||
@@ -268,12 +269,12 @@ check_generated_permissions() {
   if ! mode="$("$STAT_BIN" -c %a "$MANIFEST_PATH")"; then
     add_finding ERROR HEADROOM_PERMISSIONS_UNREADABLE "$MANIFEST_PATH" \
       "Generated Headroom permissions could not be inspected."
+  elif [[ ! "$mode" =~ ^[0-7]{3,4}$ ]]; then
+    add_finding ERROR HEADROOM_PERMISSIONS_UNREADABLE "$MANIFEST_PATH" \
+      "Generated Headroom permissions are not a valid octal mode."
   elif (( 8#$mode > 8#600 )); then
     add_finding WARN HEADROOM_PERMISSIONS_BROAD "$MANIFEST_PATH" \
       "Generated Headroom files have broader-than-0600 permissions."
-  elif (( 8#$mode < 8#600 )); then
-    add_finding WARN HEADROOM_PERMISSIONS_BROAD "$MANIFEST_PATH" \
-      "Generated Headroom files have tighter-than-0600 permissions."
   fi
 }
 
@@ -326,6 +327,7 @@ check_opencode_environment() {
   fi
   while IFS= read -r -d '' entry; do
     name="${entry%%=*}"
+    # Do not retain process-environment values after extracting the variable name.
     entry=""
     if [[ "$name" == HEADROOM_* ]]; then
       add_finding FAIL HEADROOM_OPENCODE_ENV_PRESENT opencode.service \
@@ -336,14 +338,18 @@ check_opencode_environment() {
 }
 
 check_unit_independence() {
-  local path content dependency
+  local path content dependency unit_name parent
 
   for path in "$SYSTEMD_USER_DIR/headroom-default.service" "$SYSTEMD_USER_DIR/headroom-default.service.d"/*.conf \
     "$SYSTEMD_USER_DIR/opencode.service" "$SYSTEMD_USER_DIR/opencode.service.d"/*.conf; do
     [[ -f "$path" ]] || continue
-    case "$path" in
-      *headroom-default.service*) dependency=opencode.service ;;
-      *opencode.service*) dependency=headroom-default.service ;;
+    unit_name="${path##*/}"
+    parent="${path%/*}"
+    parent="${parent##*/}"
+    [[ "$unit_name" == *.conf ]] && unit_name="${parent%.d}"
+    case "$unit_name" in
+      headroom-default.service) dependency=opencode.service ;;
+      opencode.service) dependency=headroom-default.service ;;
       *) continue ;;
     esac
     if content="$(<"$path")" && [[ "$content" == *"$dependency"* ]]; then
@@ -389,33 +395,43 @@ render_human() {
 
 render_json() {
   local status="$1" findings='[]' index
+  # shellcheck disable=SC2016 # jq variables must remain literal for jq, not Bash.
+  local append_finding='$findings + [{severity: $severity, code: $code, subject: $subject, message: $message}]'
+  # shellcheck disable=SC2016 # jq variables must remain literal for jq, not Bash.
+  local audit_envelope='{schemaVersion: 1, toolVersion: $version, action: "audit", status: $status, findings: $findings}'
 
   for index in "${!F_CODE[@]}"; do
     findings="$("$JQ_BIN" -cn --argjson findings "$findings" \
       --arg severity "${F_SEVERITY[$index]}" --arg code "${F_CODE[$index]}" \
       --arg subject "${F_SUBJECT[$index]}" --arg message "${F_MESSAGE[$index]}" \
-      "\$findings + [{severity: \$severity, code: \$code, subject: \$subject, message: \$message}]")"
+      "$append_finding")"
   done
   "$JQ_BIN" -n --arg version "$SCRIPT_VERSION" --arg status "$status" --argjson findings "$findings" \
-    "{schemaVersion: 1, toolVersion: \$version, action: \"audit\", status: \$status, findings: \$findings}"
+    "$audit_envelope"
 }
 
 render_resolution_error_json() {
-  local message="$1"
+  local message="$1" jq_candidate="${JQ_BIN:-${HRT_JQ_BIN:-}}"
+  # shellcheck disable=SC2016 # jq variables must remain literal for jq, not Bash.
+  local resolution_envelope='{schemaVersion: 1, toolVersion: $version, action: "audit", status: "ERROR", findings: [], error: $error}'
 
-  message="${message//\\/\\\\}"
-  message="${message//\"/\\\"}"
-  printf '{"schemaVersion":1,"toolVersion":"%s","action":"audit","status":"ERROR","findings":[],"error":"%s"}\n' \
-    "$SCRIPT_VERSION" "$message"
+  if [[ "$jq_candidate" == /* && -x "$jq_candidate" ]]; then
+    "$jq_candidate" -n --arg version "$SCRIPT_VERSION" --arg error "$message" \
+      "$resolution_envelope"
+  else
+    printf 'ERROR: %s\n' "$message" >&2
+    printf '{"schemaVersion":1,"toolVersion":"%s","action":"audit","status":"ERROR","findings":[],"error":"audit command resolution failed"}\n' \
+      "$SCRIPT_VERSION"
+  fi
 }
 
 run_audit() {
   local status
 
+  resolve_executable JQ_BIN HRT_JQ_BIN jq
   resolve_executable HEADROOM_BIN HRT_HEADROOM_BIN headroom
   resolve_executable SYSTEMCTL_BIN HRT_SYSTEMCTL_BIN systemctl
   resolve_executable CURL_BIN HRT_CURL_BIN curl
-  resolve_executable JQ_BIN HRT_JQ_BIN jq
   resolve_executable SS_BIN HRT_SS_BIN ss
   resolve_executable STAT_BIN HRT_STAT_BIN stat
   audit_runtime
@@ -449,6 +465,7 @@ parse_args() {
       COMMAND="install"
       ;;
     audit)
+      COMMAND="audit"
       while [[ $# -gt 0 ]]; do
         case "$1" in
           --json) JSON_MODE=1 ;;
@@ -456,7 +473,6 @@ parse_args() {
         esac
         shift
       done
-      COMMAND="audit"
       ;;
     remove)
       while [[ $# -gt 0 ]]; do

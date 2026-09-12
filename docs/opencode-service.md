@@ -1,8 +1,8 @@
 # OpenCode as a Persistent Service
 
 Running OpenCode as a long-lived server on a workstation, instead of starting a
-fresh backend per terminal, and optionally reaching it from other devices on the
-same LAN over HTTPS.
+fresh backend per terminal. An optional standalone Telegram client and an
+optional HTTPS LAN edge are independent clients of that server.
 
 Two independent halves. Part 1 is the whole story for a single-machine setup and
 has no Windows dependency. Part 2 is additive and only worth doing if another
@@ -10,7 +10,9 @@ device genuinely needs to reach the server.
 
 Placeholders used throughout: `<USER>` the Linux account, `<PORT>` the server
 port (`4096` below), `<HOSTNAME>` the DNS name the LAN resolves to the
-workstation, `<LAN_SUBNET>` the home or office subnet in CIDR form.
+workstation, `<LAN_SUBNET>` the home or office subnet in CIDR form,
+`<NODE_DIR>` the directory containing the pinned Node binary, and
+`<BOT_VERSION>` the pinned `@grinev/opencode-telegram-bot` version.
 
 ## Policy
 
@@ -29,24 +31,27 @@ merely working.
   that *adds* trust rather than removing verification.
 - **Credentials never reach an interactive shell, a process argument list, a
   config file, or a log.**
+- **Exactly one process polls a Telegram bot token.** A second poller, including
+  a diagnostic `getUpdates`, displaces the first and produces HTTP 409 conflicts.
 - **No port forwarding.** No `netsh portproxy`, no plaintext LAN listener, no
   inbound rule on a network the OS classifies as public.
 
 ## Architecture
 
 ```text
-other LAN device                     this workstation
-      |                                    |
-      | https://<HOSTNAME>:443             |  opencode CLI / local tooling
-      v                                    v
- +----------------+                 http://127.0.0.1:<PORT>
- | reverse proxy  |                        |
- | TLS, internal  |------------------------+
- | CA, host-side  |                        |
- +----------------+                        v
-                                   OpenCode server
-                                   127.0.0.1:<PORT> only
-                                   + gateway, Telegram, Web UI
+other LAN device                                this workstation
+      |                                               |
+      | https://<HOSTNAME>:443                        | TUI / Web UI / local tooling
+      v                                               v
+ +----------------+                          +-----------------+
+ | reverse proxy  |------------------------->| OpenCode server |
+ | TLS, internal  |   127.0.0.1:<PORT>       | loopback only   |
+ +----------------+                          +-----------------+
+                                                      ^
+                                                      | OpenCode API
+                                             +-----------------+
+ Telegram Bot API <--------------------------| Telegram client |
+                                             +-----------------+
 ```
 
 Part 2 adds only the left branch. The right branch is Part 1 and is what local
@@ -79,14 +84,6 @@ StartLimitBurst=5
 Type=simple
 WorkingDirectory=%h
 EnvironmentFile=%h/.config/opencode-runtime/secrets.env
-
-# A plugin that keeps its own configuration or control directory outside the
-# OpenCode config directory has to be told where they are. Left unset, it
-# resolves them against whichever config directory it finds and relocates its
-# workspace to an empty scaffold: the server starts, the plugin loads, and none
-# of its state is there. Drop these two lines only if no plugin needs them.
-Environment="OPENCODE_GATEWAY_CONFIG=%h/.config/opencode-gateway/opencode/opencode-gateway.toml"
-Environment="OPENCODE_GATEWAY_CONTROL_DIR=%h/.config/opencode-gateway/opencode/control"
 
 ExecStart=%h/.opencode/bin/opencode web --hostname 127.0.0.1 --port 4096
 ExecStartPost=%h/.local/libexec/opencode/opencode-startup-ready
@@ -131,10 +128,11 @@ install -d -m 700 ~/.config/opencode-runtime
 install -m 600 /dev/null ~/.config/opencode-runtime/secrets.env
 ```
 
-It holds the server's Basic-auth username and password, plus any channel tokens
-(a Telegram bot token, for instance). `EnvironmentFile` in the unit above is how
-the server receives them, so they never appear in `ExecStart` — a process
-argument list is world-readable via `/proc`, an environment file is not.
+It holds the server's Basic-auth username and password. A sidecar may read the
+same file for those credentials and for its own token, but the server does not
+need a channel token. `EnvironmentFile` keeps every secret out of `ExecStart` —
+a process argument list is world-readable via `/proc`, an environment file is
+not.
 
 Verify the file never became readable to others, and that auth is actually on:
 
@@ -164,11 +162,11 @@ system — `[boot] systemd=true` in `/etc/wsl.conf`, verified with
 
 ### Readiness
 
-`ExecStartPost` runs a script that blocks until the server answers and its
-plugins have registered, then logs a line per check. Without it, `systemctl
+`ExecStartPost` runs a script that blocks until the server answers and its tool
+surface is available, then logs a line per check. Without it, `systemctl
 start` returns as soon as the process exists, and the next command in a script
 races a server that is listening but not ready. Anything that polls the health
-endpoint and the plugin surface, then exits non-zero on timeout, is sufficient.
+endpoint and one required tool, then exits non-zero on timeout, is sufficient.
 
 `opencode-service/opencode-startup-ready.sh` in this repository is one such
 probe. Copy it to the path the unit names:
@@ -179,19 +177,127 @@ install -D -m 755 opencode-service/opencode-startup-ready.sh \
 ```
 
 Two things it gets right that are easy to miss. It checks **both** health and
-the registered plugin surface, because a server answers 200 while a plugin that
-failed to initialise is absent — and the server's *declared* configuration
-still lists that plugin, so configuration is not a usable signal. And it never
-calls anything external, so an outage at a message channel a plugin talks to
-cannot fail a start and have systemd restart a healthy server.
+the registered tool surface. The gateway-neutral default is the built-in
+`bash` tool; set `READY_TOOL_MARKER` to a plugin-owned tool only when that plugin
+is required for the server to count as ready. And it never calls anything
+external, so an outage at a message channel cannot fail a start and have systemd
+restart a healthy server.
 
 Whatever probe you use, keep `TimeoutStartSec` above its window. Left at the
 default the start is killed first, and the probe's own diagnosis — which half
 failed — is what you lose.
 
+### Optional standalone Telegram client
+
+Keep Telegram outside the OpenCode process. A sidecar can fail or be upgraded
+without replacing the server, while the TUI and Web UI continue to use the same
+OpenCode API and native sessions.
+
+Install a pinned release into a versioned directory. Do not use `@latest` in the
+unit:
+
+```bash
+release="$HOME/.local/share/opencode-telegram-bot/releases/<BOT_VERSION>"
+mkdir -p "$release"
+npm install --prefix "$release" --omit=dev \
+  @grinev/opencode-telegram-bot@<BOT_VERSION>
+
+install -D -m 755 opencode-service/opencode-telegram-ready.sh \
+  ~/.local/libexec/opencode/opencode-telegram-ready
+install -d -m 700 ~/.config/opencode-telegram-bot
+install -m 600 /dev/null \
+  ~/.config/opencode-runtime/opencode-telegram-bot.env
+```
+
+The common `secrets.env` supplies `TELEGRAM_BOT_TOKEN` and the OpenCode Basic
+credentials. The second, non-secret environment file supplies deployment
+settings such as `TELEGRAM_ALLOWED_USER_ID`,
+`OPENCODE_API_URL=http://127.0.0.1:4096`, and
+`OPENCODE_AUTO_RESTART_ENABLED=false`. The last setting is load-bearing:
+systemd owns the server, so the bot must not try to replace it. Keep both files
+mode `600`; an allowlisted user ID is not a token, but there is no reason to
+publish it.
+
+`~/.config/systemd/user/opencode-telegram-bot.service`:
+
+```ini
+[Unit]
+Description=OpenCode Telegram client
+After=network-online.target opencode.service
+Wants=network-online.target opencode.service
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=exec
+WorkingDirectory=%h/.config/opencode-telegram-bot
+RuntimeDirectory=opencode-telegram-bot
+UMask=0077
+
+Environment="PATH=<NODE_DIR>:%h/.opencode/bin:%h/.local/bin:/usr/bin:/bin"
+Environment="TELEGRAM_READY_TIMEOUT=60"
+EnvironmentFile=%h/.config/opencode-runtime/secrets.env
+EnvironmentFile=%h/.config/opencode-runtime/opencode-telegram-bot.env
+
+# The direct entrypoint exits on startup errors. --no-fork keeps Node as MainPID.
+ExecStart=/usr/bin/flock --nonblock --no-fork %t/opencode-telegram-bot/instance.lock <NODE_DIR>/node %h/.local/share/opencode-telegram-bot/releases/<BOT_VERSION>/node_modules/@grinev/opencode-telegram-bot/dist/index.js --mode installed
+ExecStartPost=%h/.local/libexec/opencode/opencode-telegram-ready
+
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=90
+TimeoutStopSec=15
+
+[Install]
+WantedBy=default.target
+```
+
+`Wants=` is deliberately weaker than `Requires=`: an OpenCode failure does not
+tear down the bot, and systemd can recover either service independently.
+`flock --no-fork` keeps Node as the service's main process and guards starts that
+use the same lock. It cannot stop the old gateway or an arbitrary manual client;
+operationally, singleton polling still depends on disabling every other poller.
+The readiness helper requires both authenticated OpenCode health and a
+`Bot @… started!` journal marker from the current systemd invocation. That marker
+is vendor output, so verify it when upgrading the bot. A bot or Node upgrade also
+requires updating the two pinned paths in the unit.
+
+The bot owns `~/.config/opencode-telegram-bot/settings.json`, including scheduled
+tasks and a directory cache. Back it up, but do not use the cache as declarative
+configuration: it contains machine-local paths and changes during normal use.
+
+If this replaces another Telegram integration, snapshot that integration first
+and stop it before enabling the sidecar. Confirm that no old plugin or service
+can still poll the same token. A rollback must reverse that order: stop the
+sidecar first, restore the former integration, then start it. Removing only the
+new sidecar is otherwise independent of OpenCode:
+
+```bash
+systemctl --user disable --now opencode-telegram-bot.service
+rm ~/.config/systemd/user/opencode-telegram-bot.service
+systemctl --user daemon-reload
+```
+
+Keep the versioned release, environment file, settings and readiness helper
+until the rollback window closes; they are harmless while the unit is absent
+and make restoration deterministic.
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now opencode-telegram-bot.service
+systemctl --user status opencode-telegram-bot.service
+journalctl --user -u opencode-telegram-bot.service
+```
+
+Verify end to end by sending `/status` from an allowlisted Telegram account and
+checking that the reply reports the expected bot and OpenCode versions. Do not
+probe the same token with `getUpdates`; that creates a competing poller and is
+not a safe health check.
+
 ### Restarts requested by a plugin
 
-Skip this unless a plugin offers a restart tool — one that reloads skills,
+This is optional and unrelated to the standalone Telegram client. Skip it
+unless a plugin offers a restart tool — one that reloads skills,
 agents or configuration by replacing the server. The tool cannot do the work
 itself: it lives inside the process that has to be replaced. Plugins in that
 position write a request into a control directory and rely on whatever
@@ -207,6 +313,22 @@ a path-activated unit.
 tool believe a supervisor exists, setting it alone is worse than leaving it
 unset: the tool then reports a restart as scheduled and nothing ever performs
 one. The flag and the consumer go in together.
+
+For `opencode-gateway`, add all four settings to the server unit; none is
+optional when this integration is enabled:
+
+```ini
+[Service]
+Environment="OPENCODE_GATEWAY_CONFIG=%h/.config/opencode-gateway/opencode/opencode-gateway.toml"
+Environment="OPENCODE_GATEWAY_CONTROL_DIR=%h/.config/opencode-gateway/opencode/control"
+Environment="OPENCODE_GATEWAY_MANAGED=1"
+Environment="READY_TOOL_MARKER=gateway_status"
+```
+
+The first two keep the plugin on its intended configuration and control state,
+the third advertises a working supervisor, and the fourth makes server readiness
+fail if the plugin does not initialise. Install and enable the consumer below
+before restarting the server with this drop-in.
 
 The contract is the control directory, and it is the plugin's, not yours:
 
@@ -661,7 +783,9 @@ reach them.
   installed `opencode` is not the one a shell resolves.
 - `opencode-service/opencode-startup-ready.sh` — the readiness probe the unit's
   `ExecStartPost` runs.
+- `opencode-service/opencode-telegram-ready.sh` — the standalone Telegram
+  sidecar's readiness probe.
 - `opencode-service/opencode-gateway-restart.sh` — the restart consumer that
   makes systemd the executor for a plugin-requested restart.
-- `tests/opencode-service.sh` — the suite for both, which stubs `systemctl` and
-  `curl` and needs neither a user manager nor a server.
+- `tests/opencode-service.sh` — the suite for the three scripts, which stubs
+  systemd-facing commands and needs neither a user manager nor a server.

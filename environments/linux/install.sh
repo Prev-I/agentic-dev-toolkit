@@ -10,9 +10,7 @@ readonly SUPERPOWERS_PLUGIN_BASE='superpowers@git+https://github.com/obra/superp
 readonly KARPATHY_RAW_BASE='https://raw.githubusercontent.com/multica-ai/andrej-karpathy-skills'
 readonly KARPATHY_SKILL_PATH='skills/karpathy-guidelines/SKILL.md'
 # The installer's own version, declared with the other constants for parity
-# with the repository's other versioned scripts. Nothing reads it yet, hence
-# the unused-variable exemption below.
-# shellcheck disable=SC2034
+# with the repository's other versioned scripts. Printed verbatim by --version.
 readonly SCRIPT_VERSION="0.1.0"
 
 log() {
@@ -87,6 +85,15 @@ declare -gA CATALOG=() CATALOG_LINES=()
 declare -ga CATALOG_ORDER=()
 # shellcheck disable=SC2034
 CATALOG_ERROR=""
+
+# REQUESTED_VALUE and REQUESTED_SOURCE record, per catalog key, the effective
+# value in play and which layer it came from: `the catalog`, `ADT_<NAME>`, or
+# `--<flag>` once parse_args overrides it. validate_requested_values reads
+# both to build its diagnostic. Declared -g because tests/install.sh sources
+# this file's body from inside a shell function; a plain `declare` here would
+# be function-local and leave both arrays empty once the loader returns.
+declare -gA REQUESTED_VALUE=()
+declare -gA REQUESTED_SOURCE=()
 
 load_kv_file() {
   local file=$1
@@ -185,6 +192,29 @@ catalog_value() {
   printf '%s' "${CATALOG[$1]:?missing catalog key: $1}"
 }
 
+# resolve_pin OUT_VAR CATALOG_KEY ENV_NAME ENV_VALUE
+# Assigns OUT_VAR, by nameref, to ENV_VALUE when it is non-empty, else to the
+# catalog's value for CATALOG_KEY, and records the winning value and its
+# source layer in REQUESTED_VALUE/REQUESTED_SOURCE. rp_* local names: no
+# caller may pass a variable named rp_target, rp_key, rp_envname or
+# rp_envvalue as OUT_VAR, which would alias the nameref to itself.
+#
+# Called directly in this shell, never inside a command substitution: the
+# nameref assignment and the two associative-array writes would land in a
+# subshell and vanish with it.
+resolve_pin() {
+  local -n rp_target="$1"
+  local rp_key="$2" rp_envname="$3" rp_envvalue="$4"
+  if [[ -n "$rp_envvalue" ]]; then
+    rp_target="$rp_envvalue"
+    REQUESTED_SOURCE["$rp_key"]="$rp_envname"
+  else
+    rp_target="$(catalog_value "$rp_key")"
+    REQUESTED_SOURCE["$rp_key"]="the catalog"
+  fi
+  REQUESTED_VALUE["$rp_key"]="$rp_target"
+}
+
 # Called directly in this shell. Never inside a command substitution, pipeline
 # or subshell: the arrays are populated through namerefs and would die with it,
 # leaving an empty catalog behind a zero exit status.
@@ -204,22 +234,22 @@ declare -gA CATALOG_NO_LISTS=() CATALOG_NO_MEMBERS=()
 validate_kv "$ADT_CATALOG_FILE" CATALOG CATALOG_LINES CATALOG_ORDER \
   CATALOG_REQUIRED CATALOG_NO_LISTS CATALOG_NO_MEMBERS
 
-JAVA_21_VERSION="${ADT_JAVA_21_VERSION:-$(catalog_value java-21)}"
-JAVA_17_VERSION="${ADT_JAVA_17_VERSION:-$(catalog_value java-17)}"
-DOTNET_10_VERSION="${ADT_DOTNET_10_VERSION:-$(catalog_value dotnet-10)}"
-DOTNET_8_VERSION="${ADT_DOTNET_8_VERSION:-$(catalog_value dotnet-8)}"
-PYTHON_VERSION="${ADT_PYTHON_VERSION:-$(catalog_value python)}"
-NODE_VERSION="${ADT_NODE_VERSION:-$(catalog_value node)}"
-BUN_VERSION="${ADT_BUN_VERSION:-$(catalog_value bun)}"
-MAVEN_VERSION="${ADT_MAVEN_VERSION:-$(catalog_value maven)}"
-DOTNET_EF_VERSION="${ADT_DOTNET_EF_VERSION:-$(catalog_value dotnet-ef)}"
-UV_VERSION="${ADT_UV_VERSION:-$(catalog_value uv)}"
-OPENSPEC_VERSION="${ADT_OPENSPEC_VERSION:-$(catalog_value openspec)}"
-SUPERPOWERS_REF="${ADT_SUPERPOWERS_REF:-$(catalog_value superpowers)}"
+resolve_pin JAVA_21_VERSION java-21 ADT_JAVA_21_VERSION "${ADT_JAVA_21_VERSION:-}"
+resolve_pin JAVA_17_VERSION java-17 ADT_JAVA_17_VERSION "${ADT_JAVA_17_VERSION:-}"
+resolve_pin DOTNET_10_VERSION dotnet-10 ADT_DOTNET_10_VERSION "${ADT_DOTNET_10_VERSION:-}"
+resolve_pin DOTNET_8_VERSION dotnet-8 ADT_DOTNET_8_VERSION "${ADT_DOTNET_8_VERSION:-}"
+resolve_pin PYTHON_VERSION python ADT_PYTHON_VERSION "${ADT_PYTHON_VERSION:-}"
+resolve_pin NODE_VERSION node ADT_NODE_VERSION "${ADT_NODE_VERSION:-}"
+resolve_pin BUN_VERSION bun ADT_BUN_VERSION "${ADT_BUN_VERSION:-}"
+resolve_pin MAVEN_VERSION maven ADT_MAVEN_VERSION "${ADT_MAVEN_VERSION:-}"
+resolve_pin DOTNET_EF_VERSION dotnet-ef ADT_DOTNET_EF_VERSION "${ADT_DOTNET_EF_VERSION:-}"
+resolve_pin UV_VERSION uv ADT_UV_VERSION "${ADT_UV_VERSION:-}"
+resolve_pin OPENSPEC_VERSION openspec ADT_OPENSPEC_VERSION "${ADT_OPENSPEC_VERSION:-}"
+resolve_pin SUPERPOWERS_REF superpowers ADT_SUPERPOWERS_REF "${ADT_SUPERPOWERS_REF:-}"
 OPENSPEC_TOOLS="${ADT_OPENSPEC_TOOLS:-opencode,claude,codex}"
-SHELLCHECK_VERSION="${ADT_SHELLCHECK_VERSION:-$(catalog_value shellcheck)}"
-GITLEAKS_VERSION="${ADT_GITLEAKS_VERSION:-$(catalog_value gitleaks)}"
-PYYAML_VERSION="${ADT_PYYAML_VERSION:-$(catalog_value pyyaml)}"
+resolve_pin SHELLCHECK_VERSION shellcheck ADT_SHELLCHECK_VERSION "${ADT_SHELLCHECK_VERSION:-}"
+resolve_pin GITLEAKS_VERSION gitleaks ADT_GITLEAKS_VERSION "${ADT_GITLEAKS_VERSION:-}"
+resolve_pin PYYAML_VERSION pyyaml ADT_PYYAML_VERSION "${ADT_PYYAML_VERSION:-}"
 
 # The mapping is deliberately asymmetric. The catalog digest is the default of
 # KARPATHY_DEFAULT_SHA256 only: KARPATHY_SHA256, the user override, still
@@ -230,7 +260,10 @@ KARPATHY_DEFAULT_REF="$(catalog_value karpathy-ref)"
 readonly KARPATHY_DEFAULT_REF
 KARPATHY_DEFAULT_SHA256="$(catalog_value karpathy-sha256)"
 readonly KARPATHY_DEFAULT_SHA256
-KARPATHY_REF="${ADT_KARPATHY_REF:-$KARPATHY_DEFAULT_REF}"
+resolve_pin KARPATHY_REF karpathy-ref ADT_KARPATHY_REF "${ADT_KARPATHY_REF:-}"
+# karpathy-sha256 is deliberately NOT resolved through resolve_pin: it is not
+# a requested value, defaults to empty by design, and install_karpathy_skill
+# already holds it to ^[0-9a-f]{64}$. validate_requested_values skips it too.
 KARPATHY_SHA256="${ADT_KARPATHY_SHA256:-}"
 
 DRY_RUN=0
@@ -362,6 +395,16 @@ require_value() {
   [[ -n "$value" && "$value" != --* ]] || die "$option requires a value"
 }
 
+# record_flag_override CATALOG_KEY FLAG VALUE
+# Records that --FLAG set CATALOG_KEY's effective value to VALUE, overriding
+# whatever the catalog or an ADT_* variable had already recorded for it.
+# Called directly in this shell, never inside a command substitution, for the
+# same reason as resolve_pin.
+record_flag_override() {
+  REQUESTED_VALUE["$1"]="$3"
+  REQUESTED_SOURCE["$1"]="$2"
+}
+
 parse_args() {
   while (( $# > 0 )); do
     case "$1" in
@@ -387,55 +430,115 @@ parse_args() {
         ;;
       --project=*) PROJECT_PATH="${1#*=}" ;;
       --node-version)
-        require_value "$1" "${2:-}"; NODE_VERSION="$2"; shift ;;
-      --node-version=*) NODE_VERSION="${1#*=}" ;;
+        require_value "$1" "${2:-}"; NODE_VERSION="$2"
+        record_flag_override node --node-version "$NODE_VERSION"; shift ;;
+      --node-version=*)
+        NODE_VERSION="${1#*=}"
+        [[ -n "$NODE_VERSION" ]] || die "--node-version requires a value"
+        record_flag_override node --node-version "$NODE_VERSION" ;;
       --bun-version)
-        require_value "$1" "${2:-}"; BUN_VERSION="$2"; shift ;;
-      --bun-version=*) BUN_VERSION="${1#*=}" ;;
+        require_value "$1" "${2:-}"; BUN_VERSION="$2"
+        record_flag_override bun --bun-version "$BUN_VERSION"; shift ;;
+      --bun-version=*)
+        BUN_VERSION="${1#*=}"
+        [[ -n "$BUN_VERSION" ]] || die "--bun-version requires a value"
+        record_flag_override bun --bun-version "$BUN_VERSION" ;;
       --python-version)
-        require_value "$1" "${2:-}"; PYTHON_VERSION="$2"; shift ;;
-      --python-version=*) PYTHON_VERSION="${1#*=}" ;;
+        require_value "$1" "${2:-}"; PYTHON_VERSION="$2"
+        record_flag_override python --python-version "$PYTHON_VERSION"; shift ;;
+      --python-version=*)
+        PYTHON_VERSION="${1#*=}"
+        [[ -n "$PYTHON_VERSION" ]] || die "--python-version requires a value"
+        record_flag_override python --python-version "$PYTHON_VERSION" ;;
       --uv-version)
-        require_value "$1" "${2:-}"; UV_VERSION="$2"; shift ;;
-      --uv-version=*) UV_VERSION="${1#*=}" ;;
+        require_value "$1" "${2:-}"; UV_VERSION="$2"
+        record_flag_override uv --uv-version "$UV_VERSION"; shift ;;
+      --uv-version=*)
+        UV_VERSION="${1#*=}"
+        [[ -n "$UV_VERSION" ]] || die "--uv-version requires a value"
+        record_flag_override uv --uv-version "$UV_VERSION" ;;
       --java-17-version)
-        require_value "$1" "${2:-}"; JAVA_17_VERSION="$2"; shift ;;
-      --java-17-version=*) JAVA_17_VERSION="${1#*=}" ;;
+        require_value "$1" "${2:-}"; JAVA_17_VERSION="$2"
+        record_flag_override java-17 --java-17-version "$JAVA_17_VERSION"; shift ;;
+      --java-17-version=*)
+        JAVA_17_VERSION="${1#*=}"
+        [[ -n "$JAVA_17_VERSION" ]] || die "--java-17-version requires a value"
+        record_flag_override java-17 --java-17-version "$JAVA_17_VERSION" ;;
       --java-21-version)
-        require_value "$1" "${2:-}"; JAVA_21_VERSION="$2"; shift ;;
-      --java-21-version=*) JAVA_21_VERSION="${1#*=}" ;;
+        require_value "$1" "${2:-}"; JAVA_21_VERSION="$2"
+        record_flag_override java-21 --java-21-version "$JAVA_21_VERSION"; shift ;;
+      --java-21-version=*)
+        JAVA_21_VERSION="${1#*=}"
+        [[ -n "$JAVA_21_VERSION" ]] || die "--java-21-version requires a value"
+        record_flag_override java-21 --java-21-version "$JAVA_21_VERSION" ;;
       --dotnet-8-version)
-        require_value "$1" "${2:-}"; DOTNET_8_VERSION="$2"; shift ;;
-      --dotnet-8-version=*) DOTNET_8_VERSION="${1#*=}" ;;
+        require_value "$1" "${2:-}"; DOTNET_8_VERSION="$2"
+        record_flag_override dotnet-8 --dotnet-8-version "$DOTNET_8_VERSION"; shift ;;
+      --dotnet-8-version=*)
+        DOTNET_8_VERSION="${1#*=}"
+        [[ -n "$DOTNET_8_VERSION" ]] || die "--dotnet-8-version requires a value"
+        record_flag_override dotnet-8 --dotnet-8-version "$DOTNET_8_VERSION" ;;
       --dotnet-10-version)
-        require_value "$1" "${2:-}"; DOTNET_10_VERSION="$2"; shift ;;
-      --dotnet-10-version=*) DOTNET_10_VERSION="${1#*=}" ;;
+        require_value "$1" "${2:-}"; DOTNET_10_VERSION="$2"
+        record_flag_override dotnet-10 --dotnet-10-version "$DOTNET_10_VERSION"; shift ;;
+      --dotnet-10-version=*)
+        DOTNET_10_VERSION="${1#*=}"
+        [[ -n "$DOTNET_10_VERSION" ]] || die "--dotnet-10-version requires a value"
+        record_flag_override dotnet-10 --dotnet-10-version "$DOTNET_10_VERSION" ;;
       --openspec-version)
-        require_value "$1" "${2:-}"; OPENSPEC_VERSION="$2"; shift ;;
-      --openspec-version=*) OPENSPEC_VERSION="${1#*=}" ;;
+        require_value "$1" "${2:-}"; OPENSPEC_VERSION="$2"
+        record_flag_override openspec --openspec-version "$OPENSPEC_VERSION"; shift ;;
+      --openspec-version=*)
+        OPENSPEC_VERSION="${1#*=}"
+        [[ -n "$OPENSPEC_VERSION" ]] || die "--openspec-version requires a value"
+        record_flag_override openspec --openspec-version "$OPENSPEC_VERSION" ;;
       --superpowers-ref)
-        require_value "$1" "${2:-}"; SUPERPOWERS_REF="$2"; shift ;;
-      --superpowers-ref=*) SUPERPOWERS_REF="${1#*=}" ;;
+        require_value "$1" "${2:-}"; SUPERPOWERS_REF="$2"
+        record_flag_override superpowers --superpowers-ref "$SUPERPOWERS_REF"; shift ;;
+      --superpowers-ref=*)
+        SUPERPOWERS_REF="${1#*=}"
+        [[ -n "$SUPERPOWERS_REF" ]] || die "--superpowers-ref requires a value"
+        record_flag_override superpowers --superpowers-ref "$SUPERPOWERS_REF" ;;
       --karpathy-ref)
-        require_value "$1" "${2:-}"; KARPATHY_REF="$2"; shift ;;
-      --karpathy-ref=*) KARPATHY_REF="${1#*=}" ;;
+        require_value "$1" "${2:-}"; KARPATHY_REF="$2"
+        record_flag_override karpathy-ref --karpathy-ref "$KARPATHY_REF"; shift ;;
+      --karpathy-ref=*)
+        KARPATHY_REF="${1#*=}"
+        [[ -n "$KARPATHY_REF" ]] || die "--karpathy-ref requires a value"
+        record_flag_override karpathy-ref --karpathy-ref "$KARPATHY_REF" ;;
       --karpathy-sha256)
         require_value "$1" "${2:-}"; KARPATHY_SHA256="$2"; shift ;;
       --karpathy-sha256=*) KARPATHY_SHA256="${1#*=}" ;;
       --shellcheck-version)
-        require_value "$1" "${2:-}"; SHELLCHECK_VERSION="$2"; shift ;;
-      --shellcheck-version=*) SHELLCHECK_VERSION="${1#*=}" ;;
+        require_value "$1" "${2:-}"; SHELLCHECK_VERSION="$2"
+        record_flag_override shellcheck --shellcheck-version "$SHELLCHECK_VERSION"; shift ;;
+      --shellcheck-version=*)
+        SHELLCHECK_VERSION="${1#*=}"
+        [[ -n "$SHELLCHECK_VERSION" ]] || die "--shellcheck-version requires a value"
+        record_flag_override shellcheck --shellcheck-version "$SHELLCHECK_VERSION" ;;
       --gitleaks-version)
-        require_value "$1" "${2:-}"; GITLEAKS_VERSION="$2"; shift ;;
-      --gitleaks-version=*) GITLEAKS_VERSION="${1#*=}" ;;
+        require_value "$1" "${2:-}"; GITLEAKS_VERSION="$2"
+        record_flag_override gitleaks --gitleaks-version "$GITLEAKS_VERSION"; shift ;;
+      --gitleaks-version=*)
+        GITLEAKS_VERSION="${1#*=}"
+        [[ -n "$GITLEAKS_VERSION" ]] || die "--gitleaks-version requires a value"
+        record_flag_override gitleaks --gitleaks-version "$GITLEAKS_VERSION" ;;
       --pyyaml-version)
-        require_value "$1" "${2:-}"; PYYAML_VERSION="$2"; shift ;;
-      --pyyaml-version=*) PYYAML_VERSION="${1#*=}" ;;
+        require_value "$1" "${2:-}"; PYYAML_VERSION="$2"
+        record_flag_override pyyaml --pyyaml-version "$PYYAML_VERSION"; shift ;;
+      --pyyaml-version=*)
+        PYYAML_VERSION="${1#*=}"
+        [[ -n "$PYYAML_VERSION" ]] || die "--pyyaml-version requires a value"
+        record_flag_override pyyaml --pyyaml-version "$PYYAML_VERSION" ;;
       --gcm-path)
         require_value "$1" "${2:-}"; GCM_WINDOWS_PATH="$2"; shift ;;
       --gcm-path=*) GCM_WINDOWS_PATH="${1#*=}" ;;
       -h|--help)
         usage
+        exit 0
+        ;;
+      --version)
+        printf '%s\n' "$SCRIPT_VERSION"
         exit 0
         ;;
       *)
@@ -446,6 +549,36 @@ parse_args() {
   done
 
   (( REPAIR_CODEX == 0 || SKIP_CODEX == 0 )) || die "--repair-codex cannot be combined with --skip-codex"
+}
+
+requested_value_for() {
+  printf '%s' "${REQUESTED_VALUE[$1]:-}"
+}
+
+requested_source_for() {
+  printf '%s' "${REQUESTED_SOURCE[$1]:-}"
+}
+
+# validate_requested_values is the gate: every effective value the installer
+# is about to act on must be scalar-grammar-clean before any installation
+# work begins. Called from main between parse_args, the last thing that can
+# change an effective value, and validate_environment, the first thing that
+# inspects the machine. karpathy-sha256 is excluded: it is not a requested
+# value, defaults to empty by design, and install_karpathy_skill already
+# holds it to ^[0-9a-f]{64}$.
+validate_requested_values() {
+  local key value source
+  for key in "${CATALOG_ORDER[@]}"; do
+    [[ "$key" != "karpathy-sha256" ]] || continue
+    value="$(requested_value_for "$key")"
+    source="$(requested_source_for "$key")"
+    if [[ -z "$value" ]]; then
+      die "invalid value for '$key' from $source: empty"
+    fi
+    if [[ ! "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._:+@/-]*$ ]]; then
+      die "invalid value for '$key' from $source: '$value'"
+    fi
+  done
 }
 
 validate_environment() {
@@ -651,6 +784,11 @@ render_mise_configuration() {
   # config. The projects on this workstation build on 17, so 17 is the default
   # and 21 is the one you opt into. Reordering this list silently changes which
   # JDK every unpinned build picks up.
+  # DOTNET_EF_VERSION is assigned only through resolve_pin's nameref, so the
+  # literal assignment is invisible to static analysis, and seeing
+  # DOTNET_10_VERSION and DOTNET_8_VERSION assigned nearby, it is flagged as a
+  # probable misspelling of one of those.
+  # shellcheck disable=SC2153
   cat <<EOF_MISE
 [tools]
 java = ["${JAVA_17_VERSION}", "${JAVA_21_VERSION}"]
@@ -1572,6 +1710,7 @@ EOF_SUMMARY
 
 main() {
   parse_args "$@"
+  validate_requested_values
   validate_environment
 
   if (( VERIFY_ONLY == 1 )); then

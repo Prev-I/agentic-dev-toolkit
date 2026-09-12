@@ -13,7 +13,6 @@ DRY_RUN=0
 JSON_MODE=0
 UNINSTALL_TOOL=0
 COMMAND=""
-UV_BIN=""
 UPTIME_FILE="${HRT_UPTIME_FILE:-/proc/uptime}"
 readonly UPTIME_FILE
 
@@ -39,6 +38,9 @@ die_usage() {
   exit 2
 }
 
+[[ "$UPTIME_FILE" == /* && -r "$UPTIME_FILE" ]] ||
+  die_usage "HRT_UPTIME_FILE must be an absolute readable path"
+
 quote_command() {
   printf '+'
   printf ' %q' "$@"
@@ -53,6 +55,7 @@ run() {
 }
 
 resolve_executable() {
+  # The first argument names the caller variable that receives the safe path.
   local output_name="$1"
   local env_name="$2"
   local default_name="$3"
@@ -131,8 +134,8 @@ main() {
     version) printf '%s\n' "$SCRIPT_VERSION" ;;
     install)
       resolve_executable UV_BIN HRT_UV_BIN uv
-      [[ -n "$UV_BIN" ]] || die_usage "uv is required but was not found"
       ;;
+    # Audit and remove gain their command dependencies in their later tasks.
     audit) : "$JSON_MODE" "$UPTIME_FILE" ;;
     remove) : "$UNINSTALL_TOOL" "$UPTIME_FILE" ;;
     *) die_usage "unsupported command: $COMMAND" ;;

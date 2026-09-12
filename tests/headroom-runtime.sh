@@ -46,11 +46,15 @@ install_stubs() {
       printf '#!%s\n' "$BASH_BIN"
       cat <<'STUB'
 if [[ "$0" == */readlink && "$1" == "-f" ]]; then
-  printf '%s\n' "$0" "$@" >> "$HRT_COMMAND_LOG"
+  printf '%s\n' '---' "$0" "$@" >> "$HRT_COMMAND_LOG"
   printf '%s\n' "${HRT_READLINK_TARGET:-$2}"
   exit 0
 fi
-printf '%s\n' "$0" "$@" >> "$HRT_COMMAND_LOG"
+printf '%s\n' '---' "$0" "$@" >> "$HRT_COMMAND_LOG"
+case "${0##*/}:$*" in
+  uv:'tool install '*) printf '%s\n' '---' "$0" "$@" >> "$HRT_MUTATION_LOG" ;;
+  headroom:'install apply '*) printf '%s\n' '---' "$0" "$@" >> "$HRT_MUTATION_LOG" ;;
+esac
 STUB
     } > "$CASE_DIR/bin/$command"
     chmod 0755 "$CASE_DIR/bin/$command"
@@ -65,6 +69,7 @@ new_case() {
     "$CASE_DIR/systemd" "$CASE_DIR/deploy"
   : > "$CASE_DIR/uptime"
   : > "$CASE_DIR/commands"
+  : > "$CASE_DIR/mutations"
 
   export HRT_HOME="$CASE_DIR/home"
   export HRT_PROC_ROOT="$CASE_DIR/proc"
@@ -73,6 +78,7 @@ new_case() {
   export HRT_HEADROOM_DEPLOY_ROOT="$CASE_DIR/deploy"
   export HRT_UPTIME_FILE="$CASE_DIR/uptime"
   export HRT_COMMAND_LOG="$CASE_DIR/commands"
+  export HRT_MUTATION_LOG="$CASE_DIR/mutations"
   unset OPENCODE_CONFIG
 
   install_stubs
@@ -190,7 +196,7 @@ run_install_and_print_uv() {
   source_file="$(source_cli_without_main)"
   CLI_OUTPUT="$(run_in_fixture_path "$BASH_BIN" -s "$source_file" 2>&1 <<'SCRIPT'
 source "$1"
-main install --dry-run
+resolve_executable UV_BIN HRT_UV_BIN uv
 printf '%s\n' "$UV_BIN"
 SCRIPT
 )" && CLI_STATUS=0 || CLI_STATUS=$?
@@ -793,6 +799,7 @@ test_version_does_not_require_an_uptime_file() {
 
 test_missing_uv_seam_cannot_fall_back_to_the_host() {
   new_case missing-uv
+  printf '%s\n' '0.00 0.00' > "$HRT_UPTIME_FILE"
   rm "$CASE_DIR/bin/uv"
   unset HRT_UV_BIN
   run_cli install --dry-run
@@ -805,6 +812,7 @@ test_missing_uv_seam_cannot_fall_back_to_the_host() {
 
 test_default_uv_resolution_rejects_a_non_executable_canonical_path() {
   new_case default-uv-non-executable
+  printf '%s\n' '0.00 0.00' > "$HRT_UPTIME_FILE"
   unset HRT_UV_BIN
   export HRT_READLINK_TARGET="$CASE_DIR/not-executable"
   run_cli install --dry-run
@@ -816,6 +824,7 @@ test_default_uv_resolution_rejects_a_non_executable_canonical_path() {
 
 test_non_executable_override_is_rejected() {
   new_case non-executable-override
+  printf '%s\n' '0.00 0.00' > "$HRT_UPTIME_FILE"
   chmod 0644 "$HRT_UV_BIN"
   run_cli install --dry-run
   assert_equal "$CLI_STATUS" "2" "non-executable seams must be rejected"
@@ -849,6 +858,137 @@ test_shipped_file_modes_and_entrypoint_are_preserved() {
   assert_equal "$test_mode" "100644" "the test suite must be tracked non-executable"
 }
 
+new_installable_absent_case() {
+  new_case "$1"
+  printf '%s\n' '0.00 0.00' > "$HRT_UPTIME_FILE"
+  mkdir -p "$HRT_HEADROOM_DEPLOY_ROOT/default"
+  {
+    printf '#!%s\n' "$BASH_BIN"
+    cat <<'STUB'
+printf '%s\n' '---' "$0" "$@" >> "$HRT_COMMAND_LOG"
+if [[ "$1 $2" == 'tool install' ]]; then
+  printf '%s\n' '---' "$0" "$@" >> "$HRT_MUTATION_LOG"
+  : > "$HRT_HOME/package-installed"
+fi
+STUB
+  } > "$HRT_UV_BIN"
+  {
+    printf '#!%s\n' "$BASH_BIN"
+    printf '%s\n' "printf 'Linux\\n'"
+  } > "$HRT_UNAME_BIN"
+  {
+    printf '#!%s\n' "$BASH_BIN"
+    cat <<'STUB'
+case "$*" in
+  *'is-enabled headroom-default.service'*) [[ -f "$HRT_SYSTEMD_USER_DIR/headroom-default.service" ]] && printf 'enabled\n' || printf 'disabled\n' ;;
+  *'is-active headroom-default.service'*) [[ -f "$HRT_SYSTEMD_USER_DIR/headroom-default.service" ]] && printf 'active\n' || printf 'inactive\n' ;;
+  *'show headroom-default.service'*'ExecMainStatus'*) printf '0\n' ;;
+  *'is-active opencode.service'*) printf 'inactive\n' ;;
+esac
+STUB
+  } > "$HRT_SYSTEMCTL_BIN"
+  {
+    printf '#!%s\n' "$BASH_BIN"
+    cat <<'STUB'
+case "$1 $2" in
+  '--version ')
+    [[ -f "$HRT_HOME/package-installed" ]] || exit 1
+    printf 'headroom %s\n' "${HRT_FIX_HEADROOM_VERSION:-0.37.0}"
+    ;;
+  'plugins list') ;;
+  'install apply')
+    printf '%s\n' '---' "$0" "$@" >> "$HRT_MUTATION_LOG"
+    printf '%s\n' '{"profile":"default","targets":[],"mutations":[],"memory_enabled":false,"telemetry_enabled":false,"base_env":{"HEADROOM_BEACON":"off","HEADROOM_UPDATE_CHECK":"off","HEADROOM_TELEMETRY":"off"}}' > "$HRT_HEADROOM_DEPLOY_ROOT/default/manifest.json"
+    printf '%s\n' '[Unit]' > "$HRT_SYSTEMD_USER_DIR/headroom-default.service"
+    ;;
+esac
+STUB
+  } > "$HRT_HEADROOM_BIN"
+  {
+    printf '#!%s\n' "$BASH_BIN"
+    cat <<'STUB'
+if [[ -f "$HRT_SYSTEMD_USER_DIR/headroom-default.service" ]]; then
+  printf '%s\n' 'LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("headroom",pid=42,fd=3))'
+fi
+STUB
+  } > "$HRT_SS_BIN"
+  {
+    printf '#!%s\n' "$BASH_BIN"
+    printf '%s\n' "printf '%s\\n' '{\"ready\":true,\"version\":\"0.37.0\"}'"
+  } > "$HRT_CURL_BIN"
+  {
+    printf '#!%s\n' "$BASH_BIN"
+    printf '%s\n' "printf '600\\n'"
+  } > "$HRT_STAT_BIN"
+  {
+    printf '#!%s\n' "$BASH_BIN"
+    cat <<'STUB'
+printf '%s\n' '---' "$0" "$@" >> "$HRT_COMMAND_LOG"
+printf '%s\n' '31.00 0.00' > "$HRT_UPTIME_FILE"
+STUB
+  } > "$HRT_SLEEP_BIN"
+  chmod 0755 "$HRT_UNAME_BIN" "$HRT_SYSTEMCTL_BIN" "$HRT_HEADROOM_BIN" \
+    "$HRT_SS_BIN" "$HRT_CURL_BIN" "$HRT_STAT_BIN" "$HRT_SLEEP_BIN"
+}
+
+test_install_absent_uses_the_exact_approved_commands() {
+  new_installable_absent_case install-absent
+  run_cli install
+  assert_equal "$CLI_STATUS" 0 "an absent runtime must install"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" "---
+$HRT_UV_BIN
+tool
+install
+--python
+3.13
+headroom-ai[proxy]==0.37.0
+---
+$HRT_HEADROOM_BIN
+install
+apply
+--preset
+persistent-service
+--runtime
+python
+--scope
+provider
+--providers
+manual
+--profile
+default
+--port
+8787
+--mode
+cache
+--no-telemetry
+--env
+HEADROOM_BEACON=off
+--env
+HEADROOM_UPDATE_CHECK=off" "install must use the approved package and no-target apply arguments"
+  [[ "$(<"$HRT_MUTATION_LOG")" != *'--target'* && "$(<"$HRT_MUTATION_LOG")" != *'user'* &&
+    "$(<"$HRT_MUTATION_LOG")" != *'auto'* && "$(<"$HRT_MUTATION_LOG")" != *'deploy'* &&
+    "$(<"$HRT_MUTATION_LOG")" != *'wrap'* && "$(<"$HRT_MUTATION_LOG")" != *'[all]'* &&
+    "$(<"$HRT_MUTATION_LOG")" != *'[ml]'* ]] || fail "apply must retain its service-only boundary"
+}
+
+test_install_dry_run_prints_but_does_not_mutate() {
+  new_installable_absent_case install-dry-run
+  run_cli install --dry-run
+  assert_equal "$CLI_STATUS" 0 "an absent runtime dry-run must succeed"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "dry-run must not invoke mutation stubs"
+  assert_contains "$CLI_OUTPUT" 'headroom-ai\[proxy\]==0.37.0' "dry-run must print package installation"
+  assert_contains "$CLI_OUTPUT" '--providers manual' "dry-run must print the service-only apply command"
+}
+
+test_install_rejects_an_invalid_uptime_source_before_mutation() {
+  new_installable_absent_case install-invalid-uptime
+  export HRT_UPTIME_FILE=relative/uptime
+  run_cli install
+  unset HRT_UPTIME_FILE
+  assert_equal "$CLI_STATUS" 2 "install must validate its readiness uptime source"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "invalid install uptime must block mutations"
+}
+
 JQ_BIN="$(command -v jq || true)"
 [[ -n "$JQ_BIN" ]] || fail "jq is required for Headroom runtime tests"
 JQ_BIN="$(readlink -f "$JQ_BIN")"
@@ -872,6 +1012,9 @@ test_missing_uv_seam_cannot_fall_back_to_the_host
 test_default_uv_resolution_rejects_a_non_executable_canonical_path
 test_non_executable_override_is_rejected
 test_shipped_file_modes_and_entrypoint_are_preserved
+test_install_absent_uses_the_exact_approved_commands
+test_install_dry_run_prints_but_does_not_mutate
+test_install_rejects_an_invalid_uptime_source_before_mutation
 test_conforming_runtime_passes
 test_json_audit_has_stable_shape
 test_audit_policy_and_error_findings

@@ -277,9 +277,9 @@ check_generated_permissions() {
   elif [[ ! "$mode" =~ ^[0-7]{1,4}$ ]]; then
     add_finding ERROR HEADROOM_PERMISSIONS_UNREADABLE "$MANIFEST_PATH" \
       "Generated Headroom permissions are not a valid octal mode."
-  elif (( (8#$mode & 8#777) > 8#600 )); then
+  elif (( 8#$mode & 8#7177 )); then
     add_finding WARN HEADROOM_PERMISSIONS_BROAD "$MANIFEST_PATH" \
-      "Generated Headroom files have broader-than-0600 permissions."
+      "Generated Headroom files have permissions outside owner read/write."
   fi
 }
 
@@ -416,21 +416,22 @@ render_json() {
 }
 
 render_resolution_error_json() {
-  local message="$1" jq_candidate="${JQ_BIN:-${HRT_JQ_BIN:-}}"
+  local message="$1" jq_candidate="${JQ_BIN:-${HRT_JQ_BIN:-}}" rendered
   # shellcheck disable=SC2016 # jq variables must remain literal for jq, not Bash.
   local resolution_envelope='{schemaVersion: 1, toolVersion: $version, action: "audit", status: "ERROR", findings: [], error: $error}'
 
   if [[ -z "$jq_candidate" ]]; then
+    # This PATH jq only serializes a usage error, so it is a best-effort safe serializer, not normal audit resolution.
     jq_candidate="$(command -v jq || true)"
   fi
   if [[ "$jq_candidate" == /* && -x "$jq_candidate" ]]; then
-    "$jq_candidate" -n --arg version "$SCRIPT_VERSION" --arg error "$message" \
-      "$resolution_envelope"
-  else
-    printf 'ERROR: %s\n' "$message" >&2
-    printf '{"schemaVersion":1,"toolVersion":"%s","action":"audit","status":"ERROR","findings":[],"error":"audit command resolution failed"}\n' \
-      "$SCRIPT_VERSION"
+    if rendered="$("$jq_candidate" -n --arg version "$SCRIPT_VERSION" --arg error "$message" \
+      "$resolution_envelope")"; then
+      printf '%s\n' "$rendered"
+      return 0
+    fi
   fi
+  return 1
 }
 
 run_audit() {

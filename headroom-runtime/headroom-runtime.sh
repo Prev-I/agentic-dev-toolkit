@@ -277,6 +277,7 @@ check_generated_permissions() {
   elif [[ ! "$mode" =~ ^[0-7]{1,4}$ ]]; then
     add_finding ERROR HEADROOM_PERMISSIONS_UNREADABLE "$MANIFEST_PATH" \
       "Generated Headroom permissions are not a valid octal mode."
+  # 07177 covers special bits, owner execute, and every group/other permission bit.
   elif (( 8#$mode & 8#7177 )); then
     add_finding WARN HEADROOM_PERMISSIONS_BROAD "$MANIFEST_PATH" \
       "Generated Headroom files have permissions outside owner read/write."
@@ -399,20 +400,31 @@ render_human() {
 }
 
 render_json() {
-  local status="$1" findings='[]' index
+  local status="$1" findings='[]' index rendered
   # shellcheck disable=SC2016 # jq variables must remain literal for jq, not Bash.
   local append_finding='$findings + [{severity: $severity, code: $code, subject: $subject, message: $message}]'
   # shellcheck disable=SC2016 # jq variables must remain literal for jq, not Bash.
   local audit_envelope='{schemaVersion: 1, toolVersion: $version, action: "audit", status: $status, findings: $findings}'
 
   for index in "${!F_CODE[@]}"; do
-    findings="$("$JQ_BIN" -cn --argjson findings "$findings" \
+    if ! findings="$("$JQ_BIN" -cn --argjson findings "$findings" \
       --arg severity "${F_SEVERITY[$index]}" --arg code "${F_CODE[$index]}" \
       --arg subject "${F_SUBJECT[$index]}" --arg message "${F_MESSAGE[$index]}" \
-      "$append_finding")"
+      "$append_finding")"; then
+      return 1
+    fi
   done
-  "$JQ_BIN" -n --arg version "$SCRIPT_VERSION" --arg status "$status" --argjson findings "$findings" \
-    "$audit_envelope"
+  if rendered="$("$JQ_BIN" -n --arg version "$SCRIPT_VERSION" --arg status "$status" --argjson findings "$findings" \
+    "$audit_envelope")" && [[ -n "$rendered" ]]; then
+    printf '%s\n' "$rendered"
+    return 0
+  fi
+  return 1
+}
+
+render_fixed_error_json() {
+  printf '{"schemaVersion":1,"toolVersion":"%s","action":"audit","status":"ERROR","findings":[],"error":"audit command resolution failed"}\n' \
+    "$SCRIPT_VERSION"
 }
 
 render_resolution_error_json() {
@@ -426,7 +438,7 @@ render_resolution_error_json() {
   fi
   if [[ "$jq_candidate" == /* && -x "$jq_candidate" ]]; then
     if rendered="$("$jq_candidate" -n --arg version "$SCRIPT_VERSION" --arg error "$message" \
-      "$resolution_envelope")"; then
+      "$resolution_envelope")" && [[ -n "$rendered" ]]; then
       printf '%s\n' "$rendered"
       return 0
     fi
@@ -445,7 +457,15 @@ run_audit() {
   resolve_executable STAT_BIN HRT_STAT_BIN stat
   audit_runtime
   status="$(status_for_findings)"
-  if (( JSON_MODE )); then render_json "$status"; else render_human "$status"; fi
+  if (( JSON_MODE )); then
+    if ! render_json "$status"; then
+      printf 'ERROR: audit JSON rendering failed\n' >&2
+      render_fixed_error_json
+      return 2
+    fi
+  else
+    render_human "$status"
+  fi
   case "$status" in PASS|WARN) return 0 ;; FAIL) return 1 ;; ERROR) return 2 ;; esac
 }
 

@@ -41,7 +41,11 @@ usage() {
 
 die_usage() {
   if [[ "$COMMAND" == audit && "$JSON_MODE" == 1 ]]; then
-    render_resolution_error_json "$1"
+    if ! render_resolution_error_json "$1"; then
+      printf 'ERROR: %s\n' "$1" >&2
+      printf '{"schemaVersion":1,"toolVersion":"%s","action":"audit","status":"ERROR","findings":[],"error":"audit command resolution failed"}\n' \
+        "$SCRIPT_VERSION"
+    fi
   else
     printf 'ERROR: %s\n' "$1" >&2
   fi
@@ -182,6 +186,7 @@ check_listener() {
     return
   fi
   while IFS= read -r row; do
+    # ss prints state, queues, local address, peer address, then process details.
     IFS=' ' read -r _ _ _ local_address _ <<<"$row"
     [[ "$local_address" == *":${HEADROOM_PORT}" ]] || continue
     listener_found=1
@@ -269,10 +274,10 @@ check_generated_permissions() {
   if ! mode="$("$STAT_BIN" -c %a "$MANIFEST_PATH")"; then
     add_finding ERROR HEADROOM_PERMISSIONS_UNREADABLE "$MANIFEST_PATH" \
       "Generated Headroom permissions could not be inspected."
-  elif [[ ! "$mode" =~ ^[0-7]{3,4}$ ]]; then
+  elif [[ ! "$mode" =~ ^[0-7]{1,4}$ ]]; then
     add_finding ERROR HEADROOM_PERMISSIONS_UNREADABLE "$MANIFEST_PATH" \
       "Generated Headroom permissions are not a valid octal mode."
-  elif (( 8#$mode > 8#600 )); then
+  elif (( (8#$mode & 8#777) > 8#600 )); then
     add_finding WARN HEADROOM_PERMISSIONS_BROAD "$MANIFEST_PATH" \
       "Generated Headroom files have broader-than-0600 permissions."
   fi
@@ -415,6 +420,9 @@ render_resolution_error_json() {
   # shellcheck disable=SC2016 # jq variables must remain literal for jq, not Bash.
   local resolution_envelope='{schemaVersion: 1, toolVersion: $version, action: "audit", status: "ERROR", findings: [], error: $error}'
 
+  if [[ -z "$jq_candidate" ]]; then
+    jq_candidate="$(command -v jq || true)"
+  fi
   if [[ "$jq_candidate" == /* && -x "$jq_candidate" ]]; then
     "$jq_candidate" -n --arg version "$SCRIPT_VERSION" --arg error "$message" \
       "$resolution_envelope"

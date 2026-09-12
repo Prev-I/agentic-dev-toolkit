@@ -92,6 +92,19 @@ run_cli() {
     CLI_STATUS=0 || CLI_STATUS=$?
 }
 
+run_cli_split_streams() {
+  local stdout_file="$CASE_DIR/stdout"
+  local stderr_file="$CASE_DIR/stderr"
+
+  if run_in_fixture_path "$BASH_BIN" "$CLI" "$@" >"$stdout_file" 2>"$stderr_file"; then
+    CLI_STATUS=0
+  else
+    CLI_STATUS=$?
+  fi
+  CLI_STDOUT="$(<"$stdout_file")"
+  CLI_STDERR="$(<"$stderr_file")"
+}
+
 run_cli_from() {
   local directory="$1"
   shift
@@ -468,6 +481,13 @@ test_audit_warning_and_non_invocation_boundaries() {
   [[ "$CLI_OUTPUT" != *HEADROOM_PERMISSIONS_BROAD* ]] ||
     fail "tighter manifest permissions must not report broad permissions"
 
+  new_conforming_case compact-tighter-permissions
+  export HRT_FIX_MANIFEST_MODE=40
+  run_cli audit
+  assert_equal "$CLI_STATUS" 0 "compact tighter manifest permissions must not error"
+  [[ "$CLI_OUTPUT" != *HEADROOM_PERMISSIONS_BROAD* ]] ||
+    fail "compact tighter manifest permissions must not report broad permissions"
+
   new_conforming_case invalid-permissions
   export HRT_FIX_MANIFEST_MODE=invalid
   assert_audit_finding 2 HEADROOM_PERMISSIONS_UNREADABLE
@@ -581,6 +601,38 @@ test_audit_command_and_flag_validation() {
   assert_equal "$CLI_STATUS" 2 "invalid audit JSON option must be a usage error"
   assert_equal "$("$JQ_BIN" -r '.status' <<<"$CLI_OUTPUT")" ERROR \
     "invalid audit JSON option must emit a valid error envelope"
+
+  new_conforming_case fixture-path-jq-resolution
+  ln -s "$JQ_BIN" "$CASE_DIR/bin/jq"
+  unset HRT_JQ_BIN
+  run_cli_split_streams audit --json $'--invalid\n\001'
+  assert_equal "$CLI_STATUS" 2 "fixture-path jq must preserve audit usage status"
+  assert_equal "$("$JQ_BIN" -r '.status' <<<"$CLI_STDOUT")" ERROR \
+    "fixture-path jq must render a valid error envelope"
+  assert_contains "$("$JQ_BIN" -r '.error' <<<"$CLI_STDOUT")" 'unknown audit option' \
+    "fixture-path jq error envelope must retain the diagnostic"
+  assert_equal "$CLI_STDERR" '' "fixture-path jq must not emit a fallback diagnostic"
+
+  new_conforming_case missing-jq-fallback
+  unset HRT_JQ_BIN
+  run_cli_split_streams audit --json $'--invalid\n\001'
+  assert_equal "$CLI_STATUS" 2 "missing jq fallback must preserve audit usage status"
+  assert_equal "$("$JQ_BIN" -r '.status' <<<"$CLI_STDOUT")" ERROR \
+    "missing jq fallback must keep stdout valid JSON"
+  assert_equal "$("$JQ_BIN" -r '.error' <<<"$CLI_STDOUT")" 'audit command resolution failed' \
+    "missing jq fallback must use a fixed JSON diagnostic"
+  assert_contains "$CLI_STDERR" 'unknown audit option' \
+    "missing jq fallback must preserve unsafe detail on stderr"
+
+  new_conforming_case failing-jq-renderer
+  {
+    printf '#!%s\n' "$BASH_BIN"
+    printf '%s\n' 'exit 1'
+  } > "$CASE_DIR/bin/jq-failing"
+  chmod 0755 "$CASE_DIR/bin/jq-failing"
+  export HRT_JQ_BIN="$CASE_DIR/bin/jq-failing"
+  run_cli_split_streams audit --json --invalid
+  assert_equal "$CLI_STATUS" 2 "a failed jq renderer must not change the usage exit code"
 }
 
 test_version_is_exact() {

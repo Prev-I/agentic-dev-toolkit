@@ -161,7 +161,7 @@ prints only the mutation commands that the real run would execute. It never
 performs a package, service or file mutation. Audit never mutates and accepts
 no dry-run flag.
 
-The script version is `0.1.1`. This component defines the local rule
+The script version is `0.1.2`. This component defines the local rule
 that future behavior or output changes bump that version in the same commit:
 patch for fixes, minor for additive interface changes and major for breaking
 changes.
@@ -360,7 +360,7 @@ the doctor-style shape:
 ```json
 {
   "schemaVersion": 1,
-  "toolVersion": "0.1.1",
+  "toolVersion": "0.1.2",
   "action": "audit",
   "status": "WARN",
   "findings": [
@@ -382,10 +382,12 @@ escaping.
 
 Audit fails when any of these invariants is violated:
 
-- `headroom --version` is exactly 0.37.0;
+- `headroom --version` is exactly `headroom, version 0.37.0`;
 - `headroom-default.service` is enabled and active/running;
 - `http://127.0.0.1:8787/readyz` succeeds, reports ready and version 0.37.0;
-- port 8787 listens only on `127.0.0.1` and belongs to the Headroom process;
+- port 8787 listens only on `127.0.0.1` and is owned by the PID from the
+  managed `default/runner.pid`, whose NUL-separated arguments contain the
+  precise `-m headroom.cli proxy` invocation;
 - manifest profile is `default`;
 - manifest targets and managed mutations are empty;
 - manifest memory and telemetry are disabled;
@@ -393,20 +395,27 @@ Audit fails when any of these invariants is violated:
   `HEADROOM_UPDATE_CHECK=off`;
 - every present effective/global OpenCode config candidate has no Headroom
   integration reference;
-- `headroom-opencode` is absent;
+- `headroom-opencode` is absent from OpenCode's global `node_modules` directory
+  and package manifest dependencies;
 - the OpenCode process has no `HEADROOM_PROXY_URL` or equivalent integration
   environment;
 - neither unit depends on the other.
 
-An unreadable manifest, unavailable required command, malformed JSON, or an
+An unreadable Headroom or OpenCode package manifest, unavailable required command, malformed JSON, or an
 ambiguous listener/process owner is `ERROR`, because the check did not establish
 a result. Curl uses a five-second connect/request bound. The audit makes one
 bounded readiness request; it does not wait indefinitely or turn a transiently
 slow endpoint into an ambiguous pass.
 
-Listener ownership absent from `ss` output is ambiguous, not evidence that a
-port is free. This includes listeners owned by another user when process
-attribution is unavailable.
+Audit resolves Headroom from `HRT_HEADROOM_BIN` when supplied; otherwise it
+uses the uv/XDG tool-bin resolution (`UV_TOOL_BIN_DIR`, `XDG_BIN_HOME`,
+`XDG_DATA_HOME`'s sibling `bin`, then `$HOME/.local/bin`) before an optional
+`PATH` fallback. Listener ownership absent from `ss` output, a missing or
+unreadable managed PID, or an unreadable/non-matching managed command line is
+ambiguous, not evidence that a port is free. A listener PID that differs from
+the managed PID is foreign (`FAIL`). Before installation, where no managed PID
+exists, every attributed listener is existing foreign state; no process-name
+heuristic establishes Headroom ownership. Process arguments are never emitted.
 
 OpenCode may legitimately be stopped or not installed. In that state the
 process-environment coupling check is satisfied and reported informationally;
@@ -421,7 +430,7 @@ whether or not the process runs.
 
 Audit warns rather than fails for:
 
-- optional Kompress degraded/not-ready while overall readiness is true;
+- optional `.checks.kompress.ready=false` while overall readiness is true;
 - generated directory/file modes that are broader than the observed
   `0600` manifest boundary;
 - a recorded or observed upstream lifecycle exit-241 symptom that does not

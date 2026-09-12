@@ -67,8 +67,14 @@ coupling findings use the `HEADROOM_OPENCODE_*` prefix. Non-blocking findings
 are `HEADROOM_KOMPRESS_OPTIONAL_DEGRADED`, `HEADROOM_LIFECYCLE_EXIT_241`, and
 `HEADROOM_PERMISSIONS_BROAD`.
 
-Audit is non-destructive. It does not query Telegram, edit OpenCode, or dump
-process environment values.
+Audit is non-destructive. It resolves Headroom first from `HRT_HEADROOM_BIN`,
+then its uv/XDG tool destination, and only then from `PATH`. For a managed
+deployment it establishes listener ownership from `default/runner.pid`, the
+listener owner PID, and the non-disclosed NUL-separated process arguments
+(`-m headroom.cli proxy`); unreadable or ambiguous ownership is `ERROR`.
+Without a managed deployment PID, an attributed listener is existing foreign
+state rather than a Headroom-owned listener. Audit does not query Telegram,
+edit OpenCode, or dump process environment values or command lines.
 
 ## WSL Shutdown/Start Validation
 
@@ -84,7 +90,9 @@ after the distribution starts, not availability during shutdown.
 
 ## Known Findings
 
-Optional Kompress can be degraded while required Headroom readiness succeeds.
+Optional Kompress can be degraded at `.checks.kompress.ready` while required
+Headroom readiness succeeds. Its status is informational and excluded from the
+overall readiness result.
 The component does not add the optional ML dependency set without a separate
 benefit and risk evaluation. Upstream may record lifecycle exit `241` during
 explicit stop/restart despite successful recovery. Generated operational files

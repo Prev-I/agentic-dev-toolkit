@@ -541,6 +541,31 @@ test_audit_warning_and_non_invocation_boundaries() {
   assert_json_finding_array 'FAIL,FAIL' 'HEADROOM_SERVICE_DISABLED,HEADROOM_SERVICE_INACTIVE'
 }
 
+test_normal_json_renderer_failure_is_atomic() {
+  new_conforming_case partial-normal-jq-renderer
+  export HRT_FIX_CURL_BODY='{"ready":true,"version":"0.37.0","kompress":{"ready":false}}'
+  export HRT_REAL_JQ_BIN="$JQ_BIN"
+  {
+    printf '#!%s\n' "$BASH_BIN"
+    cat <<'STUB'
+if [[ "$1" == -n ]]; then
+  printf '%s\n' '{"partial":true}'
+  exit 1
+fi
+exec "$HRT_REAL_JQ_BIN" "$@"
+STUB
+  } > "$CASE_DIR/bin/jq-partial"
+  chmod 0755 "$CASE_DIR/bin/jq-partial"
+  export HRT_JQ_BIN="$CASE_DIR/bin/jq-partial"
+  run_cli_split_streams audit --json
+  assert_equal "$CLI_STATUS" 2 "a normal JSON renderer failure must fail audit"
+  assert_equal "$CLI_STDOUT" \
+    '{"schemaVersion":1,"toolVersion":"0.1.0","action":"audit","status":"ERROR","findings":[],"error":"audit command resolution failed"}' \
+    "a normal JSON renderer failure must emit only the fixed JSON error envelope"
+  assert_equal "$("$JQ_BIN" -r '.status' <<<"$CLI_STDOUT")" ERROR \
+    "a normal JSON renderer failure must leave stdout valid JSON"
+}
+
 test_audit_command_and_flag_validation() {
   new_conforming_case missing-curl
   rm "$HRT_CURL_BIN"
@@ -653,6 +678,21 @@ test_audit_command_and_flag_validation() {
     "a partial jq renderer failure must leave stdout valid JSON"
   assert_contains "$CLI_STDERR" 'unknown audit option' \
     "a partial jq renderer failure must preserve detail on stderr"
+
+  new_conforming_case empty-jq-resolution-renderer
+  {
+    printf '#!%s\n' "$BASH_BIN"
+    printf '%s\n' 'exit 0'
+  } > "$CASE_DIR/bin/jq-empty"
+  chmod 0755 "$CASE_DIR/bin/jq-empty"
+  export HRT_JQ_BIN="$CASE_DIR/bin/jq-empty"
+  run_cli_split_streams audit --json --invalid
+  assert_equal "$CLI_STATUS" 2 "an empty jq resolution renderer must preserve the usage exit code"
+  assert_equal "$CLI_STDOUT" \
+    '{"schemaVersion":1,"toolVersion":"0.1.0","action":"audit","status":"ERROR","findings":[],"error":"audit command resolution failed"}' \
+    "an empty jq resolution renderer must emit the fixed JSON error envelope"
+  assert_contains "$CLI_STDERR" 'unknown audit option' \
+    "an empty jq resolution renderer must preserve detail on stderr"
 }
 
 test_version_is_exact() {
@@ -838,6 +878,7 @@ test_audit_policy_and_error_findings
 test_audit_opencode_isolation_findings
 test_audit_accepts_uncoupled_opencode_global_surfaces
 test_audit_warning_and_non_invocation_boundaries
+test_normal_json_renderer_failure_is_atomic
 test_audit_command_and_flag_validation
 
 printf 'PASS: Headroom runtime tests\n'

@@ -86,7 +86,7 @@ new_case() {
   export HRT_MUTATION_LOG="$CASE_DIR/mutations"
   unset OPENCODE_CONFIG UV_TOOL_BIN_DIR XDG_BIN_HOME XDG_DATA_HOME \
     HRT_FIX_CURL_BODY HRT_FIX_CURL_STATUS HRT_FIX_EXEC_MAIN_STATUS \
-    HRT_FIX_HEADROOM_PLUGINS HRT_FIX_HEADROOM_PLUGINS_STATUS HRT_FIX_HEADROOM_VERSION \
+    HRT_FIX_HEADROOM_VERSION HRT_FIX_HEADROOM_VERSION_OUTPUT \
     HRT_FIX_MANIFEST_MODE HRT_FIX_OPENCODE_ACTIVE HRT_FIX_OPENCODE_PID \
     HRT_FIX_SERVICE_ACTIVE HRT_FIX_SERVICE_ENABLED HRT_FIX_SS_OUTPUT HRT_FIX_SS_OUTPUT_AFTER_APPLY HRT_FIX_SS_STATUS \
     HRT_FIX_STAT_STATUS HRT_FIX_TOOL_LINK_TARGET HRT_FIX_UV_INSTALL_NO_TOOL \
@@ -247,20 +247,22 @@ new_conforming_case() {
   printf '%s\n' '{"profile":"default","targets":[],"mutations":[],"memory_enabled":false,"telemetry_enabled":false,"base_env":{"HEADROOM_BEACON":"off","HEADROOM_UPDATE_CHECK":"off","HEADROOM_TELEMETRY":"off"}}' \
     > "$HRT_HEADROOM_DEPLOY_ROOT/default/manifest.json"
   printf '%s\n' '[Unit]' > "$HRT_SYSTEMD_USER_DIR/headroom-default.service"
+  printf '%s\n' 42 > "$HRT_HEADROOM_DEPLOY_ROOT/default/runner.pid"
+  mkdir -p "$HRT_PROC_ROOT/42"
+  printf '%s\0' python -m headroom.cli proxy --profile default > "$HRT_PROC_ROOT/42/cmdline"
   export HRT_FIX_HEADROOM_VERSION=0.37.0
   export HRT_FIX_SERVICE_ENABLED=enabled
   export HRT_FIX_SERVICE_ACTIVE=active
-  export HRT_FIX_CURL_BODY='{"ready":true,"version":"0.37.0"}'
-  export HRT_FIX_SS_OUTPUT='LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("headroom",pid=42,fd=3))'
-  unset HRT_FIX_HEADROOM_PLUGINS HRT_FIX_CURL_STATUS HRT_FIX_EXEC_MAIN_STATUS \
+  export HRT_FIX_CURL_BODY='{"ready":true,"version":"0.37.0","checks":{"kompress":{"ready":true}}}'
+  export HRT_FIX_SS_OUTPUT='LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("python",pid=42,fd=3))'
+  unset HRT_FIX_CURL_STATUS HRT_FIX_EXEC_MAIN_STATUS \
     HRT_FIX_OPENCODE_ACTIVE HRT_FIX_OPENCODE_PID HRT_FIX_MANIFEST_MODE \
-    HRT_FIX_HEADROOM_PLUGINS_STATUS HRT_FIX_STAT_STATUS
+    HRT_FIX_STAT_STATUS
 
   {
     printf '#!%s\n' "$BASH_BIN"
     cat <<'STUB'
-if [[ "$1" == "--version" ]]; then printf 'headroom %s\n' "$HRT_FIX_HEADROOM_VERSION"; exit 0; fi
-if [[ "$1 $2" == "plugins list" ]]; then printf '%s\n' "${HRT_FIX_HEADROOM_PLUGINS:-}"; exit "${HRT_FIX_HEADROOM_PLUGINS_STATUS:-0}"; fi
+if [[ "$1" == "--version" ]]; then printf '%s\n' "${HRT_FIX_HEADROOM_VERSION_OUTPUT:-headroom, version ${HRT_FIX_HEADROOM_VERSION}}"; exit 0; fi
 if [[ "$1 $2" == "install remove" ]]; then
   printf '%s\n' '---' "$0" "$@" >> "$HRT_MUTATION_LOG"
   [[ -n "${HRT_FIX_REMOVE_LEAVES_ARTIFACTS:-}" ]] || {
@@ -343,7 +345,7 @@ test_json_audit_has_stable_shape() {
   assert_equal "$CLI_STATUS" "0" "JSON audit must pass"
   assert_equal "$("$JQ_BIN" -r '.schemaVersion' <<<"$CLI_OUTPUT")" "1" \
     "JSON schema version must be one"
-  assert_equal "$("$JQ_BIN" -r '.toolVersion' <<<"$CLI_OUTPUT")" "0.1.1" \
+  assert_equal "$("$JQ_BIN" -r '.toolVersion' <<<"$CLI_OUTPUT")" "0.1.2" \
     "toolVersion must identify the toolkit component"
   assert_equal "$("$JQ_BIN" -r '.status' <<<"$CLI_OUTPUT")" "PASS" \
     "JSON status must match human status"
@@ -369,6 +371,16 @@ assert_json_finding_array() {
 }
 
 test_audit_policy_and_error_findings() {
+  # Captured from Headroom 0.37.0: exact punctuation is part of the pin contract.
+  new_conforming_case exact-real-version-capture
+  export HRT_FIX_HEADROOM_VERSION_OUTPUT='headroom, version 0.37.0'
+  run_cli audit
+  assert_equal "$CLI_STATUS" 0 "the exact Headroom 0.37.0 version capture must pass"
+
+  new_conforming_case legacy-version-shape
+  export HRT_FIX_HEADROOM_VERSION_OUTPUT='headroom 0.37.0'
+  assert_audit_finding 1 HEADROOM_VERSION_MISMATCH
+
   new_conforming_case version
   export HRT_FIX_HEADROOM_VERSION=0.36.0
   assert_audit_finding 1 HEADROOM_VERSION_MISMATCH
@@ -410,11 +422,11 @@ test_audit_policy_and_error_findings() {
     "audit missing readiness version must have its own diagnostic"
 
   new_conforming_case unsafe-bind
-  export HRT_FIX_SS_OUTPUT='LISTEN 0 4096 0.0.0.0:8787 0.0.0.0:* users:(("headroom",pid=42,fd=3))'
+  export HRT_FIX_SS_OUTPUT='LISTEN 0 4096 0.0.0.0:8787 0.0.0.0:* users:(("python",pid=42,fd=3))'
   assert_audit_finding 1 HEADROOM_UNSAFE_BIND
 
   new_conforming_case foreign-listener
-  export HRT_FIX_SS_OUTPUT='LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("other",pid=42,fd=3))'
+  export HRT_FIX_SS_OUTPUT='LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("python",pid=43,fd=3))'
   assert_audit_finding 1 HEADROOM_FOREIGN_LISTENER
 
   new_conforming_case unknown-listener
@@ -422,19 +434,20 @@ test_audit_policy_and_error_findings() {
   assert_audit_finding 2 HEADROOM_LISTENER_OWNER_AMBIGUOUS
 
   new_conforming_case mixed-listeners
-  export HRT_FIX_SS_OUTPUT=$'LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("headroom",pid=42,fd=3))\nLISTEN 0 4096 0.0.0.0:8787 0.0.0.0:* users:(("headroom",pid=42,fd=3))'
+  export HRT_FIX_SS_OUTPUT=$'LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("python",pid=42,fd=3))\nLISTEN 0 4096 0.0.0.0:8787 0.0.0.0:* users:(("python",pid=42,fd=3))'
   assert_audit_finding 1 HEADROOM_UNSAFE_BIND
 
   new_conforming_case ipv6-listener
-  export HRT_FIX_SS_OUTPUT='LISTEN 0 4096 [::1]:8787 [::]:* users:(("headroom",pid=42,fd=3))'
+  export HRT_FIX_SS_OUTPUT='LISTEN 0 4096 [::1]:8787 [::]:* users:(("python",pid=42,fd=3))'
   assert_audit_finding 1 HEADROOM_UNSAFE_BIND
 
-  new_conforming_case unanchored-owner
-  export HRT_FIX_SS_OUTPUT='LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("other-headroom-helper",pid=42,fd=3))'
-  assert_audit_finding 1 HEADROOM_FOREIGN_LISTENER
+  new_conforming_case python-owner
+  export HRT_FIX_SS_OUTPUT='LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("python",pid=42,fd=3))'
+  run_cli audit
+  assert_equal "$CLI_STATUS" 0 "the upstream Python owner label must be accepted"
 
   new_conforming_case shared-listener
-  export HRT_FIX_SS_OUTPUT='LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("headroom",pid=42,fd=3),("other",pid=43,fd=3))'
+  export HRT_FIX_SS_OUTPUT='LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("python",pid=42,fd=3),("python",pid=43,fd=3))'
   assert_audit_finding 1 HEADROOM_FOREIGN_LISTENER
 
   new_conforming_case unreadable-manifest
@@ -487,9 +500,17 @@ test_audit_policy_and_error_findings() {
 }
 
 test_audit_opencode_isolation_findings() {
-  new_conforming_case package
-  export HRT_FIX_HEADROOM_PLUGINS=headroom-opencode
+  new_conforming_case package-directory
+  mkdir -p "$HRT_OPENCODE_CONFIG_DIR/node_modules/headroom-opencode"
   assert_audit_finding 1 HEADROOM_OPENCODE_PACKAGE_PRESENT
+
+  new_conforming_case package-manifest-dependency
+  printf '%s\n' '{"dependencies":{"headroom-opencode":"1.0.0"}}' > "$HRT_OPENCODE_CONFIG_DIR/package.json"
+  assert_audit_finding 1 HEADROOM_OPENCODE_PACKAGE_PRESENT
+
+  new_conforming_case unreadable-package-manifest
+  mkdir "$HRT_OPENCODE_CONFIG_DIR/package.json"
+  assert_audit_finding 2 HEADROOM_OPENCODE_PACKAGE_UNREADABLE
 
   new_conforming_case config
   printf '%s\n' '{"plugin":"headroom-opencode"}' > "$HRT_OPENCODE_CONFIG_DIR/opencode.json"
@@ -541,7 +562,7 @@ test_audit_accepts_uncoupled_opencode_global_surfaces() {
 
 test_audit_warning_and_non_invocation_boundaries() {
   new_conforming_case kompress
-  export HRT_FIX_CURL_BODY='{"ready":true,"version":"0.37.0","kompress":{"ready":false}}'
+  export HRT_FIX_CURL_BODY='{"ready":true,"version":"0.37.0","checks":{"kompress":{"ready":false,"message":"optional model unavailable"}}}'
   run_cli audit --json
   assert_equal "$CLI_STATUS" 0 "optional Kompress degradation must not fail audit"
   assert_contains "$CLI_OUTPUT" HEADROOM_KOMPRESS_OPTIONAL_DEGRADED "Kompress warning must be reported"
@@ -622,7 +643,7 @@ test_audit_warning_and_non_invocation_boundaries() {
 
 test_normal_json_renderer_failure_is_atomic() {
   new_conforming_case partial-normal-jq-renderer
-  export HRT_FIX_CURL_BODY='{"ready":true,"version":"0.37.0","kompress":{"ready":false}}'
+  export HRT_FIX_CURL_BODY='{"ready":true,"version":"0.37.0","checks":{"kompress":{"ready":false,"message":"optional model unavailable"}}}'
   export HRT_REAL_JQ_BIN="$JQ_BIN"
   {
     printf '#!%s\n' "$BASH_BIN"
@@ -639,7 +660,7 @@ STUB
   run_cli_split_streams audit --json
   assert_equal "$CLI_STATUS" 2 "a normal JSON renderer failure must fail audit"
   assert_equal "$CLI_STDOUT" \
-    '{"schemaVersion":1,"toolVersion":"0.1.1","action":"audit","status":"ERROR","findings":[],"error":"audit command resolution failed"}' \
+    '{"schemaVersion":1,"toolVersion":"0.1.2","action":"audit","status":"ERROR","findings":[],"error":"audit command resolution failed"}' \
     "a normal JSON renderer failure must emit only the fixed JSON error envelope"
   assert_equal "$("$JQ_BIN" -r '.status' <<<"$CLI_STDOUT")" ERROR \
     "a normal JSON renderer failure must leave stdout valid JSON"
@@ -685,14 +706,14 @@ test_audit_command_and_flag_validation() {
   assert_contains "$CLI_OUTPUT" HEADROOM_VERSION_UNREADABLE \
     "unreadable Headroom version must have its own finding code"
 
-  new_conforming_case package-list-error
-  export HRT_FIX_HEADROOM_PLUGINS_STATUS=1
+  new_conforming_case invalid-package-manifest
+  printf '%s\n' not-json > "$HRT_OPENCODE_CONFIG_DIR/package.json"
   run_cli audit
-  assert_equal "$CLI_STATUS" 2 "package-list inspection failures must be errors"
+  assert_equal "$CLI_STATUS" 2 "package manifest inspection failures must be errors"
   assert_contains "$CLI_OUTPUT" HEADROOM_OPENCODE_PACKAGE_UNREADABLE \
-    "package-list inspection failures must report their finding code"
+    "package manifest inspection failures must report their finding code"
   [[ "$CLI_OUTPUT" != *HEADROOM_OPENCODE_PACKAGE_PRESENT* ]] ||
-    fail "package-list inspection failures must not claim the package is present"
+    fail "package manifest inspection failures must not claim the package is present"
 
   new_conforming_case invalid-flags
   run_cli audit --dry-run
@@ -751,7 +772,7 @@ test_audit_command_and_flag_validation() {
   run_cli_split_streams audit --json --invalid
   assert_equal "$CLI_STATUS" 2 "a partial jq renderer failure must preserve the usage exit code"
   assert_equal "$CLI_STDOUT" \
-    '{"schemaVersion":1,"toolVersion":"0.1.1","action":"audit","status":"ERROR","findings":[],"error":"audit command resolution failed"}' \
+    '{"schemaVersion":1,"toolVersion":"0.1.2","action":"audit","status":"ERROR","findings":[],"error":"audit command resolution failed"}' \
     "a failed jq renderer must emit only the fixed JSON error envelope"
   assert_equal "$("$JQ_BIN" -r '.status' <<<"$CLI_STDOUT")" ERROR \
     "a partial jq renderer failure must leave stdout valid JSON"
@@ -768,17 +789,102 @@ test_audit_command_and_flag_validation() {
   run_cli_split_streams audit --json --invalid
   assert_equal "$CLI_STATUS" 2 "an empty jq resolution renderer must preserve the usage exit code"
   assert_equal "$CLI_STDOUT" \
-    '{"schemaVersion":1,"toolVersion":"0.1.1","action":"audit","status":"ERROR","findings":[],"error":"audit command resolution failed"}' \
+    '{"schemaVersion":1,"toolVersion":"0.1.2","action":"audit","status":"ERROR","findings":[],"error":"audit command resolution failed"}' \
     "an empty jq resolution renderer must emit the fixed JSON error envelope"
   assert_contains "$CLI_STDERR" 'unknown audit option' \
     "an empty jq resolution renderer must preserve detail on stderr"
+}
+
+test_audit_resolves_headroom_from_the_uv_tool_destination() {
+  local tool_bin
+
+  new_conforming_case audit-uv-tool-bin
+  tool_bin="$HRT_HOME/uv-tools"
+  mkdir -p "$tool_bin"
+  cp "$HRT_HEADROOM_BIN" "$tool_bin/headroom"
+  chmod 0755 "$tool_bin/headroom"
+  rm "$HRT_HEADROOM_BIN"
+  unset HRT_HEADROOM_BIN
+  export UV_TOOL_BIN_DIR="$tool_bin"
+  run_cli audit
+  assert_equal "$CLI_STATUS" 0 "audit must find Headroom in UV_TOOL_BIN_DIR without PATH"
+  assert_contains "$CLI_OUTPUT" 'Status: PASS' "uv tool-bin discovery must preserve a passing audit"
+}
+
+test_audit_resolves_headroom_from_xdg_and_home_tool_destinations() {
+  local tool_bin
+
+  new_conforming_case audit-xdg-bin-home
+  tool_bin="$HRT_HOME/xdg-bin"
+  mkdir -p "$tool_bin"
+  cp "$HRT_HEADROOM_BIN" "$tool_bin/headroom"
+  chmod 0755 "$tool_bin/headroom"
+  rm "$HRT_HEADROOM_BIN"
+  unset HRT_HEADROOM_BIN
+  export XDG_BIN_HOME="$tool_bin"
+  run_cli audit
+  assert_equal "$CLI_STATUS" 0 "audit must find Headroom in XDG_BIN_HOME without PATH"
+
+  new_conforming_case audit-xdg-data-home
+  tool_bin="$HRT_HOME/bin"
+  mkdir -p "$tool_bin"
+  cp "$HRT_HEADROOM_BIN" "$tool_bin/headroom"
+  chmod 0755 "$tool_bin/headroom"
+  rm "$HRT_HEADROOM_BIN"
+  unset HRT_HEADROOM_BIN
+  export XDG_DATA_HOME="$HRT_HOME/xdg-data"
+  run_cli audit
+  assert_equal "$CLI_STATUS" 0 "audit must find Headroom in XDG_DATA_HOME's sibling bin without PATH"
+
+  new_conforming_case audit-home-tool-bin
+  tool_bin="$HRT_HOME/.local/bin"
+  mkdir -p "$tool_bin"
+  cp "$HRT_HEADROOM_BIN" "$tool_bin/headroom"
+  chmod 0755 "$tool_bin/headroom"
+  rm "$HRT_HEADROOM_BIN"
+  unset HRT_HEADROOM_BIN
+  run_cli audit
+  assert_equal "$CLI_STATUS" 0 "audit must find Headroom in the default uv tool directory without PATH"
+}
+
+test_audit_listener_uses_managed_pid_and_precise_python_invocation() {
+  new_conforming_case listener-runner-pid-without-trailing-newline
+  printf '%s' 42 > "$HRT_HEADROOM_DEPLOY_ROOT/default/runner.pid"
+  run_cli audit
+  assert_equal "$CLI_STATUS" 0 "a numeric runner PID without a trailing newline must be accepted"
+
+  new_conforming_case listener-missing-runner-pid
+  rm "$HRT_HEADROOM_DEPLOY_ROOT/default/runner.pid"
+  assert_audit_finding 2 HEADROOM_LISTENER_OWNER_AMBIGUOUS
+
+  new_conforming_case listener-invalid-runner-pid
+  printf '%s\n' not-a-pid > "$HRT_HEADROOM_DEPLOY_ROOT/default/runner.pid"
+  assert_audit_finding 2 HEADROOM_LISTENER_OWNER_AMBIGUOUS
+
+  new_conforming_case listener-missing-cmdline
+  rm "$HRT_PROC_ROOT/42/cmdline"
+  assert_audit_finding 2 HEADROOM_LISTENER_OWNER_AMBIGUOUS
+
+  new_conforming_case listener-wrong-cmdline
+  printf '%s\0' python -m headroom.cli serve SENSITIVE_CMDLINE_DO_NOT_PRINT > "$HRT_PROC_ROOT/42/cmdline"
+  assert_audit_finding 2 HEADROOM_LISTENER_OWNER_AMBIGUOUS
+  [[ "$CLI_OUTPUT" != *SENSITIVE_CMDLINE_DO_NOT_PRINT* ]] ||
+    fail "listener ownership findings must not print process arguments"
+
+  new_conforming_case listener-foreign-pid
+  export HRT_FIX_SS_OUTPUT='LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("python",pid=43,fd=3))'
+  assert_audit_finding 1 HEADROOM_FOREIGN_LISTENER
+
+  new_conforming_case listener-shared-foreign-pid
+  export HRT_FIX_SS_OUTPUT='LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("python",pid=42,fd=3),("python",pid=43,fd=3))'
+  assert_audit_finding 1 HEADROOM_FOREIGN_LISTENER
 }
 
 test_version_is_exact() {
   new_case version
   run_cli --version
   assert_equal "$CLI_STATUS" "0" "--version must succeed"
-  assert_equal "$CLI_OUTPUT" "0.1.1" "--version must print only the tool version"
+  assert_equal "$CLI_OUTPUT" "0.1.2" "--version must print only the tool version"
 }
 
 test_help_lists_the_three_commands() {
@@ -868,7 +974,7 @@ test_version_does_not_require_an_uptime_file() {
   run_cli --version
   unset HRT_UPTIME_FILE
   assert_equal "$CLI_STATUS" "0" "--version must not inspect uptime state"
-  assert_equal "$CLI_OUTPUT" "0.1.1" "--version must remain independent of uptime"
+  assert_equal "$CLI_OUTPUT" "0.1.2" "--version must remain independent of uptime"
 }
 
 test_missing_uv_seam_cannot_fall_back_to_the_host() {
@@ -934,7 +1040,7 @@ test_shipped_file_modes_and_entrypoint_are_preserved() {
 
 new_installable_absent_case() {
   new_case "$1"
-  unset HRT_FIX_HEADROOM_VERSION HRT_FIX_HEADROOM_PLUGINS HRT_FIX_EXEC_MAIN_STATUS \
+  unset HRT_FIX_HEADROOM_VERSION HRT_FIX_HEADROOM_VERSION_OUTPUT HRT_FIX_EXEC_MAIN_STATUS \
     HRT_FIX_OPENCODE_ACTIVE HRT_FIX_OPENCODE_PID HRT_FIX_SS_OUTPUT
   printf '%s\n' '0.00 0.00' > "$HRT_UPTIME_FILE"
   local headroom_template="$HRT_HEADROOM_BIN"
@@ -991,13 +1097,15 @@ STUB
 case "$1 $2" in
   '--version ')
     [[ -f "$HRT_HOME/package-installed" ]] || exit 1
-    printf 'headroom %s\n' "${HRT_FIX_HEADROOM_VERSION:-0.37.0}"
-    ;;
-  'plugins list') printf '%s\n' "${HRT_FIX_HEADROOM_PLUGINS:-}" ;;
+     printf '%s\n' "${HRT_FIX_HEADROOM_VERSION_OUTPUT:-headroom, version ${HRT_FIX_HEADROOM_VERSION:-0.37.0}}"
+     ;;
   'install apply')
     printf '%s\n' '---' "$0" "$@" >> "$HRT_MUTATION_LOG"
     /bin/mkdir -p "$HRT_HEADROOM_DEPLOY_ROOT/default"
     printf '%s\n' '{"profile":"default","targets":[],"mutations":[],"memory_enabled":false,"telemetry_enabled":false,"base_env":{"HEADROOM_BEACON":"off","HEADROOM_UPDATE_CHECK":"off","HEADROOM_TELEMETRY":"off"}}' > "$HRT_HEADROOM_DEPLOY_ROOT/default/manifest.json"
+    printf '%s\n' 42 > "$HRT_HEADROOM_DEPLOY_ROOT/default/runner.pid"
+    /bin/mkdir -p "$HRT_PROC_ROOT/42"
+    printf '%s\0' python -m headroom.cli proxy --profile default > "$HRT_PROC_ROOT/42/cmdline"
     printf '%s\n' '[Unit]' > "$HRT_SYSTEMD_USER_DIR/headroom-default.service"
     : > "$HRT_HOME/service-applied"
     ;;
@@ -1024,7 +1132,7 @@ if [[ -f "$HRT_HOME/service-applied" && -n "${HRT_FIX_SS_OUTPUT_AFTER_APPLY:-}" 
 elif [[ -n "${HRT_FIX_SS_OUTPUT:-}" ]]; then
   printf '%s\n' "$HRT_FIX_SS_OUTPUT"
 elif [[ -f "$HRT_HOME/service-applied" ]]; then
-  printf '%s\n' 'tcp LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("headroom",pid=42,fd=3))'
+    printf '%s\n' 'tcp LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("python",pid=42,fd=3))'
 fi
 STUB
   } > "$HRT_SS_BIN"
@@ -1156,7 +1264,7 @@ test_install_refuses_opencode_coupling_before_mutation() {
         /bin/chmod 0755 "$HRT_HOME/.local/bin/headroom"
         export HRT_HEADROOM_BIN="$HRT_HOME/.local/bin/headroom"
         : > "$HRT_HOME/package-installed"
-        export HRT_FIX_HEADROOM_PLUGINS=headroom-opencode
+        /bin/mkdir -p "$HRT_OPENCODE_CONFIG_DIR/node_modules/headroom-opencode"
         ;;
       environment)
         export HRT_FIX_OPENCODE_ACTIVE=active HRT_FIX_OPENCODE_PID=88
@@ -1178,7 +1286,7 @@ test_install_refuses_opencode_coupling_before_mutation() {
     assert_equal "$CLI_STATUS" 1 "$case_name coupling must refuse installation"
     assert_contains "$CLI_OUTPUT" "$expected_code" "$case_name coupling must retain its finding code"
     assert_equal "$(<"$HRT_MUTATION_LOG")" '' "$case_name coupling must block every mutation"
-    unset HRT_FIX_HEADROOM_PLUGINS HRT_FIX_OPENCODE_ACTIVE HRT_FIX_OPENCODE_PID
+    unset HRT_FIX_OPENCODE_ACTIVE HRT_FIX_OPENCODE_PID
   done
 }
 
@@ -1198,7 +1306,7 @@ test_install_state_matrix_core_refusals() {
   printf '%s\n' '0.00 0.00' > "$HRT_UPTIME_FILE"
   rm "$HRT_HEADROOM_BIN"
   unset HRT_HEADROOM_BIN
-  export HRT_FIX_SS_OUTPUT='tcp LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("headroom",pid=42,fd=3))'
+  export HRT_FIX_SS_OUTPUT='tcp LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("python",pid=42,fd=3))'
   run_cli install
   assert_equal "$CLI_STATUS" 1 "a deployment without a runtime must be orphaned"
   assert_contains "$CLI_OUTPUT" 'deployment exists without the pinned runtime' \
@@ -1383,12 +1491,12 @@ test_install_listener_classification_errors() {
   /bin/chmod 0755 "$HRT_HOME/.local/bin/headroom"
   : > "$HRT_HOME/package-installed"
   export HRT_HEADROOM_BIN="$HRT_HOME/.local/bin/headroom"
-  export HRT_FIX_SS_OUTPUT='tcp LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("headroom",pid=42,fd=3))'
+  export HRT_FIX_SS_OUTPUT='tcp LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("python",pid=42,fd=3))'
   run_cli install
-  assert_equal "$CLI_STATUS" 2 "an unmanaged Headroom listener must be ambiguous"
-  assert_contains "$CLI_OUTPUT" HEADROOM_UNMANAGED_LISTENER \
-    "an unmanaged Headroom listener must identify the ownership problem"
-  assert_contains "$CLI_OUTPUT" 'Status: ERROR' "an unmanaged Headroom listener must render ERROR"
+  assert_equal "$CLI_STATUS" 1 "an unmanaged listener must be a foreign existing-state conflict"
+  assert_contains "$CLI_OUTPUT" HEADROOM_FOREIGN_LISTENER \
+    "an unmanaged listener must identify the foreign ownership"
+  assert_contains "$CLI_OUTPUT" 'Status: FAIL' "an unmanaged listener must render FAIL"
   assert_equal "$(<"$HRT_MUTATION_LOG")" '' "an unmanaged Headroom listener must block every mutation"
 }
 
@@ -1573,19 +1681,19 @@ test_audit_listener_findings_are_distinct_and_ordered() {
   assert_json_finding_array 'FAIL,FAIL' 'HEADROOM_LISTENER_ABSENT,HEADROOM_NOT_READY'
 }
 
-test_install_unmanaged_unsafe_headroom_listener_is_ambiguous() {
+test_install_unmanaged_unsafe_listener_is_foreign() {
   new_installable_absent_case install-unmanaged-unsafe-headroom-listener
   /bin/mkdir -p "$HRT_HOME/.local/bin"
   /bin/cp "$HRT_HEADROOM_TEMPLATE" "$HRT_HOME/.local/bin/headroom"
   /bin/chmod 0755 "$HRT_HOME/.local/bin/headroom"
   : > "$HRT_HOME/package-installed"
   export HRT_HEADROOM_BIN="$HRT_HOME/.local/bin/headroom"
-  export HRT_FIX_SS_OUTPUT='tcp LISTEN 0 4096 0.0.0.0:8787 0.0.0.0:* users:(("headroom",pid=42,fd=3))'
+  export HRT_FIX_SS_OUTPUT='tcp LISTEN 0 4096 0.0.0.0:8787 0.0.0.0:* users:(("python",pid=42,fd=3))'
   run_cli install
-  assert_equal "$CLI_STATUS" 2 "an unsafe unmanaged Headroom listener must be ambiguous"
+  assert_equal "$CLI_STATUS" 1 "an unsafe unmanaged listener must be a foreign existing-state conflict"
   assert_contains "$CLI_OUTPUT" HEADROOM_UNSAFE_BIND "unsafe unmanaged ownership must retain bind evidence"
-  assert_contains "$CLI_OUTPUT" HEADROOM_UNMANAGED_LISTENER "unsafe unmanaged ownership must retain ownership evidence"
-  assert_contains "$CLI_OUTPUT" 'Status: ERROR' "unsafe unmanaged ownership must render ERROR"
+  assert_contains "$CLI_OUTPUT" HEADROOM_FOREIGN_LISTENER "unsafe unmanaged ownership must retain ownership evidence"
+  assert_contains "$CLI_OUTPUT" 'Status: FAIL' "unsafe unmanaged ownership must render FAIL"
   assert_equal "$(<"$HRT_MUTATION_LOG")" '' "unsafe unmanaged ownership must block every mutation"
 }
 
@@ -1778,7 +1886,7 @@ test_readiness_finalization() {
     "wrong readiness version must not be retried"
 
   new_installable_absent_case install-readiness-preserves-audit-failure
-  export HRT_FIX_SS_OUTPUT_AFTER_APPLY='tcp LISTEN 0 4096 0.0.0.0:8787 0.0.0.0:* users:(("headroom",pid=42,fd=3))'
+  export HRT_FIX_SS_OUTPUT_AFTER_APPLY='tcp LISTEN 0 4096 0.0.0.0:8787 0.0.0.0:* users:(("python",pid=42,fd=3))'
   run_cli install
   assert_equal "$CLI_STATUS" 1 "an unrelated post-apply audit failure must fail installation"
   assert_contains "$CLI_OUTPUT" HEADROOM_UNSAFE_BIND \
@@ -1930,6 +2038,18 @@ default" "nonconforming removal must delegate the exact approved command"
     "removal must not modify OpenCode configuration"
 }
 
+test_remove_preserves_opencode_package_inspection_errors() {
+  new_conforming_case remove-unreadable-package-manifest
+  mkdir "$HRT_OPENCODE_CONFIG_DIR/package.json"
+  run_cli remove
+  assert_equal "$CLI_STATUS" 2 "an unreadable OpenCode package manifest must block removal"
+  assert_contains "$CLI_OUTPUT" HEADROOM_OPENCODE_PACKAGE_UNREADABLE \
+    "removal must retain the package inspection error"
+  assert_contains "$CLI_OUTPUT" 'ERROR: HEADROOM_OPENCODE_PACKAGE_UNREADABLE' \
+    "removal must not demote package inspection errors to warnings"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "an inspection error must block removal mutation"
+}
+
 test_remove_isolated_and_verified() {
   new_conforming_case remove-opencode-warning
   printf '%s\n' '{"plugin":"headroom-opencode"}' > "$HRT_OPENCODE_CONFIG_DIR/opencode.json"
@@ -2045,7 +2165,7 @@ test_install_canonicalizes_the_executable_created_by_uv
 test_install_error_evidence_overrides_manifest_refusal
 test_install_missing_tool_and_path_fallback_after_uv
 test_audit_listener_findings_are_distinct_and_ordered
-test_install_unmanaged_unsafe_headroom_listener_is_ambiguous
+test_install_unmanaged_unsafe_listener_is_foreign
 test_audit_conforming_runtime_handles_ss_failure
 test_install_unions_classification_and_preflight_evidence
 test_readiness_finalization
@@ -2054,6 +2174,7 @@ test_install_deduplicates_and_renders_secondary_refusals
 test_remove_manifest_aware_behavior
 test_remove_validates_uv_before_uninstall_mutations
 test_remove_warns_about_nonconforming_manifest_before_delegation
+test_remove_preserves_opencode_package_inspection_errors
 test_remove_isolated_and_verified
 test_conforming_runtime_passes
 test_json_audit_has_stable_shape
@@ -2063,5 +2184,8 @@ test_audit_accepts_uncoupled_opencode_global_surfaces
 test_audit_warning_and_non_invocation_boundaries
 test_normal_json_renderer_failure_is_atomic
 test_audit_command_and_flag_validation
+test_audit_resolves_headroom_from_the_uv_tool_destination
+test_audit_resolves_headroom_from_xdg_and_home_tool_destinations
+test_audit_listener_uses_managed_pid_and_precise_python_invocation
 
 printf 'PASS: Headroom runtime tests\n'

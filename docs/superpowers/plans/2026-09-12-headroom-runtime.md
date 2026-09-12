@@ -51,7 +51,7 @@
 - Produces CLI commands: `install`, `audit`, `remove`, `--help`, `--version`;
   Task 1 implements argument validation and temporary command handlers that
   resolve only the binaries each command needs, then return 0 without mutation.
-- Produces constants: `SCRIPT_VERSION=0.1.1`, `HEADROOM_VERSION=0.37.0`, `HEADROOM_PYTHON=3.13`, `HEADROOM_PROFILE=default`, `HEADROOM_PORT=8787`.
+- Produces constants: `SCRIPT_VERSION=0.1.2`, `HEADROOM_VERSION=0.37.0`, `HEADROOM_PYTHON=3.13`, `HEADROOM_PROFILE=default`, `HEADROOM_PORT=8787`.
 - Produces mutation wrapper: `run COMMAND...`, controlled by `DRY_RUN`.
 - Produces validated executable variables: `UV_BIN`, `HEADROOM_BIN`,
   `SYSTEMCTL_BIN`, `CURL_BIN`, `JQ_BIN`, `SS_BIN`, `UNAME_BIN`, and
@@ -76,7 +76,7 @@ test_version_is_exact() {
   new_case version
   run_cli --version
   assert_equal "$CLI_STATUS" "0" "--version must succeed"
-  assert_equal "$CLI_OUTPUT" "0.1.1" "--version must print only the tool version"
+  assert_equal "$CLI_OUTPUT" "0.1.2" "--version must print only the tool version"
 }
 
 test_help_lists_the_three_commands() {
@@ -131,7 +131,7 @@ Create `headroom-runtime/headroom-runtime.sh` with:
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-readonly SCRIPT_VERSION="0.1.1"
+readonly SCRIPT_VERSION="0.1.2"
 readonly HEADROOM_VERSION="0.37.0"
 readonly HEADROOM_PYTHON="3.13"
 readonly HEADROOM_PROFILE="default"
@@ -235,7 +235,7 @@ test_json_audit_has_stable_shape() {
   assert_equal "$CLI_STATUS" "0" "JSON audit must pass"
   assert_equal "$(jq -r '.schemaVersion' <<<"$CLI_OUTPUT")" "1" \
     "JSON schema version must be one"
-  assert_equal "$(jq -r '.toolVersion' <<<"$CLI_OUTPUT")" "0.1.1" \
+  assert_equal "$(jq -r '.toolVersion' <<<"$CLI_OUTPUT")" "0.1.2" \
     "toolVersion must identify the toolkit component"
   assert_equal "$(jq -r '.status' <<<"$CLI_OUTPUT")" "PASS" \
     "JSON status must match human status"
@@ -354,6 +354,14 @@ integration identifiers; do not load or rewrite them.
 
 Use stable finding order matching the check order above. `status_for_findings`
 returns `ERROR` if any error exists, then `FAIL`, then `WARN`, else `PASS`.
+
+The upstream runtime contract additionally resolves the Headroom executable
+from `HRT_HEADROOM_BIN`, then the uv/XDG tool-bin destination, and finally
+`PATH`. It identifies a managed listener by the numeric `default/runner.pid`,
+matching every `ss` owner PID, and the NUL-separated `-m headroom.cli proxy`
+process arguments under `/proc/<pid>/cmdline`; it does not trust the `ss`
+process name. Missing ownership evidence is `ERROR`, a different owner PID is
+`FAIL`, and an attributed pre-install listener is foreign existing state.
 
 - [ ] **Step 6: Run focused checks**
 
@@ -595,7 +603,7 @@ git commit -m "feat(headroom): add safe runtime removal"
 
 Create `headroom-runtime/README.md` with:
 
-- version 0.1.1 and Headroom 0.37.0;
+- version 0.1.2 and Headroom 0.37.0;
 - file map;
 - quick-start commands for dry-run, install, human/JSON audit, remove, and full uninstall;
 - PASS/WARN/FAIL/ERROR and exit-code table;

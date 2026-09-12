@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-readonly SCRIPT_VERSION="0.1.1"
+readonly SCRIPT_VERSION="0.1.2"
 readonly HEADROOM_VERSION="0.37.0"
 readonly HEADROOM_PYTHON="3.13"
 readonly HEADROOM_PROFILE="default"
@@ -14,6 +14,7 @@ readonly OPENCODE_CONFIG_DIR="${HRT_OPENCODE_CONFIG_DIR:-$RUNTIME_HOME/.config/o
 readonly SYSTEMD_USER_DIR="${HRT_SYSTEMD_USER_DIR:-$RUNTIME_HOME/.config/systemd/user}"
 readonly HEADROOM_DEPLOY_ROOT="${HRT_HEADROOM_DEPLOY_ROOT:-$RUNTIME_HOME/.headroom/deploy}"
 readonly MANIFEST_PATH="${HEADROOM_DEPLOY_ROOT}/${HEADROOM_PROFILE}/manifest.json"
+readonly RUNNER_PID_PATH="${HRT_RUNNER_PID_PATH:-${HEADROOM_DEPLOY_ROOT}/${HEADROOM_PROFILE}/runner.pid}"
 
 DRY_RUN=0
 JSON_MODE=0
@@ -137,7 +138,7 @@ check_headroom_version() {
   local output
 
   if output="$("$HEADROOM_BIN" --version)"; then
-    if [[ "$output" != "headroom ${HEADROOM_VERSION}" ]]; then
+    if [[ "$output" != "headroom, version ${HEADROOM_VERSION}" ]]; then
       add_finding FAIL HEADROOM_VERSION_MISMATCH headroom \
         "Headroom CLI is not version ${HEADROOM_VERSION}."
     fi
@@ -200,7 +201,7 @@ probe_readiness() {
     READINESS_RESULT=VERSION_MISMATCH
     return
   fi
-  if "$JQ_BIN" -e '.kompress.ready == false' >/dev/null <<<"$body"; then
+  if "$JQ_BIN" -e '.checks.kompress.ready == false' >/dev/null <<<"$body"; then
     READINESS_KOMPRESS_DEGRADED=1
   fi
   READINESS_RESULT=READY
@@ -228,11 +229,39 @@ check_readiness() {
   add_readiness_findings
 }
 
+runner_cmdline_is_headroom_proxy() {
+  local pid="$1" index
+  local -a arguments=()
+
+  [[ -r "$PROC_ROOT/$pid/cmdline" ]] || return 1
+  if ! mapfile -d '' -t arguments < "$PROC_ROOT/$pid/cmdline"; then
+    return 1
+  fi
+  for index in "${!arguments[@]}"; do
+    [[ "${arguments[$index]}" == -m ]] || continue
+    [[ "${arguments[$((index + 1))]:-}" == headroom.cli ]] || continue
+    [[ "${arguments[$((index + 2))]:-}" == proxy ]] && return 0
+  done
+  return 1
+}
+
 parse_listener() {
-  local output row owners owner owner_seen local_address
-  local listener_found=0 unsafe_bind=0 foreign_owner=0 ambiguous_owner=0
+  local output row owners owner_pid local_address runner_pid=""
+  local listener_found=0 unsafe_bind=0 foreign_owner=0 ambiguous_owner=0 managed_deployment=0
+  local managed_owner_seen=0 owner_seen=0
+  local -a runner_pid_lines=()
 
   LISTENER_STATE=AMBIGUOUS
+  if [[ -e "$MANIFEST_PATH" || -e "$SYSTEMD_USER_DIR/headroom-default.service" ]]; then
+    managed_deployment=1
+    if [[ ! -r "$RUNNER_PID_PATH" ]] || ! mapfile -t runner_pid_lines < "$RUNNER_PID_PATH" ||
+      [[ ${#runner_pid_lines[@]} -ne 1 || ! "${runner_pid_lines[0]}" =~ ^[1-9][0-9]*$ ]]; then
+      add_finding ERROR HEADROOM_LISTENER_OWNER_AMBIGUOUS "port ${HEADROOM_PORT}" \
+        "Headroom listener ownership could not be determined."
+      return
+    fi
+    runner_pid="${runner_pid_lines[0]}"
+  fi
   if ! output="$("$SS_BIN" -ltnp "sport = :${HEADROOM_PORT}")"; then
     add_finding ERROR HEADROOM_LISTENER_OWNER_AMBIGUOUS "port ${HEADROOM_PORT}" \
       "Headroom listener ownership could not be determined."
@@ -254,10 +283,18 @@ parse_listener() {
     fi
     owners="${row#*users:}"
     owner_seen=0
-    while [[ "$owners" =~ \"([^\"]+)\" ]]; do
-      owner="${BASH_REMATCH[1]}"
+    while [[ "$owners" =~ pid=([0-9]+) ]]; do
+      owner_pid="${BASH_REMATCH[1]}"
       owner_seen=1
-      [[ "$owner" == headroom ]] || foreign_owner=1
+      if (( managed_deployment )); then
+        if [[ "$owner_pid" == "$runner_pid" ]]; then
+          managed_owner_seen=1
+        else
+          foreign_owner=1
+        fi
+      else
+        foreign_owner=1
+      fi
       owners="${owners#*"${BASH_REMATCH[0]}"}"
     done
     (( owner_seen )) || ambiguous_owner=1
@@ -275,6 +312,15 @@ parse_listener() {
   if (( unsafe_bind )); then
     add_finding FAIL HEADROOM_UNSAFE_BIND "port ${HEADROOM_PORT}" \
       "Headroom is not bound only to 127.0.0.1."
+  fi
+  if (( managed_deployment && managed_owner_seen )) && ! runner_cmdline_is_headroom_proxy "$runner_pid"; then
+    add_finding ERROR HEADROOM_LISTENER_OWNER_AMBIGUOUS "port ${HEADROOM_PORT}" \
+      "Headroom listener ownership could not be determined."
+    LISTENER_STATE=AMBIGUOUS
+    return
+  fi
+  if (( managed_deployment && managed_owner_seen == 0 )); then
+    foreign_owner=1
   fi
   if (( foreign_owner )); then
     add_finding FAIL HEADROOM_FOREIGN_LISTENER "port ${HEADROOM_PORT}" \
@@ -386,13 +432,31 @@ check_opencode_config() {
 }
 
 check_opencode_package() {
-  local output
+  local package_dir="$OPENCODE_CONFIG_DIR/node_modules/headroom-opencode"
+  local manifest="$OPENCODE_CONFIG_DIR/package.json"
 
-  if ! output="$("$HEADROOM_BIN" plugins list 2>/dev/null)"; then
-    add_finding ERROR HEADROOM_OPENCODE_PACKAGE_UNREADABLE headroom-opencode \
-      "Headroom OpenCode package state could not be inspected."
-  elif [[ "${output,,}" == *headroom-opencode* ]]; then
-    add_finding FAIL HEADROOM_OPENCODE_PACKAGE_PRESENT headroom-opencode \
+  if [[ -e "$package_dir" ]]; then
+    add_finding FAIL HEADROOM_OPENCODE_PACKAGE_PRESENT "$package_dir" \
+      "The Headroom OpenCode integration package is present."
+  fi
+  [[ -e "$manifest" ]] || return 0
+  if [[ ! -f "$manifest" || ! -r "$manifest" ]] ||
+    ! "$JQ_BIN" -e '
+      type == "object" and
+      ((.dependencies? // {}) | type == "object") and
+      ((.devDependencies? // {}) | type == "object") and
+      ((.optionalDependencies? // {}) | type == "object") and
+      ((.peerDependencies? // {}) | type == "object")
+    ' "$manifest" >/dev/null; then
+    add_finding ERROR HEADROOM_OPENCODE_PACKAGE_UNREADABLE "$manifest" \
+      "OpenCode package manifest could not be inspected."
+  elif "$JQ_BIN" -e '
+    (.dependencies? // {})["headroom-opencode"] != null or
+    (.devDependencies? // {})["headroom-opencode"] != null or
+    (.optionalDependencies? // {})["headroom-opencode"] != null or
+    (.peerDependencies? // {})["headroom-opencode"] != null
+  ' "$manifest" >/dev/null; then
+    add_finding FAIL HEADROOM_OPENCODE_PACKAGE_PRESENT "$manifest" \
       "The Headroom OpenCode integration package is present."
   fi
 }
@@ -454,9 +518,7 @@ audit_runtime_without_readiness() {
   check_manifest
   check_generated_permissions
   check_opencode_config
-  if [[ -n "${HEADROOM_BIN:-}" ]]; then
-    check_opencode_package
-  fi
+  check_opencode_package
   check_opencode_environment
   check_unit_independence
 }
@@ -537,7 +599,14 @@ run_audit() {
   local status
 
   resolve_executable JQ_BIN HRT_JQ_BIN jq
-  resolve_executable HEADROOM_BIN HRT_HEADROOM_BIN headroom
+  if [[ -n "${HRT_HEADROOM_BIN:-}" ]]; then
+    resolve_executable HEADROOM_BIN HRT_HEADROOM_BIN headroom
+  else
+    resolve_headroom_tool_bin_dir
+    if ! HEADROOM_BIN="$(headroom_tool_path)"; then
+      resolve_executable HEADROOM_BIN HRT_HEADROOM_BIN headroom
+    fi
+  fi
   resolve_executable SYSTEMCTL_BIN HRT_SYSTEMCTL_BIN systemctl
   resolve_executable CURL_BIN HRT_CURL_BIN curl
   resolve_executable SS_BIN HRT_SS_BIN ss
@@ -629,7 +698,7 @@ headroom_package_state() {
     PACKAGE_STATE=UNINSPECTABLE
     add_finding ERROR HEADROOM_VERSION_UNREADABLE headroom \
       "Headroom CLI version could not be inspected."
-  elif [[ "$output" == "headroom ${HEADROOM_VERSION}" ]]; then
+  elif [[ "$output" == "headroom, version ${HEADROOM_VERSION}" ]]; then
     PACKAGE_STATE=EXACT
   else
     PACKAGE_STATE=WRONG_VERSION
@@ -665,9 +734,7 @@ deployment_state() {
           check_listener
           check_generated_permissions
           check_opencode_config
-          if [[ -n "${HEADROOM_BIN:-}" ]]; then
-            check_opencode_package
-          fi
+          check_opencode_package
           check_opencode_environment
           check_unit_independence
           case "$(status_for_findings)" in
@@ -790,13 +857,17 @@ demote_opencode_findings() {
   local index
 
   for index in "${!F_CODE[@]}"; do
-    [[ "${F_CODE[$index]}" == HEADROOM_OPENCODE_* ]] || continue
-    F_SEVERITY[index]=WARN
+    [[ "${F_SEVERITY[$index]}" == FAIL ]] || continue
+    case "${F_CODE[$index]}" in
+      HEADROOM_OPENCODE_CONFIG_PRESENT|HEADROOM_OPENCODE_PACKAGE_PRESENT|HEADROOM_OPENCODE_ENV_PRESENT|HEADROOM_OPENCODE_UNIT_COUPLED)
+        F_SEVERITY[index]=WARN
+        ;;
+    esac
   done
 }
 
 report_removal_warnings() {
-  local code mutation_risk=0
+  local code index mutation_risk=0 status
 
   for code in "${F_CODE[@]}"; do
     case "$code" in
@@ -804,8 +875,8 @@ report_removal_warnings() {
     esac
   done
   demote_opencode_findings
-  for code in "${!F_SEVERITY[@]}"; do
-    F_SEVERITY[code]=WARN
+  for index in "${!F_SEVERITY[@]}"; do
+    [[ "${F_SEVERITY[$index]}" == FAIL ]] && F_SEVERITY[index]=WARN
   done
   if (( mutation_risk )); then
     add_finding WARN HEADROOM_REMOVAL_MAY_REVERT_MUTATIONS "$MANIFEST_PATH" \
@@ -814,11 +885,13 @@ report_removal_warnings() {
   check_opencode_config
   check_opencode_environment
   check_unit_independence
-  [[ -z "${HEADROOM_BIN:-}" ]] || check_opencode_package
+  check_opencode_package
   demote_opencode_findings
   deduplicate_findings
-  [[ ${#F_CODE[@]} -eq 0 ]] || render_human "$(status_for_findings)"
+  status="$(status_for_findings)"
+  [[ ${#F_CODE[@]} -eq 0 ]] || render_human "$status"
   F_SEVERITY=() F_CODE=() F_SUBJECT=() F_MESSAGE=()
+  case "$status" in PASS|WARN) return 0 ;; FAIL) return 1 ;; ERROR) return 2 ;; esac
 }
 
 verify_removed() {
@@ -844,7 +917,7 @@ verify_removed() {
 }
 
 run_remove() {
-  local status
+  local status warning_status
 
   resolve_executable JQ_BIN HRT_JQ_BIN jq
   resolve_executable SYSTEMCTL_BIN HRT_SYSTEMCTL_BIN systemctl
@@ -903,7 +976,12 @@ run_remove() {
       return 1
       ;;
   esac
-  report_removal_warnings
+  if report_removal_warnings; then
+    :
+  else
+    warning_status=$?
+    return "$warning_status"
+  fi
   run "$HEADROOM_BIN" install remove --profile "$HEADROOM_PROFILE"
   if (( UNINSTALL_TOOL )); then
     run "$UV_BIN" tool uninstall headroom-ai
@@ -995,9 +1073,7 @@ run_install() {
   check_opencode_config
   check_opencode_environment
   check_unit_independence
-  if [[ "$PACKAGE_STATE" != ABSENT && "$PACKAGE_STATE" != UNINSPECTABLE ]]; then
-    check_opencode_package
-  fi
+  check_opencode_package
   F_SEVERITY=("${state_findings_severity[@]}" "${F_SEVERITY[@]}")
   F_CODE=("${state_findings_code[@]}" "${F_CODE[@]}")
   F_SUBJECT=("${state_findings_subject[@]}" "${F_SUBJECT[@]}")
@@ -1069,7 +1145,7 @@ run_install() {
       return 0
     fi
     if HEADROOM_BIN="$(headroom_tool_path)"; then
-      if package_state="$("$HEADROOM_BIN" --version)" && [[ "$package_state" == "headroom ${HEADROOM_VERSION}" ]]; then
+      if package_state="$("$HEADROOM_BIN" --version)" && [[ "$package_state" == "headroom, version ${HEADROOM_VERSION}" ]]; then
         PACKAGE_STATE=EXACT
       else
         PACKAGE_STATE=UNINSPECTABLE

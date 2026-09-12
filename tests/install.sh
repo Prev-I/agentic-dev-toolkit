@@ -1315,6 +1315,54 @@ test_installer_dies_on_a_missing_required_catalog_key() {
   [[ "$output" == *"missing required key: java-21"* ]] || fail "unexpected: $output"
 }
 
+test_installer_version_flag() {
+  local output status
+  set +e
+  output="$(bash "$INSTALLER" --version 2>&1)"
+  status=$?
+  set -e
+  assert_equal "$status" "0" "--version must exit 0"
+  assert_equal "$output" "0.1.0" "--version must print exactly the version"
+  [[ "$output" != *"Unknown option"* ]] \
+    || fail "--version must be parsed before the generic unknown-option arm"
+}
+
+test_installer_version_flag_performs_no_installation() {
+  local output
+  output="$(bash "$INSTALLER" --version 2>&1)"
+  [[ "$output" != *"=="* ]] || fail "--version must print no installation log"
+}
+
+test_installer_rejects_an_ungrammatical_override() {
+  local output bad
+  for bad in "24,25" "24 25" "24[0]" ; do
+    output="$(bash "$INSTALLER" --node-version="$bad" --dry-run 2>&1 || true)"
+    [[ "$output" == *"invalid value for 'node' from --node-version"* ]] \
+      || fail "'$bad' must be rejected naming key and source, got: $output"
+  done
+}
+
+test_installer_rejects_an_empty_inline_override() {
+  local output
+  output="$(bash "$INSTALLER" --node-version= --dry-run 2>&1 || true)"
+  [[ "$output" == *"requires a value"* ]] \
+    || fail "an empty inline value must be refused, got: $output"
+}
+
+test_installer_rejects_an_ungrammatical_environment_override() {
+  local output
+  output="$(ADT_MAVEN_VERSION='3.9.16 (rc)' bash "$INSTALLER" --dry-run 2>&1 || true)"
+  [[ "$output" == *"invalid value for 'maven' from ADT_MAVEN_VERSION"* ]] \
+    || fail "unexpected: $output"
+}
+
+test_an_invalid_override_installs_nothing() {
+  local output
+  output="$(bash "$INSTALLER" --node-version="24,25" --dry-run 2>&1 || true)"
+  [[ "$output" != *"Configuring mise runtimes"* ]] \
+    || fail "installation must not begin when an input is invalid"
+}
+
 TEMP_DIR="$(mktemp -d)"
 test_claude_template_resolves_after_copying_to_project_root
 
@@ -1459,5 +1507,11 @@ test_validator_reports_the_first_defect_in_source_order
 test_installer_dies_on_a_missing_catalog
 test_installer_dies_on_a_malformed_catalog_key
 test_installer_dies_on_a_missing_required_catalog_key
+test_installer_version_flag
+test_installer_version_flag_performs_no_installation
+test_installer_rejects_an_ungrammatical_override
+test_installer_rejects_an_empty_inline_override
+test_installer_rejects_an_ungrammatical_environment_override
+test_an_invalid_override_installs_nothing
 
 printf 'PASS: installer compatibility tests\n'

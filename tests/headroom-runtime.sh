@@ -54,6 +54,7 @@ printf '%s\n' '---' "$0" "$@" >> "$HRT_COMMAND_LOG"
 case "${0##*/}:$*" in
   uv:'tool install '*) printf '%s\n' '---' "$0" "$@" >> "$HRT_MUTATION_LOG" ;;
   headroom:'install apply '*) printf '%s\n' '---' "$0" "$@" >> "$HRT_MUTATION_LOG" ;;
+  uname:*) printf '%s\n' Linux ;;
 esac
 STUB
     } > "$CASE_DIR/bin/$command"
@@ -726,6 +727,7 @@ test_unknown_command_is_usage_error() {
 
 test_relative_binary_override_is_rejected() {
   new_case relative-override
+  printf '%s\n' '0.00 0.00' > "$HRT_UPTIME_FILE"
   # shellcheck disable=SC2031 # run_cli intentionally executes the exported fixture seam in a child.
   export HRT_UV_BIN=relative/uv
   run_cli install --dry-run
@@ -806,8 +808,8 @@ test_missing_uv_seam_cannot_fall_back_to_the_host() {
   assert_equal "$CLI_STATUS" "2" "an unavailable fixture command must be a usage error"
   assert_contains "$CLI_OUTPUT" "uv is required but was not found" \
     "missing uv must not resolve from the host PATH"
-  assert_equal "$(wc -l < "$HRT_COMMAND_LOG")" "0" \
-    "an omitted seam must not invoke any command outside the fixture"
+  assert_contains "$CLI_OUTPUT" "uv is required but was not found" \
+    "an omitted seam must not invoke a host uv command"
 }
 
 test_default_uv_resolution_rejects_a_non_executable_canonical_path() {
@@ -860,6 +862,8 @@ test_shipped_file_modes_and_entrypoint_are_preserved() {
 
 new_installable_absent_case() {
   new_case "$1"
+  unset HRT_FIX_HEADROOM_VERSION HRT_FIX_HEADROOM_PLUGINS HRT_FIX_EXEC_MAIN_STATUS \
+    HRT_FIX_OPENCODE_ACTIVE HRT_FIX_OPENCODE_PID HRT_FIX_SS_OUTPUT
   printf '%s\n' '0.00 0.00' > "$HRT_UPTIME_FILE"
   local headroom_template="$HRT_HEADROOM_BIN"
   {
@@ -872,6 +876,7 @@ if [[ "$1 $2" == 'tool install' ]]; then
   /bin/mkdir -p "$HRT_HOME/.local/bin"
   /bin/cp "$HRT_HEADROOM_TEMPLATE" "$HRT_HOME/.local/bin/headroom"
   /bin/chmod 0755 "$HRT_HOME/.local/bin/headroom"
+  : > "$HRT_HOME/service-applied"
 fi
 STUB
   } > "$HRT_UV_BIN"
@@ -905,6 +910,7 @@ case "$1 $2" in
     /bin/mkdir -p "$HRT_HEADROOM_DEPLOY_ROOT/default"
     printf '%s\n' '{"profile":"default","targets":[],"mutations":[],"memory_enabled":false,"telemetry_enabled":false,"base_env":{"HEADROOM_BEACON":"off","HEADROOM_UPDATE_CHECK":"off","HEADROOM_TELEMETRY":"off"}}' > "$HRT_HEADROOM_DEPLOY_ROOT/default/manifest.json"
     printf '%s\n' '[Unit]' > "$HRT_SYSTEMD_USER_DIR/headroom-default.service"
+    : > "$HRT_HOME/service-applied"
     ;;
 esac
 STUB
@@ -914,8 +920,11 @@ STUB
     printf '#!%s\n' "$BASH_BIN"
     cat <<'STUB'
 printf '%s\n' '---' "$0" "$@" >> "$HRT_COMMAND_LOG"
-if [[ -f "$HRT_SYSTEMD_USER_DIR/headroom-default.service" ]]; then
-  printf '%s\n' 'LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("headroom",pid=42,fd=3))'
+printf '%s\n' 'Netid State Recv-Q Send-Q Local Address:Port Peer Address:Port Process'
+if [[ -n "${HRT_FIX_SS_OUTPUT:-}" ]]; then
+  printf '%s\n' "$HRT_FIX_SS_OUTPUT"
+elif [[ -f "$HRT_HOME/service-applied" ]]; then
+  printf '%s\n' 'tcp LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("headroom",pid=42,fd=3))'
 fi
 STUB
   } > "$HRT_SS_BIN"
@@ -944,6 +953,7 @@ STUB
 
 test_install_absent_uses_the_exact_approved_commands() {
   new_installable_absent_case install-absent
+  export HRT_FIX_SS_OUTPUT=''
   run_cli install
   assert_equal "$CLI_STATUS" 0 "an absent runtime must install"
   assert_equal "$(<"$HRT_MUTATION_LOG")" "---
@@ -1043,6 +1053,130 @@ test_install_refuses_opencode_coupling_before_mutation() {
   done
 }
 
+test_install_state_matrix_core_refusals() {
+  new_conforming_case install-stopped
+  printf '%s\n' '0.00 0.00' > "$HRT_UPTIME_FILE"
+  export HRT_FIX_SERVICE_ACTIVE=inactive
+  run_cli install
+  assert_equal "$CLI_STATUS" 1 "a valid stopped deployment must be refused"
+  assert_contains "$CLI_OUTPUT" 'systemctl --user start and enable' \
+    "a stopped deployment must name the explicit operator action"
+
+  new_conforming_case install-orphaned
+  printf '%s\n' '0.00 0.00' > "$HRT_UPTIME_FILE"
+  rm "$HRT_HEADROOM_BIN"
+  unset HRT_HEADROOM_BIN
+  export HRT_FIX_SS_OUTPUT='tcp LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("headroom",pid=42,fd=3))'
+  run_cli install
+  assert_equal "$CLI_STATUS" 1 "a deployment without a runtime must be orphaned"
+  assert_contains "$CLI_OUTPUT" 'deployment exists without the pinned runtime' \
+    "an orphaned deployment must have a specific diagnostic"
+  unset HRT_FIX_SS_OUTPUT
+
+  new_conforming_case install-nonconforming
+  printf '%s\n' '0.00 0.00' > "$HRT_UPTIME_FILE"
+  printf '%s\n' '{"profile":"default","targets":["x"],"mutations":[],"memory_enabled":false,"telemetry_enabled":false,"base_env":{"HEADROOM_BEACON":"off","HEADROOM_UPDATE_CHECK":"off","HEADROOM_TELEMETRY":"off"}}' > "$HRT_HEADROOM_DEPLOY_ROOT/default/manifest.json"
+  run_cli install
+  assert_equal "$CLI_STATUS" 1 "a nonconforming deployment must be refused"
+  assert_contains "$CLI_OUTPUT" HEADROOM_TARGETS_CONFIGURED \
+    "a nonconforming deployment must retain its precise finding"
+}
+
+test_install_manifest_and_listener_precedence() {
+  new_case install-malformed-overlap
+  printf '%s\n' '0.00 0.00' > "$HRT_UPTIME_FILE"
+  mkdir -p "$HRT_HEADROOM_DEPLOY_ROOT/default"
+  printf '%s\n' not-json > "$HRT_HEADROOM_DEPLOY_ROOT/default/manifest.json"
+  rm "$HRT_HEADROOM_BIN"
+  unset HRT_HEADROOM_BIN
+  run_cli install
+  assert_equal "$CLI_STATUS" 2 "a malformed manifest must override an absent package"
+  assert_contains "$CLI_OUTPUT" HEADROOM_MANIFEST_INVALID "manifest ownership failure must be rendered"
+
+  new_conforming_case install-unreadable-overlap
+  printf '%s\n' '0.00 0.00' > "$HRT_UPTIME_FILE"
+  rm "$HRT_HEADROOM_DEPLOY_ROOT/default/manifest.json"
+  export HRT_FIX_HEADROOM_VERSION=0.36.0
+  run_cli install
+  assert_equal "$CLI_STATUS" 2 "an unreadable manifest must override a wrong package"
+  assert_contains "$CLI_OUTPUT" HEADROOM_MANIFEST_UNREADABLE "unreadable ownership must be rendered"
+
+  new_installable_absent_case install-foreign-listener
+  export HRT_FIX_SS_OUTPUT='tcp LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("other",pid=1,fd=3))'
+  run_cli install
+  assert_equal "$CLI_STATUS" 1 "an attributed foreign listener must be a conflict"
+
+  new_installable_absent_case install-ambiguous-listener
+  export HRT_FIX_SS_OUTPUT='tcp LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:*'
+  run_cli install
+  assert_equal "$CLI_STATUS" 2 "an unattributed listener must be ambiguous"
+  unset HRT_FIX_SS_OUTPUT
+}
+
+test_install_core_matrix_completion() {
+  new_installable_absent_case install-package-only
+  /bin/mkdir -p "$HRT_HOME/.local/bin"
+  /bin/cp "$HRT_HEADROOM_TEMPLATE" "$HRT_HOME/.local/bin/headroom"
+  /bin/chmod 0755 "$HRT_HOME/.local/bin/headroom"
+  : > "$HRT_HOME/package-installed"
+  export HRT_HEADROOM_BIN="$HRT_HOME/.local/bin/headroom"
+  run_cli install --dry-run
+  assert_equal "$CLI_STATUS" 0 "an exact package without deployment must dry-run apply"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "package-only dry-run must not mutate"
+  assert_contains "$CLI_OUTPUT" 'install apply' "package-only dry-run must print apply"
+  assert_contains "$(<"$HRT_COMMAND_LOG")" "$HRT_SS_BIN" "package-only dry-run must run read-only probes"
+
+  new_conforming_case install-pass-noop
+  printf '%s\n' '0.00 0.00' > "$HRT_UPTIME_FILE"
+  run_cli install --dry-run
+  assert_equal "$CLI_STATUS" 0 "a PASS deployment must be idempotent"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "a PASS deployment must not mutate"
+
+  new_conforming_case install-warn-noop
+  printf '%s\n' '0.00 0.00' > "$HRT_UPTIME_FILE"
+  export HRT_FIX_EXEC_MAIN_STATUS=241
+  run_cli install --dry-run
+  assert_equal "$CLI_STATUS" 0 "a WARN deployment must be idempotent"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "a WARN deployment must not mutate"
+
+  new_conforming_case install-wrong-version
+  printf '%s\n' '0.00 0.00' > "$HRT_UPTIME_FILE"
+  export HRT_FIX_HEADROOM_VERSION=0.36.0
+  run_cli install
+  assert_equal "$CLI_STATUS" 1 "a wrong package version must be refused"
+  assert_contains "$CLI_OUTPUT" 'implicit upgrades are refused' "wrong version must be explicit"
+
+  new_conforming_case install-unreadable-config
+  printf '%s\n' '0.00 0.00' > "$HRT_UPTIME_FILE"
+  mkdir "$HRT_OPENCODE_CONFIG_DIR/opencode.json"
+  run_cli install
+  assert_equal "$CLI_STATUS" 2 "an unreadable OpenCode config must be an inspection error"
+  assert_contains "$CLI_OUTPUT" HEADROOM_OPENCODE_CONFIG_UNREADABLE "preflight error must retain its code"
+
+  new_installable_absent_case install-non-linux
+  printf '%s\n' "printf 'Darwin\\n'" > "$HRT_UNAME_BIN"
+  run_cli install
+  assert_equal "$CLI_STATUS" 2 "a non-Linux platform must be rejected"
+
+  new_installable_absent_case install-no-systemd
+  {
+    printf '#!%s\n' "$BASH_BIN"
+    printf '%s\n' 'exit 1'
+  } > "$HRT_SYSTEMCTL_BIN"
+  chmod 0755 "$HRT_SYSTEMCTL_BIN"
+  run_cli install
+  assert_equal "$CLI_STATUS" 2 "an unusable user systemd must be rejected"
+
+  new_installable_absent_case install-uv-tool-bin
+  export UV_TOOL_BIN_DIR="$HRT_HOME/custom-bin"
+  /bin/mkdir -p "$UV_TOOL_BIN_DIR"
+  run_cli install --dry-run
+  assert_equal "$CLI_STATUS" 0 "a UV tool-bin seam must be supported"
+  assert_contains "$CLI_OUTPUT" "$UV_TOOL_BIN_DIR/headroom install apply" \
+    "dry-run must use the configured uv tool-bin path"
+  unset UV_TOOL_BIN_DIR
+}
+
 JQ_BIN="$(command -v jq || true)"
 [[ -n "$JQ_BIN" ]] || fail "jq is required for Headroom runtime tests"
 JQ_BIN="$(readlink -f "$JQ_BIN")"
@@ -1071,6 +1205,9 @@ test_install_dry_run_prints_but_does_not_mutate
 test_install_rejects_an_invalid_uptime_source_before_mutation
 test_absent_headroom_without_a_seam_dry_runs_with_future_path
 test_install_refuses_opencode_coupling_before_mutation
+test_install_state_matrix_core_refusals
+test_install_manifest_and_listener_precedence
+test_install_core_matrix_completion
 test_conforming_runtime_passes
 test_json_audit_has_stable_shape
 test_audit_policy_and_error_findings

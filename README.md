@@ -31,6 +31,8 @@ A collection of reusable components for teams using AI coding agents:
   inside WSL: it checks the `interop` policy, audits PATH hygiene and provenance, verifies that
   `mise`-managed runtimes are not shadowed by Windows executables, and can conservatively
   remediate `wsl.conf` and persistent `PATH=` assignments.
+- **Headroom runtime** — an opt-in standalone Headroom service installer, auditor, and remover
+  with no active OpenCode traffic optimization.
 
 ## What this is NOT
 
@@ -96,10 +98,23 @@ agentic-dev-toolkit/
   wsl-toolchain-doctor/
     README.md                                      # Component overview and policy
     wsl-toolchain-doctor.sh                        # Linux-first PATH and toolchain auditor
+  headroom-runtime/
+    README.md                                      # Opt-in standalone runtime usage and safety
+    headroom-runtime.sh                            # Install, audit, and removal CLI
   docs/
     multi-agent-workspace-guide.md                 # Full guide: AGENTS.md pattern + MCP parity
     wsl-toolchain-doctor.md                        # Toolchain doctor operational documentation
+    headroom-runtime.md                            # Headroom runtime operations and status
 ```
+
+## Headroom Runtime
+
+The opt-in [Headroom runtime component](headroom-runtime/README.md) installs a
+standalone loopback service, audits its isolation boundary, and supports safe
+removal. It is not installed by `environments/linux/install.sh`. The
+[operational runbook](docs/headroom-runtime.md) records installation, rollback,
+upgrades, status evidence, and the decision to keep OpenCode integration on
+hold.
 
 ## Workstation bootstrap
 

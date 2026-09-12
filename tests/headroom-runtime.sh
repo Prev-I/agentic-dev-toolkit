@@ -41,9 +41,9 @@ install_stubs() {
   mkdir -p "$CASE_DIR/bin"
   for command in uv headroom systemctl curl ss uname sleep readlink; do
     cat > "$CASE_DIR/bin/$command" <<'STUB'
-#!/usr/bin/env bash
+#!/bin/bash
 if [[ "$0" == */readlink && "$1" == "-f" ]]; then
-  printf '%s\n' "$2"
+  printf '%s\n' "${HRT_READLINK_TARGET:-$2}"
   exit 0
 fi
 printf '%s\n' "$0" "$@" >> "$HRT_COMMAND_LOG"
@@ -191,6 +191,17 @@ test_missing_uv_seam_cannot_fall_back_to_the_host() {
     "an omitted seam must not invoke any command outside the fixture"
 }
 
+test_default_uv_resolution_rejects_a_non_executable_canonical_path() {
+  new_case default-uv-non-executable
+  unset HRT_UV_BIN
+  export HRT_READLINK_TARGET="$CASE_DIR/not-executable"
+  run_cli install --dry-run
+  unset HRT_READLINK_TARGET
+  assert_equal "$CLI_STATUS" "2" "a default must resolve to an executable path"
+  assert_contains "$CLI_OUTPUT" "uv resolved to a non-executable path" \
+    "a broken canonical default must identify the command"
+}
+
 test_non_executable_override_is_rejected() {
   new_case non-executable-override
   chmod 0644 "$HRT_UV_BIN"
@@ -229,6 +240,7 @@ test_invalid_override_exits_even_in_a_conditional
 test_uptime_file_uses_the_fixture_override
 test_uptime_file_defaults_to_proc_uptime
 test_missing_uv_seam_cannot_fall_back_to_the_host
+test_default_uv_resolution_rejects_a_non_executable_canonical_path
 test_non_executable_override_is_rejected
 test_shipped_file_modes_and_entrypoint_are_preserved
 

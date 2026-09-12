@@ -8,6 +8,12 @@ readonly HEADROOM_PYTHON="3.13"
 readonly HEADROOM_PROFILE="default"
 readonly HEADROOM_PORT="8787"
 readonly HEADROOM_PACKAGE="headroom-ai[proxy]==${HEADROOM_VERSION}"
+readonly RUNTIME_HOME="${HRT_HOME:-$HOME}"
+readonly PROC_ROOT="${HRT_PROC_ROOT:-/proc}"
+readonly OPENCODE_CONFIG_DIR="${HRT_OPENCODE_CONFIG_DIR:-$RUNTIME_HOME/.config/opencode}"
+readonly SYSTEMD_USER_DIR="${HRT_SYSTEMD_USER_DIR:-$RUNTIME_HOME/.config/systemd/user}"
+readonly HEADROOM_DEPLOY_ROOT="${HRT_HEADROOM_DEPLOY_ROOT:-$RUNTIME_HOME/.headroom/deploy}"
+readonly MANIFEST_PATH="${HEADROOM_DEPLOY_ROOT}/${HEADROOM_PROFILE}/manifest.json"
 
 DRY_RUN=0
 JSON_MODE=0
@@ -80,6 +86,274 @@ resolve_executable() {
   printf -v "$output_name" '%s' "$candidate"
 }
 
+declare -a F_SEVERITY=()
+declare -a F_CODE=()
+declare -a F_SUBJECT=()
+declare -a F_MESSAGE=()
+
+add_finding() {
+  F_SEVERITY+=("$1")
+  F_CODE+=("$2")
+  F_SUBJECT+=("$3")
+  F_MESSAGE+=("$4")
+}
+
+check_headroom_version() {
+  local output
+
+  if output="$("$HEADROOM_BIN" --version)"; then
+    if [[ "$output" != "headroom ${HEADROOM_VERSION}" ]]; then
+      add_finding FAIL HEADROOM_VERSION_MISMATCH headroom \
+        "Headroom CLI is not version ${HEADROOM_VERSION}."
+    fi
+  else
+    add_finding ERROR HEADROOM_VERSION_MISMATCH headroom \
+      "Headroom CLI version could not be inspected."
+  fi
+}
+
+check_service_state() {
+  local enabled active lifecycle_status
+
+  if enabled="$("$SYSTEMCTL_BIN" --user is-enabled headroom-default.service 2>/dev/null)"; then
+    [[ "$enabled" == enabled ]] ||
+      add_finding FAIL HEADROOM_SERVICE_DISABLED headroom-default.service \
+        "Headroom service is not enabled."
+  else
+    add_finding FAIL HEADROOM_SERVICE_DISABLED headroom-default.service \
+      "Headroom service is not enabled."
+  fi
+  if active="$("$SYSTEMCTL_BIN" --user is-active headroom-default.service 2>/dev/null)"; then
+    [[ "$active" == active ]] ||
+      add_finding FAIL HEADROOM_SERVICE_INACTIVE headroom-default.service \
+        "Headroom service is not active."
+  else
+    add_finding FAIL HEADROOM_SERVICE_INACTIVE headroom-default.service \
+      "Headroom service is not active."
+  fi
+  if lifecycle_status="$("$SYSTEMCTL_BIN" --user show headroom-default.service --property=ExecMainStatus --value 2>/dev/null)" &&
+    [[ "$lifecycle_status" == 241 ]]; then
+    add_finding WARN HEADROOM_LIFECYCLE_EXIT_241 headroom-default.service \
+      "Headroom recorded the known recoverable lifecycle exit 241."
+  fi
+}
+
+check_readiness() {
+  local body ready version kompress
+  local readonly subject="http://127.0.0.1:${HEADROOM_PORT}/readyz"
+
+  if ! body="$("$CURL_BIN" --silent --show-error --fail --connect-timeout 5 --max-time 5 "$subject")"; then
+    add_finding FAIL HEADROOM_NOT_READY "$subject" "Headroom readiness endpoint did not succeed."
+    return
+  fi
+  if ! "$JQ_BIN" -e . >/dev/null <<<"$body"; then
+    add_finding ERROR HEADROOM_READINESS_INVALID "$subject" \
+      "Headroom readiness response was not valid JSON."
+    return
+  fi
+  if ready="$("$JQ_BIN" -er '.ready' <<<"$body")" && [[ "$ready" == true ]]; then
+    if version="$("$JQ_BIN" -er '.version' <<<"$body")" && [[ "$version" != "$HEADROOM_VERSION" ]]; then
+      add_finding FAIL HEADROOM_READINESS_VERSION_MISMATCH "$subject" \
+        "Headroom readiness version does not match the pinned runtime."
+    fi
+    if kompress="$("$JQ_BIN" -er '.kompress.ready == false' <<<"$body")" && [[ "$kompress" == true ]]; then
+      add_finding WARN HEADROOM_KOMPRESS_OPTIONAL_DEGRADED "$subject" \
+        "Optional Kompress is degraded; the required runtime is ready."
+    fi
+  else
+    add_finding FAIL HEADROOM_NOT_READY "$subject" "Headroom readiness endpoint did not report ready."
+  fi
+}
+
+check_listener() {
+  local output
+
+  if ! output="$("$SS_BIN" -ltnp "sport = :${HEADROOM_PORT}")" || [[ -z "$output" ]]; then
+    add_finding ERROR HEADROOM_LISTENER_OWNER_AMBIGUOUS "port ${HEADROOM_PORT}" \
+      "Headroom listener ownership could not be determined."
+    return
+  fi
+  if [[ "$output" != *"127.0.0.1:${HEADROOM_PORT}"* ]]; then
+    add_finding FAIL HEADROOM_UNSAFE_BIND "port ${HEADROOM_PORT}" \
+      "Headroom is not bound only to localhost."
+  fi
+  if [[ "$output" != *'users:'* ]]; then
+    add_finding ERROR HEADROOM_LISTENER_OWNER_AMBIGUOUS "port ${HEADROOM_PORT}" \
+      "Headroom listener ownership could not be determined."
+  elif [[ "$output" != *headroom* ]]; then
+    add_finding FAIL HEADROOM_FOREIGN_LISTENER "port ${HEADROOM_PORT}" \
+      "Headroom port is owned by another process."
+  fi
+}
+
+check_manifest() {
+  local profile targets mutations memory telemetry beacon update_check
+
+  if [[ ! -r "$MANIFEST_PATH" ]]; then
+    add_finding ERROR HEADROOM_MANIFEST_UNREADABLE "$MANIFEST_PATH" \
+      "Headroom manifest is not readable."
+    return
+  fi
+  if ! "$JQ_BIN" -e . "$MANIFEST_PATH" >/dev/null; then
+    add_finding ERROR HEADROOM_MANIFEST_INVALID "$MANIFEST_PATH" \
+      "Headroom manifest is not valid JSON."
+    return
+  fi
+  profile="$("$JQ_BIN" -r '.profile' "$MANIFEST_PATH")"
+  targets="$("$JQ_BIN" -r '.targets | length' "$MANIFEST_PATH")"
+  mutations="$("$JQ_BIN" -r '.mutations | length' "$MANIFEST_PATH")"
+  memory="$("$JQ_BIN" -r '.memory_enabled' "$MANIFEST_PATH")"
+  telemetry="$("$JQ_BIN" -r '.telemetry_enabled' "$MANIFEST_PATH")"
+  beacon="$("$JQ_BIN" -r '.base_env.HEADROOM_BEACON' "$MANIFEST_PATH")"
+  update_check="$("$JQ_BIN" -r '.base_env.HEADROOM_UPDATE_CHECK' "$MANIFEST_PATH")"
+  [[ "$profile" == "$HEADROOM_PROFILE" ]] ||
+    add_finding FAIL HEADROOM_PROFILE_MISMATCH "$MANIFEST_PATH" "Headroom manifest profile is not default."
+  [[ "$targets" == 0 ]] ||
+    add_finding FAIL HEADROOM_TARGETS_CONFIGURED "$MANIFEST_PATH" "Headroom targets are configured."
+  [[ "$mutations" == 0 ]] ||
+    add_finding FAIL HEADROOM_MUTATIONS_PRESENT "$MANIFEST_PATH" "Headroom managed mutations are present."
+  [[ "$memory" == false ]] ||
+    add_finding FAIL HEADROOM_MEMORY_ENABLED "$MANIFEST_PATH" "Headroom memory is enabled."
+  [[ "$telemetry" == false ]] ||
+    add_finding FAIL HEADROOM_TELEMETRY_ENABLED "$MANIFEST_PATH" "Headroom telemetry is enabled."
+  [[ "$beacon" == off ]] ||
+    add_finding FAIL HEADROOM_BEACON_NOT_DISABLED "$MANIFEST_PATH" "Headroom beacon is not disabled."
+  [[ "$update_check" == off ]] ||
+    add_finding FAIL HEADROOM_UPDATE_CHECK_NOT_DISABLED "$MANIFEST_PATH" \
+      "Headroom update checks are not disabled."
+}
+
+check_generated_permissions() {
+  local mode
+
+  if mode="$("$STAT_BIN" -c %a "$MANIFEST_PATH")" && [[ "$mode" != 600 ]]; then
+    add_finding WARN HEADROOM_PERMISSIONS_BROAD "$MANIFEST_PATH" \
+      "Generated Headroom files have broader-than-manifest permissions."
+  fi
+}
+
+check_opencode_config() {
+  local path content
+  local -a candidates=("$OPENCODE_CONFIG_DIR/opencode.json" "$OPENCODE_CONFIG_DIR/opencode.jsonc")
+
+  [[ -n "${OPENCODE_CONFIG:-}" ]] && candidates+=("$OPENCODE_CONFIG")
+  for path in "${candidates[@]}"; do
+    [[ -f "$path" ]] || continue
+    if content="$(<"$path")" &&
+      { [[ "${content,,}" == *headroom-opencode* ]] || [[ "${content,,}" == *headroom_proxy_url* ]]; }; then
+      add_finding FAIL HEADROOM_OPENCODE_CONFIG_PRESENT "$path" \
+        "OpenCode global configuration references Headroom."
+    fi
+  done
+}
+
+check_opencode_package() {
+  local output
+
+  if output="$("$HEADROOM_BIN" plugins list 2>/dev/null)" && [[ "${output,,}" == *headroom-opencode* ]]; then
+    add_finding FAIL HEADROOM_OPENCODE_PACKAGE_PRESENT headroom-opencode \
+      "The Headroom OpenCode integration package is present."
+  fi
+}
+
+check_opencode_environment() {
+  local active pid name value
+
+  if ! active="$("$SYSTEMCTL_BIN" --user is-active opencode.service 2>/dev/null)" || [[ "$active" != active ]]; then
+    return
+  fi
+  if ! pid="$("$SYSTEMCTL_BIN" --user show opencode.service --property=MainPID --value 2>/dev/null)" ||
+    [[ ! "$pid" =~ ^[1-9][0-9]*$ ]] || [[ ! -r "$PROC_ROOT/$pid/environ" ]]; then
+    add_finding ERROR HEADROOM_OPENCODE_ENV_UNREADABLE opencode.service \
+      "OpenCode environment could not be inspected."
+    return
+  fi
+  while IFS= read -r -d '' name; do
+    value="${name%%=*}"
+    if [[ "$value" == HEADROOM_* ]]; then
+      add_finding FAIL HEADROOM_OPENCODE_ENV_PRESENT opencode.service \
+        "OpenCode environment contains a Headroom integration variable."
+      return
+    fi
+  done < "$PROC_ROOT/$pid/environ"
+}
+
+check_unit_independence() {
+  local path content
+
+  for path in "$SYSTEMD_USER_DIR/headroom-default.service" "$SYSTEMD_USER_DIR/opencode.service"; do
+    [[ -f "$path" ]] || continue
+    if content="$(<"$path")" &&
+      { [[ "$path" == *headroom-default.service && "$content" == *opencode.service* ]] ||
+        [[ "$path" == *opencode.service && "$content" == *headroom-default.service* ]]; }; then
+      add_finding FAIL HEADROOM_OPENCODE_UNIT_COUPLED "$path" \
+        "Headroom and OpenCode user units are coupled."
+      return
+    fi
+  done
+}
+
+audit_runtime() {
+  F_SEVERITY=() F_CODE=() F_SUBJECT=() F_MESSAGE=()
+  check_headroom_version
+  check_service_state
+  check_readiness
+  check_listener
+  check_manifest
+  check_generated_permissions
+  check_opencode_config
+  check_opencode_package
+  check_opencode_environment
+  check_unit_independence
+}
+
+status_for_findings() {
+  local severity
+
+  for severity in "${F_SEVERITY[@]}"; do [[ "$severity" == ERROR ]] && { printf '%s\n' ERROR; return; }; done
+  for severity in "${F_SEVERITY[@]}"; do [[ "$severity" == FAIL ]] && { printf '%s\n' FAIL; return; }; done
+  for severity in "${F_SEVERITY[@]}"; do [[ "$severity" == WARN ]] && { printf '%s\n' WARN; return; }; done
+  printf '%s\n' PASS
+}
+
+render_human() {
+  local status="$1" index
+
+  for index in "${!F_CODE[@]}"; do
+    printf '%s: %s (%s): %s\n' "${F_SEVERITY[$index]}" "${F_CODE[$index]}" \
+      "${F_SUBJECT[$index]}" "${F_MESSAGE[$index]}"
+  done
+  printf 'Status: %s\n' "$status"
+}
+
+render_json() {
+  local status="$1" findings='[]' index
+
+  for index in "${!F_CODE[@]}"; do
+    findings="$("$JQ_BIN" -cn --argjson findings "$findings" \
+      --arg severity "${F_SEVERITY[$index]}" --arg code "${F_CODE[$index]}" \
+      --arg subject "${F_SUBJECT[$index]}" --arg message "${F_MESSAGE[$index]}" \
+      '$findings + [{severity: $severity, code: $code, subject: $subject, message: $message}]')"
+  done
+  "$JQ_BIN" -n --arg version "$SCRIPT_VERSION" --arg status "$status" --argjson findings "$findings" \
+    '{schemaVersion: 1, toolVersion: $version, action: "audit", status: $status, findings: $findings}'
+}
+
+run_audit() {
+  local status
+
+  resolve_executable HEADROOM_BIN HRT_HEADROOM_BIN headroom
+  resolve_executable SYSTEMCTL_BIN HRT_SYSTEMCTL_BIN systemctl
+  resolve_executable CURL_BIN HRT_CURL_BIN curl
+  resolve_executable JQ_BIN HRT_JQ_BIN jq
+  resolve_executable SS_BIN HRT_SS_BIN ss
+  resolve_executable STAT_BIN HRT_STAT_BIN stat
+  audit_runtime
+  status="$(status_for_findings)"
+  if (( JSON_MODE )); then render_json "$status"; else render_human "$status"; fi
+  case "$status" in PASS|WARN) return 0 ;; FAIL) return 1 ;; ERROR) return 2 ;; esac
+}
+
 parse_args() {
   local command="${1:-}"
   [[ $# -gt 0 ]] || die_usage "a command is required"
@@ -138,8 +412,7 @@ main() {
     install)
       resolve_executable UV_BIN HRT_UV_BIN uv
       ;;
-    # Audit and remove gain their command dependencies in their later tasks.
-    audit) : "$JSON_MODE" "$UPTIME_FILE" ;;
+    audit) run_audit ;;
     remove) : "$UNINSTALL_TOOL" "$UPTIME_FILE" ;;
     *) die_usage "unsupported command: $COMMAND" ;;
   esac

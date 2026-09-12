@@ -32,6 +32,11 @@ die() {
 
 TEMP_PATHS=()
 DOWNLOADED_INSTALLER=""
+# Zero-invocation provenance for the install receipt: the SHA-256 that was
+# actually verified by install_karpathy_skill before it wrote the file. Empty
+# unless Karpathy was installed on this run; never recomputed by the receipt
+# writer, which is the whole point of recording it here instead.
+INSTALLED_KARPATHY_SHA256=""
 
 quote_command() {
   printf '+'
@@ -94,6 +99,15 @@ CATALOG_ERROR=""
 # be function-local and leave both arrays empty once the loader returns.
 declare -gA REQUESTED_VALUE=()
 declare -gA REQUESTED_SOURCE=()
+
+# OVERRIDDEN_SET records SET MEMBERSHIP, not append history: it answers only
+# "was this catalog key's effective value replaced by an ADT_* variable or a
+# CLI flag", never how many times or which layer. resolve_pin marks it for the
+# environment layer, record_flag_override for the CLI layer, and both are
+# idempotent -- marking an already-marked key is a no-op. Declared -g for the
+# same sourcing reason as REQUESTED_VALUE above.
+# shellcheck disable=SC2034 # read by serialize_catalog_set through a nameref
+declare -gA OVERRIDDEN_SET=()
 
 load_kv_file() {
   local file=$1
@@ -208,6 +222,7 @@ resolve_pin() {
   if [[ -n "$rp_envvalue" ]]; then
     rp_target="$rp_envvalue"
     REQUESTED_SOURCE["$rp_key"]="$rp_envname"
+    OVERRIDDEN_SET["$rp_key"]=1
   else
     rp_target="$(catalog_value "$rp_key")"
     REQUESTED_SOURCE["$rp_key"]="the catalog"
@@ -397,12 +412,17 @@ require_value() {
 
 # record_flag_override CATALOG_KEY FLAG VALUE
 # Records that --FLAG set CATALOG_KEY's effective value to VALUE, overriding
-# whatever the catalog or an ADT_* variable had already recorded for it.
+# whatever the catalog or an ADT_* variable had already recorded for it. Only
+# ever called from the sixteen allowlisted parse_args arms, so marking
+# OVERRIDDEN_SET here is exactly the CLI layer of override tracking; marking an
+# already-marked key (an environment override the CLI also names) is a no-op.
 # Called directly in this shell, never inside a command substitution, for the
 # same reason as resolve_pin.
 record_flag_override() {
   REQUESTED_VALUE["$1"]="$3"
   REQUESTED_SOURCE["$1"]="$2"
+  # shellcheck disable=SC2034 # read by serialize_catalog_set through a nameref
+  OVERRIDDEN_SET["$1"]=1
 }
 
 parse_args() {
@@ -1258,6 +1278,9 @@ install_karpathy_skill() {
   actual_sha="$(sha256sum -- "$temp_file" | cut -d' ' -f1)"
   [[ "$actual_sha" == "$expected_sha" ]] || \
     die "Karpathy skill checksum mismatch: expected $expected_sha, got $actual_sha"
+  # Zero-invocation provenance for the install receipt: the digest just
+  # verified above, recorded once rather than recomputed later.
+  INSTALLED_KARPATHY_SHA256="$actual_sha"
 
   # Every harness resolves a skill by the name in its frontmatter, which must
   # equal the containing directory. A file that fails this is silently ignored
@@ -1499,6 +1522,306 @@ configure_project() {
   )
 }
 
+# serialize_catalog_set SET_NAME
+# Prints the members of the named associative array as a comma-joined list,
+# walked in CANONICAL CATALOG ORDER rather than the set's own hash order --
+# that is what makes skipped= and overridden= reproducible across runs.
+# ss_* local names: no caller may pass a set literally named ss_set.
+serialize_catalog_set() {
+  local -n ss_set="$1"
+  local key out=""
+  for key in "${CATALOG_ORDER[@]}"; do
+    if [[ -n "${ss_set[$key]+set}" ]]; then
+      out="${out:+$out,}$key"
+    fi
+  done
+  printf '%s' "$out"
+}
+
+# populate_skipped_set OUT_ARRAY
+# Fills the named associative array with the catalog keys the current run's
+# --skip-* flags expand to. Shared by skipped_keys, which serializes it for
+# the receipt's skipped= value, and write_installed_versions, which must probe
+# none of them. --skip-runtimes implies the three quality tools because three
+# separate gates produce that effect elsewhere (configure_runtimes returns
+# before rendering them, render_mise_configuration gates only on
+# SKIP_QUALITY_TOOLS, and install_python_quality_libraries gates on either
+# flag); --skip-opencode, --skip-claude, --skip-codex and --skip-git-credential
+# contribute nothing, because those components have no catalog key at all.
+populate_skipped_set() {
+  local -n ps_set="$1"
+  local key
+  if (( SKIP_RUNTIMES == 1 )); then
+    for key in java-17 java-21 dotnet-10 dotnet-8 python node bun maven dotnet-ef uv; do
+      ps_set["$key"]=1
+    done
+  fi
+  if (( SKIP_RUNTIMES == 1 || SKIP_QUALITY_TOOLS == 1 )); then
+    for key in shellcheck gitleaks pyyaml; do
+      ps_set["$key"]=1
+    done
+  fi
+  (( SKIP_OPENSPEC == 0 ))    || ps_set["openspec"]=1
+  (( SKIP_SUPERPOWERS == 0 )) || ps_set["superpowers"]=1
+  # shellcheck disable=SC2034 # read by the caller through populate_skipped_set's nameref
+  (( SKIP_KARPATHY == 0 ))    || ps_set["karpathy-ref"]=1
+}
+
+# skipped_keys prints the receipt's skipped= value: every catalog key this
+# run's flags expand to, in catalog order.
+skipped_keys() {
+  # shellcheck disable=SC2034 # populated by name through populate_skipped_set's nameref
+  local -A skipped=()
+  populate_skipped_set skipped
+  serialize_catalog_set skipped
+}
+
+# emit_or_warn_installed KEY CANDIDATE
+# The single point where a probe's extracted candidate becomes
+# installed.<KEY>=<CANDIDATE> or is dropped with a warning. Enforces the
+# receipt's scalar grammar: nothing reaches the file that is empty or that
+# fails ^[A-Za-z0-9][A-Za-z0-9._:+@/-]*$ -- no blank, quoted or raw value ever
+# gets written.
+emit_or_warn_installed() {
+  local key="$1" candidate="$2"
+  if [[ -n "$candidate" && "$candidate" =~ ^[A-Za-z0-9][A-Za-z0-9._:+@/-]*$ ]]; then
+    printf 'installed.%s=%s\n' "$key" "$candidate"
+  else
+    warn "Could not record installed version for $key."
+  fi
+}
+
+# run_bounded_probe TIMEOUT_BIN CMD...
+# Runs CMD bounded by "TIMEOUT_BIN 10s". Callers invoke this only as
+# `if output="$(run_bounded_probe ...)"; then`, so an expected probe failure
+# cannot trip errexit or the ERR trap.
+run_bounded_probe() {
+  local timeout_bin="$1"
+  shift
+  "$timeout_bin" 10s "$@"
+}
+
+# write_installed_versions emits installed.* for every catalog key a probe can
+# observe, in catalog order, skip-aware and time-bounded. Called only from
+# write_receipt_body.
+#
+# Three rules from the installer's probe contract:
+#   - a skipped component is never probed: no probe, no key, no warning;
+#   - every probe is guarded, so an expected failure cannot trip errexit or
+#     the ERR trap;
+#   - every probe is bounded by `timeout 10s`, resolved once. If `timeout`
+#     cannot be resolved, all probe-derived capture is skipped with one
+#     aggregate warning, but installed.karpathy-sha256 is still written when
+#     Karpathy was installed: it is zero-invocation provenance already
+#     computed and verified before the file was written, so it runs no
+#     command and has nothing to bound.
+write_installed_versions() {
+  local -A skip=()
+  populate_skipped_set skip
+
+  local timeout_bin=""
+  if ! timeout_bin="$(command -v timeout 2>/dev/null)"; then
+    warn "timeout is unavailable; no installed versions will be recorded."
+  fi
+
+  local output candidate
+
+  if [[ -n "$timeout_bin" ]]; then
+    if [[ -z "${skip[java-17]+set}" ]]; then
+      if output="$(run_bounded_probe "$timeout_bin" "$MISE_BIN" exec "java@$JAVA_17_VERSION" -- java -version 2>&1)"; then
+        candidate="$(awk -F'"' 'NF>=3{print $2; exit}' <<<"$output")"
+        emit_or_warn_installed java-17 "$candidate"
+      else
+        warn "Could not record installed version for java-17."
+      fi
+    fi
+
+    if [[ -z "${skip[java-21]+set}" ]]; then
+      if output="$(run_bounded_probe "$timeout_bin" "$MISE_BIN" exec "java@$JAVA_21_VERSION" -- java -version 2>&1)"; then
+        candidate="$(awk -F'"' 'NF>=3{print $2; exit}' <<<"$output")"
+        emit_or_warn_installed java-21 "$candidate"
+      else
+        warn "Could not record installed version for java-21."
+      fi
+    fi
+
+    # dotnet-10 and dotnet-8 share one probe: one `--list-sdks` invocation
+    # supplies both. It runs if at least one of the two is unskipped, and
+    # emits a value only for the ones that are.
+    if [[ -z "${skip[dotnet-10]+set}" || -z "${skip[dotnet-8]+set}" ]]; then
+      if output="$(run_bounded_probe "$timeout_bin" "$MISE_BIN" exec -- dotnet --list-sdks 2>/dev/null)"; then
+        if [[ -z "${skip[dotnet-10]+set}" ]]; then
+          candidate="$(awk '{ split($1, v, "."); if (v[1] == "10") { print $1; exit } }' <<<"$output")"
+          emit_or_warn_installed dotnet-10 "$candidate"
+        fi
+        if [[ -z "${skip[dotnet-8]+set}" ]]; then
+          candidate="$(awk '{ split($1, v, "."); if (v[1] == "8") { print $1; exit } }' <<<"$output")"
+          emit_or_warn_installed dotnet-8 "$candidate"
+        fi
+      else
+        [[ -n "${skip[dotnet-10]+set}" ]] || warn "Could not record installed version for dotnet-10."
+        [[ -n "${skip[dotnet-8]+set}" ]]  || warn "Could not record installed version for dotnet-8."
+      fi
+    fi
+
+    if [[ -z "${skip[python]+set}" ]]; then
+      if output="$(run_bounded_probe "$timeout_bin" "$MISE_BIN" exec -- python --version 2>/dev/null)"; then
+        candidate="$(awk 'NR==1{print $2}' <<<"$output")"
+        emit_or_warn_installed python "$candidate"
+      else
+        warn "Could not record installed version for python."
+      fi
+    fi
+
+    if [[ -z "${skip[node]+set}" ]]; then
+      if output="$(run_bounded_probe "$timeout_bin" "$MISE_BIN" exec -- node --version 2>/dev/null)"; then
+        candidate="$(awk 'NR==1{ sub(/^v/, "", $1); print $1 }' <<<"$output")"
+        emit_or_warn_installed node "$candidate"
+      else
+        warn "Could not record installed version for node."
+      fi
+    fi
+
+    if [[ -z "${skip[bun]+set}" ]]; then
+      if output="$(run_bounded_probe "$timeout_bin" "$MISE_BIN" exec -- bun --version 2>/dev/null)"; then
+        candidate="$(awk 'NR==1{print $1}' <<<"$output")"
+        emit_or_warn_installed bun "$candidate"
+      else
+        warn "Could not record installed version for bun."
+      fi
+    fi
+
+    if [[ -z "${skip[maven]+set}" ]]; then
+      if output="$(run_bounded_probe "$timeout_bin" "$MISE_BIN" exec -- mvn -version 2>/dev/null)"; then
+        candidate="$(awk 'NR==1{print $3}' <<<"$output")"
+        emit_or_warn_installed maven "$candidate"
+      else
+        warn "Could not record installed version for maven."
+      fi
+    fi
+
+    if [[ -z "${skip[dotnet-ef]+set}" ]]; then
+      if output="$(run_bounded_probe "$timeout_bin" "$MISE_BIN" exec -- dotnet-ef --version 2>/dev/null)"; then
+        candidate="$(awk 'NF{last=$1} END{print last}' <<<"$output")"
+        emit_or_warn_installed dotnet-ef "$candidate"
+      else
+        warn "Could not record installed version for dotnet-ef."
+      fi
+    fi
+
+    if [[ -z "${skip[uv]+set}" ]]; then
+      if output="$(run_bounded_probe "$timeout_bin" "$MISE_BIN" exec -- uv --version 2>/dev/null)"; then
+        candidate="$(awk 'NR==1{print $2}' <<<"$output")"
+        emit_or_warn_installed uv "$candidate"
+      else
+        warn "Could not record installed version for uv."
+      fi
+    fi
+
+    if [[ -z "${skip[shellcheck]+set}" ]]; then
+      if output="$(run_bounded_probe "$timeout_bin" "$MISE_BIN" exec -- shellcheck --version 2>/dev/null)"; then
+        candidate="$(awk '$1=="version:"{print $2; exit}' <<<"$output")"
+        emit_or_warn_installed shellcheck "$candidate"
+      else
+        warn "Could not record installed version for shellcheck."
+      fi
+    fi
+
+    if [[ -z "${skip[gitleaks]+set}" ]]; then
+      if output="$(run_bounded_probe "$timeout_bin" "$MISE_BIN" exec -- gitleaks version 2>/dev/null)"; then
+        candidate="$(awk 'NR==1{ sub(/^v/, "", $1); print $1 }' <<<"$output")"
+        emit_or_warn_installed gitleaks "$candidate"
+      else
+        warn "Could not record installed version for gitleaks."
+      fi
+    fi
+
+    if [[ -z "${skip[pyyaml]+set}" ]]; then
+      if output="$(run_bounded_probe "$timeout_bin" "$MISE_BIN" exec -- python -c 'import yaml; print(yaml.__version__)' 2>/dev/null)"; then
+        candidate="$(awk 'NR==1{print $1}' <<<"$output")"
+        emit_or_warn_installed pyyaml "$candidate"
+      else
+        warn "Could not record installed version for pyyaml."
+      fi
+    fi
+
+    if [[ -z "${skip[openspec]+set}" ]]; then
+      if output="$(run_bounded_probe "$timeout_bin" openspec --version 2>/dev/null)"; then
+        candidate="$(grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' <<<"$output" | head -n1 || true)"
+        emit_or_warn_installed openspec "$candidate"
+      else
+        warn "Could not record installed version for openspec."
+      fi
+    fi
+  fi
+
+  # superpowers and karpathy-ref have no reliable probe and get no
+  # installed.* key at all -- see the design's "Observing installed versions".
+
+  # Zero-invocation provenance: independent of timeout_bin, because recording
+  # it runs no command. Empty unless Karpathy was actually installed.
+  if [[ -n "$INSTALLED_KARPATHY_SHA256" ]]; then
+    printf 'installed.karpathy-sha256=%s\n' "$INSTALLED_KARPATHY_SHA256"
+  fi
+}
+
+# write_receipt_body emits the install receipt to stdout, in the canonical
+# order the design declares: the four provenance literals, skipped=,
+# overridden=, every requested.* in catalog order (karpathy-sha256 excepted --
+# it is integrity provenance, never a requested value), then installed.* in
+# catalog order. Called directly by tests and, in production, only through
+# write_install_receipt, which redirects it into the atomic temp file.
+write_receipt_body() {
+  local source_commit="unknown"
+  if git -C "$ADT_INSTALL_ROOT" rev-parse HEAD >/dev/null 2>&1; then
+    source_commit="$(git -C "$ADT_INSTALL_ROOT" rev-parse HEAD)"
+    if [[ -n "$(git -C "$ADT_INSTALL_ROOT" status --porcelain 2>/dev/null)" ]]; then
+      source_commit="$source_commit-dirty"
+    fi
+  fi
+
+  printf 'script-version=%s\n' "$SCRIPT_VERSION"
+  printf 'installed-at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  printf 'source-commit=%s\n' "$source_commit"
+  printf 'catalog-sha256=%s\n' "$(sha256sum -- "$ADT_CATALOG_FILE" | cut -d' ' -f1)"
+  printf 'skipped=%s\n' "$(skipped_keys)"
+  printf 'overridden=%s\n' "$(serialize_catalog_set OVERRIDDEN_SET)"
+
+  local key
+  for key in "${CATALOG_ORDER[@]}"; do
+    [[ "$key" != "karpathy-sha256" ]] || continue
+    printf 'requested.%s=%s\n' "$key" "$(requested_value_for "$key")"
+  done
+
+  write_installed_versions
+}
+
+# write_install_receipt persists write_receipt_body's output atomically at
+# ${XDG_STATE_HOME:-$HOME/.local/state}/agentic-dev-toolkit/install-receipt.env.
+# Called from main between verify_installation and print_summary: only after
+# verification succeeds, and before the summary claims success, so a write
+# failure is an installation failure under the ERR trap rather than a warning
+# after "Setup complete". --verify-only never reaches this call; --dry-run
+# reaches it and returns immediately after describing what would be written.
+write_install_receipt() {
+  local state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/agentic-dev-toolkit"
+  local receipt="$state_dir/install-receipt.env"
+  local tmp
+
+  if (( DRY_RUN == 1 )); then
+    info "Would write the install receipt to $receipt"
+    return 0
+  fi
+
+  mkdir -p "$state_dir"
+  chmod 0755 "$state_dir"
+  tmp="$(mktemp "$state_dir/.install-receipt.XXXXXX")"
+  TEMP_PATHS+=("$tmp")
+  write_receipt_body > "$tmp"
+  chmod 0644 "$tmp"
+  mv -f "$tmp" "$receipt"
+}
+
 verify_installation() {
   log "Verifying workstation"
 
@@ -1733,6 +2056,7 @@ main() {
   configure_git_credential_helper
   configure_project
   verify_installation
+  write_install_receipt
   print_summary
 }
 

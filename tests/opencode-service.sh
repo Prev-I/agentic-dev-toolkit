@@ -6,6 +6,7 @@ REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly REPOSITORY_ROOT
 readonly CONSUMER="$REPOSITORY_ROOT/opencode-service/opencode-gateway-restart.sh"
 readonly READY="$REPOSITORY_ROOT/opencode-service/opencode-startup-ready.sh"
+readonly TELEGRAM_READY="$REPOSITORY_ROOT/opencode-service/opencode-telegram-ready.sh"
 
 cleanup() {
   rm -rf "${TEMP_DIR:-}"
@@ -38,8 +39,8 @@ assert_contains() {
   [[ "$haystack" == *"$needle"* ]] || fail "$message: '$needle' not found in '$haystack'"
 }
 
-# `systemctl` and `curl` are replaced on PATH, so the suite exercises the real
-# decision logic without a systemd user manager or a server. Each stub reports
+# `systemctl`, `journalctl` and `curl` are replaced on PATH, so the suite exercises
+# the real decision logic without a systemd user manager or a server. Each stub reports
 # what it was asked to do through files the assertions read, because a stub that
 # only fakes a return value cannot show that a restart was *not* attempted.
 install_stubs() {
@@ -61,13 +62,27 @@ STUB
 
   cat > "$TEMP_DIR/bin/curl" <<'STUB'
 #!/usr/bin/env bash
-cat > /dev/null                      # drain the -K - option block
+options="$(cat)"                    # drain and inspect the -K - option block
+if [[ "${STUB_REQUIRE_AUTH:-0}" == "1" ]]; then
+  [[ "$options" == *'user = "test-user:test-password"'* ]] || exit 2
+fi
 exit_status="${STUB_CURL_STATUS:-0}"
 [[ "$exit_status" == "0" ]] || exit "$exit_status"
-printf '%s' "${STUB_SESSION_BODY:-\{\}}"
+case "$options" in
+  *'/global/health'*) printf '%s' "${STUB_HEALTH_BODY:-\{\}}" ;;
+  *'/experimental/tool/ids'*) printf '%s' "${STUB_TOOLS_BODY:-\[\]}" ;;
+  *) printf '%s' "${STUB_SESSION_BODY:-\{\}}" ;;
+esac
 STUB
 
-  chmod 0755 "$TEMP_DIR/bin/systemctl" "$TEMP_DIR/bin/curl"
+  cat > "$TEMP_DIR/bin/journalctl" <<'STUB'
+#!/usr/bin/env bash
+[[ "$*" == *"_SYSTEMD_INVOCATION_ID=${STUB_MARKER_INVOCATION:-}"* ]] || exit 1
+[[ "$*" == *'--grep=Bot @[^ ]+ started!'* ]] || exit 2
+[[ "${STUB_TELEGRAM_STARTED:-0}" == "1" ]]
+STUB
+
+  chmod 0755 "$TEMP_DIR/bin/systemctl" "$TEMP_DIR/bin/curl" "$TEMP_DIR/bin/journalctl"
 }
 
 # Resets the control directory and the stub-visible state before each case, so
@@ -86,6 +101,11 @@ new_case() {
   export RESTART_IDLE_INTERVAL=1
   export STUB_ACTIVE_STATE="active"
   export STUB_SESSION_BODY="{}"
+  export STUB_HEALTH_BODY='{"healthy":true}'
+  export STUB_TOOLS_BODY='["bash"]'
+  export STUB_TELEGRAM_STARTED=1
+  export STUB_MARKER_INVOCATION=test-invocation
+  export STUB_REQUIRE_AUTH=0
   export STUB_CURL_STATUS=0
   export STUB_RESTART_STATUS=0
   export STUB_RESTART_OUTPUT=""
@@ -278,9 +298,139 @@ test_every_written_status_is_well_formed_json() {
     "the status file must carry exactly the fields the contract defines"
 }
 
-test_both_shipped_scripts_are_executable_and_syntactically_valid() {
+test_server_readiness_defaults_to_a_builtin_tool() {
+  new_case server-ready
+
+  local output status
+  set +e
+  output="$(
+    PATH="$TEMP_DIR/bin:$PATH" \
+      READY_TIMEOUT=0 READY_INTERVAL=0 \
+      env -u READY_TOOL_MARKER bash "$READY" 2>&1
+  )"
+  status=$?
+  set -e
+
+  assert_equal "$status" "0" "a stock OpenCode server must pass readiness"
+  assert_contains "$output" "tool 'bash' registered" \
+    "the default marker must be a built-in OpenCode tool"
+}
+
+test_server_readiness_accepts_an_explicit_plugin_marker() {
+  new_case plugin-ready
+  export STUB_TOOLS_BODY='["gateway_status"]'
+
+  local output status
+  set +e
+  output="$(
+    PATH="$TEMP_DIR/bin:$PATH" \
+      READY_TIMEOUT=0 READY_INTERVAL=0 READY_TOOL_MARKER=gateway_status \
+      bash "$READY" 2>&1
+  )"
+  status=$?
+  set -e
+
+  assert_equal "$status" "0" "an explicit plugin marker must remain supported"
+  assert_contains "$output" "tool 'gateway_status' registered" \
+    "readiness must report the configured marker"
+}
+
+test_telegram_readiness_requires_polling_and_opencode() {
+  new_case telegram-ready
+  export STUB_REQUIRE_AUTH=1
+
+  local output status
+  set +e
+  output="$(
+    PATH="$TEMP_DIR/bin:$PATH" \
+      INVOCATION_ID=test-invocation \
+      TELEGRAM_READY_TIMEOUT=0 TELEGRAM_READY_INTERVAL=0 \
+      OPENCODE_SERVER_USERNAME=test-user \
+      OPENCODE_SERVER_PASSWORD=test-password \
+      bash "$TELEGRAM_READY" 2>&1
+  )"
+  status=$?
+  set -e
+
+  assert_equal "$status" "0" "Telegram readiness must pass when both dependencies are ready"
+  assert_contains "$output" "telegram-readiness: READY" \
+    "Telegram readiness must report success"
+
+  export STUB_TELEGRAM_STARTED=0
+  set +e
+  output="$(
+    PATH="$TEMP_DIR/bin:$PATH" \
+      INVOCATION_ID=test-invocation \
+      TELEGRAM_READY_TIMEOUT=0 TELEGRAM_READY_INTERVAL=0 \
+      OPENCODE_SERVER_USERNAME=test-user \
+      OPENCODE_SERVER_PASSWORD=test-password \
+      bash "$TELEGRAM_READY" 2>&1
+  )"
+  status=$?
+  set -e
+
+  assert_equal "$status" "1" "Telegram readiness must fail without a polling marker"
+  assert_contains "$output" "polling marker absent" \
+    "Telegram readiness must diagnose a missing polling marker"
+
+  export STUB_TELEGRAM_STARTED=1
+  export STUB_HEALTH_BODY='{"healthy":false}'
+  set +e
+  output="$(
+    PATH="$TEMP_DIR/bin:$PATH" \
+      INVOCATION_ID=test-invocation \
+      TELEGRAM_READY_TIMEOUT=0 TELEGRAM_READY_INTERVAL=0 \
+      OPENCODE_SERVER_USERNAME=test-user \
+      OPENCODE_SERVER_PASSWORD=test-password \
+      bash "$TELEGRAM_READY" 2>&1
+  )"
+  status=$?
+  set -e
+
+  assert_equal "$status" "1" "Telegram readiness must fail without OpenCode health"
+  assert_contains "$output" "OpenCode health unavailable" \
+    "Telegram readiness must diagnose an unhealthy OpenCode dependency"
+
+  export STUB_HEALTH_BODY='{"healthy":true}'
+  export STUB_MARKER_INVOCATION=stale-invocation
+  set +e
+  output="$(
+    PATH="$TEMP_DIR/bin:$PATH" \
+      INVOCATION_ID=current-invocation \
+      TELEGRAM_READY_TIMEOUT=0 TELEGRAM_READY_INTERVAL=0 \
+      OPENCODE_SERVER_USERNAME=test-user \
+      OPENCODE_SERVER_PASSWORD=test-password \
+      bash "$TELEGRAM_READY" 2>&1
+  )"
+  status=$?
+  set -e
+
+  assert_equal "$status" "1" "a stale invocation marker must not satisfy readiness"
+  assert_contains "$output" "polling marker absent" \
+    "Telegram readiness must scope the marker to the current invocation"
+}
+
+test_telegram_readiness_requires_systemd_invocation_id() {
+  new_case telegram-no-invocation
+
+  local output status
+  set +e
+  output="$(
+    PATH="$TEMP_DIR/bin:$PATH" \
+      TELEGRAM_READY_TIMEOUT=0 TELEGRAM_READY_INTERVAL=0 \
+      env -u INVOCATION_ID bash "$TELEGRAM_READY" 2>&1
+  )"
+  status=$?
+  set -e
+
+  assert_equal "$status" "1" "Telegram readiness must reject non-systemd execution"
+  assert_contains "$output" "systemd invocation id is required" \
+    "Telegram readiness must explain its systemd-only contract"
+}
+
+test_shipped_scripts_are_executable_and_syntactically_valid() {
   local script
-  for script in "$CONSUMER" "$READY"; do
+  for script in "$CONSUMER" "$READY" "$TELEGRAM_READY"; do
     [[ -x "$script" ]] || fail "$script must be executable as shipped"
     bash -n "$script" || fail "$script must be syntactically valid"
   done
@@ -299,6 +449,10 @@ test_a_unit_mid_start_is_not_idle
 test_a_failed_restart_is_recorded_with_its_output
 test_a_request_without_a_usable_stamp_is_still_honoured
 test_every_written_status_is_well_formed_json
-test_both_shipped_scripts_are_executable_and_syntactically_valid
+test_server_readiness_defaults_to_a_builtin_tool
+test_server_readiness_accepts_an_explicit_plugin_marker
+test_telegram_readiness_requires_polling_and_opencode
+test_telegram_readiness_requires_systemd_invocation_id
+test_shipped_scripts_are_executable_and_syntactically_valid
 
 printf 'PASS: opencode service tests\n'

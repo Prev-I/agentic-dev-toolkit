@@ -71,6 +71,15 @@ validate_uptime_file() {
     die_usage "HRT_UPTIME_FILE must be an absolute readable path"
 }
 
+validate_uptime_content() {
+  local uptime
+
+  if ! IFS=' ' read -r uptime _ < "$UPTIME_FILE" ||
+    [[ ! "$uptime" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    die_usage "HRT_UPTIME_FILE must contain a monotonic uptime value"
+  fi
+}
+
 resolve_executable() {
   # The first argument names the caller variable that receives the safe path.
   local output_name="$1"
@@ -187,7 +196,11 @@ check_listener() {
   fi
   while IFS= read -r row; do
     # ss prints state, queues, local address, peer address, then process details.
-    IFS=' ' read -r _ _ _ local_address _ <<<"$row"
+    if [[ "$row" == tcp* || "$row" == udp* ]]; then
+      IFS=' ' read -r _ _ _ _ local_address _ <<<"$row"
+    else
+      IFS=' ' read -r _ _ _ local_address _ <<<"$row"
+    fi
     [[ "$local_address" == *":${HEADROOM_PORT}" ]] || continue
     listener_found=1
     [[ "$local_address" == "127.0.0.1:${HEADROOM_PORT}" ]] || unsafe_bind=1
@@ -217,6 +230,39 @@ check_listener() {
     add_finding FAIL HEADROOM_FOREIGN_LISTENER "port ${HEADROOM_PORT}" \
       "Headroom port is owned by another process."
   fi
+}
+
+listener_install_state() {
+  local output row local_address owner
+
+  if ! output="$("$SS_BIN" -ltnp "sport = :${HEADROOM_PORT}")"; then
+    printf '%s\n' AMBIGUOUS
+    return
+  fi
+  while IFS= read -r row; do
+    if [[ "$row" == tcp* || "$row" == udp* ]]; then
+      IFS=' ' read -r _ _ _ _ local_address _ <<<"$row"
+    else
+      IFS=' ' read -r _ _ _ local_address _ <<<"$row"
+    fi
+    [[ "$local_address" == *":${HEADROOM_PORT}" ]] || continue
+    if [[ "$row" != *'users:(('* ]]; then
+      printf '%s\n' AMBIGUOUS
+      return
+    fi
+    owners="${row#*users:}"
+    while [[ "$owners" =~ \"([^\"]+)\" ]]; do
+      owner="${BASH_REMATCH[1]}"
+      if [[ "$owner" != headroom ]]; then
+        printf '%s\n' CONFLICT
+        return
+      fi
+      owners="${owners#*"${BASH_REMATCH[0]}"}"
+    done
+    printf '%s\n' CONFLICT
+    return
+  done <<<"$output"
+  printf '%s\n' ABSENT
 }
 
 check_manifest() {
@@ -368,13 +414,17 @@ check_unit_independence() {
 
 audit_runtime_without_readiness() {
   F_SEVERITY=() F_CODE=() F_SUBJECT=() F_MESSAGE=()
-  [[ -n "${HEADROOM_BIN:-}" ]] && check_headroom_version
+  if [[ -n "${HEADROOM_BIN:-}" ]]; then
+    check_headroom_version
+  fi
   check_service_state
   check_listener
   check_manifest
   check_generated_permissions
   check_opencode_config
-  [[ -n "${HEADROOM_BIN:-}" ]] && check_opencode_package
+  if [[ -n "${HEADROOM_BIN:-}" ]]; then
+    check_opencode_package
+  fi
   check_opencode_environment
   check_unit_independence
 }
@@ -476,6 +526,16 @@ run_audit() {
 PACKAGE_STATE=""
 DEPLOYMENT_STATE=""
 
+headroom_tool_path() {
+  local bin_dir candidate
+
+  bin_dir="${UV_TOOL_BIN_DIR:-${XDG_BIN_HOME:-$RUNTIME_HOME/.local/bin}}"
+  candidate="$bin_dir/headroom"
+  if [[ -x "$candidate" ]]; then
+    readlink -f "$candidate"
+  fi
+}
+
 headroom_package_state() {
   local candidate output
 
@@ -483,13 +543,18 @@ headroom_package_state() {
   if [[ -n "$candidate" ]]; then
     resolve_executable HEADROOM_BIN HRT_HEADROOM_BIN headroom
   else
-    candidate="$(command -v headroom || true)"
+    candidate="$(headroom_tool_path || true)"
+    if [[ -z "$candidate" ]]; then
+      candidate="$(command -v headroom || true)"
+    fi
     if [[ -z "$candidate" ]]; then
       PACKAGE_STATE=ABSENT
       return
     fi
-    [[ "$candidate" == /* && -x "$candidate" ]] || die_usage "headroom resolved to a non-executable path"
-    HEADROOM_BIN="$candidate"
+    if ! HEADROOM_BIN="$(readlink -f "$candidate")" || [[ ! -x "$HEADROOM_BIN" ]]; then
+      PACKAGE_STATE=UNINSPECTABLE
+      return
+    fi
   fi
   if ! output="$("$HEADROOM_BIN" --version)"; then
     PACKAGE_STATE=UNINSPECTABLE
@@ -501,49 +566,54 @@ headroom_package_state() {
 }
 
 deployment_state() {
-  local output enabled active profile
+  local output enabled active
 
   if [[ -e "$MANIFEST_PATH" || -e "$SYSTEMD_USER_DIR/headroom-default.service" ]]; then
-    if [[ ! -r "$MANIFEST_PATH" ]] ||
-      ! profile="$("$JQ_BIN" -er '.profile | select(type == "string" and length > 0)' "$MANIFEST_PATH")"; then
-      DEPLOYMENT_STATE=AMBIGUOUS
-      return
-    fi
-    if [[ "$profile" != "$HEADROOM_PROFILE" ]]; then
-      DEPLOYMENT_STATE=CONFLICT
-      return
-    fi
-    audit_runtime_without_readiness
+    F_SEVERITY=() F_CODE=() F_SUBJECT=() F_MESSAGE=()
+    check_manifest
     case "$(status_for_findings)" in
-      ERROR) DEPLOYMENT_STATE=AMBIGUOUS ;;
-      FAIL) DEPLOYMENT_STATE=NONCONFORMING ;;
+      ERROR)
+        DEPLOYMENT_STATE=AMBIGUOUS
+        return
+        ;;
+      FAIL)
+        DEPLOYMENT_STATE=NONCONFORMING
+        return
+        ;;
       PASS|WARN)
         if ! enabled="$("$SYSTEMCTL_BIN" --user is-enabled headroom-default.service 2>/dev/null)" ||
           ! active="$("$SYSTEMCTL_BIN" --user is-active headroom-default.service 2>/dev/null)" ||
           [[ "$enabled" != enabled || "$active" != active ]]; then
           DEPLOYMENT_STATE=STOPPED
         else
-          DEPLOYMENT_STATE=CONFORMING
+          F_SEVERITY=() F_CODE=() F_SUBJECT=() F_MESSAGE=()
+          check_listener
+          check_generated_permissions
+          check_opencode_config
+          if [[ -n "${HEADROOM_BIN:-}" ]]; then
+            check_opencode_package
+          fi
+          check_opencode_environment
+          check_unit_independence
+          case "$(status_for_findings)" in
+            ERROR) DEPLOYMENT_STATE=AMBIGUOUS ;;
+            FAIL) DEPLOYMENT_STATE=NONCONFORMING ;;
+            PASS|WARN) DEPLOYMENT_STATE=CONFORMING ;;
+          esac
         fi
         ;;
     esac
     return
   fi
-  if ! output="$("$SS_BIN" -ltnp "sport = :${HEADROOM_PORT}")"; then
-    DEPLOYMENT_STATE=AMBIGUOUS
-  elif [[ -z "$output" ]]; then
-    DEPLOYMENT_STATE=ABSENT
-  elif [[ "$output" == *'users:(('* ]]; then
-    DEPLOYMENT_STATE=CONFLICT
-  else
-    DEPLOYMENT_STATE=AMBIGUOUS
-  fi
+  DEPLOYMENT_STATE="$(listener_install_state)"
 }
 
 classify_install_state() {
   headroom_package_state
   deployment_state
-  if [[ "$DEPLOYMENT_STATE" == AMBIGUOUS ]]; then
+  if [[ "$DEPLOYMENT_STATE" == NONCONFORMING ]]; then
+    INSTALL_STATE=NONCONFORMING
+  elif [[ "$DEPLOYMENT_STATE" == AMBIGUOUS ]]; then
     INSTALL_STATE=AMBIGUOUS
   elif [[ "$DEPLOYMENT_STATE" == CONFLICT ]]; then
     INSTALL_STATE=CONFLICT
@@ -621,13 +691,14 @@ wait_for_readiness() {
 
 run_install() {
   local package_state final_status future_headroom
+  local -a state_findings_severity=() state_findings_code=() state_findings_subject=() state_findings_message=()
 
-  resolve_executable UV_BIN HRT_UV_BIN uv
   resolve_executable UNAME_BIN HRT_UNAME_BIN uname
-  resolve_executable SLEEP_BIN HRT_SLEEP_BIN sleep
   [[ "$("$UNAME_BIN" -s)" == Linux ]] || die_usage "Headroom runtime installation requires Linux"
   validate_uptime_file
-  uptime_centiseconds >/dev/null
+  validate_uptime_content
+  resolve_executable UV_BIN HRT_UV_BIN uv
+  resolve_executable SLEEP_BIN HRT_SLEEP_BIN sleep
   resolve_executable SYSTEMCTL_BIN HRT_SYSTEMCTL_BIN systemctl
   if ! "$SYSTEMCTL_BIN" --user show-environment >/dev/null 2>&1; then
     die_usage "usable user systemd is required"
@@ -636,38 +707,23 @@ run_install() {
   resolve_executable SS_BIN HRT_SS_BIN ss
   resolve_executable CURL_BIN HRT_CURL_BIN curl
   resolve_executable STAT_BIN HRT_STAT_BIN stat
-  headroom_package_state
-  F_SEVERITY=() F_CODE=() F_SUBJECT=() F_MESSAGE=()
-  deployment_state
-  if [[ "$DEPLOYMENT_STATE" == AMBIGUOUS ]]; then
-    INSTALL_STATE=AMBIGUOUS
-  elif [[ "$DEPLOYMENT_STATE" == CONFLICT ]]; then
-    INSTALL_STATE=CONFLICT
-  elif [[ "$PACKAGE_STATE" == UNINSPECTABLE ]]; then
-    INSTALL_STATE=AMBIGUOUS
-  elif [[ "$PACKAGE_STATE" == WRONG_VERSION ]]; then
-    INSTALL_STATE=WRONG_VERSION
-  elif [[ "$PACKAGE_STATE" == ABSENT && "$DEPLOYMENT_STATE" != ABSENT ]]; then
-    INSTALL_STATE=ORPHANED_DEPLOYMENT
-  elif [[ "$PACKAGE_STATE" == EXACT && "$DEPLOYMENT_STATE" == STOPPED ]]; then
-    INSTALL_STATE=STOPPED
-  elif [[ "$PACKAGE_STATE" == EXACT && "$DEPLOYMENT_STATE" == CONFORMING ]]; then
-    INSTALL_STATE=CONFORMING
-  elif [[ "$PACKAGE_STATE" == EXACT ]]; then
-    INSTALL_STATE=PACKAGE_ONLY
-  else
-    INSTALL_STATE=ABSENT
-  fi
+  classify_install_state
+  state_findings_status="$(status_for_findings)"
+  state_findings_severity=("${F_SEVERITY[@]}")
+  state_findings_code=("${F_CODE[@]}")
+  state_findings_subject=("${F_SUBJECT[@]}")
+  state_findings_message=("${F_MESSAGE[@]}")
   F_SEVERITY=() F_CODE=() F_SUBJECT=() F_MESSAGE=()
   check_opencode_config
   check_opencode_environment
   check_unit_independence
-  if [[ "$PACKAGE_STATE" != ABSENT ]]; then
+  if [[ "$PACKAGE_STATE" != ABSENT && "$PACKAGE_STATE" != UNINSPECTABLE ]]; then
     check_opencode_package
   fi
   final_status="$(status_for_findings)"
   if [[ "$final_status" != PASS ]]; then
     render_human "$final_status"
+    [[ "$final_status" == ERROR ]] && return 2
     return 1
   fi
   case "$INSTALL_STATE" in
@@ -688,15 +744,21 @@ run_install() {
       return 1
       ;;
     NONCONFORMING|CONFLICT)
+      F_SEVERITY=("${state_findings_severity[@]}") F_CODE=("${state_findings_code[@]}")
+      F_SUBJECT=("${state_findings_subject[@]}") F_MESSAGE=("${state_findings_message[@]}")
+      render_human "$state_findings_status"
       printf '%s\n' "ERROR: Headroom installation is ${INSTALL_STATE,,}; implicit repair is refused." >&2
       return 1
       ;;
     AMBIGUOUS)
+      F_SEVERITY=("${state_findings_severity[@]}") F_CODE=("${state_findings_code[@]}")
+      F_SUBJECT=("${state_findings_subject[@]}") F_MESSAGE=("${state_findings_message[@]}")
+      render_human "$state_findings_status"
       printf '%s\n' 'ERROR: Headroom installation ownership could not be established.' >&2
       return 2
       ;;
   esac
-  future_headroom="$RUNTIME_HOME/.local/bin/headroom"
+  future_headroom="${UV_TOOL_BIN_DIR:-${XDG_BIN_HOME:-$RUNTIME_HOME/.local/bin}}/headroom"
   if [[ "$INSTALL_STATE" == ABSENT ]]; then
     install_package
     if [[ "$DRY_RUN" -eq 1 ]]; then

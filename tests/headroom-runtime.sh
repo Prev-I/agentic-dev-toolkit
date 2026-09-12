@@ -861,7 +861,7 @@ test_shipped_file_modes_and_entrypoint_are_preserved() {
 new_installable_absent_case() {
   new_case "$1"
   printf '%s\n' '0.00 0.00' > "$HRT_UPTIME_FILE"
-  mkdir -p "$HRT_HEADROOM_DEPLOY_ROOT/default"
+  local headroom_template="$HRT_HEADROOM_BIN"
   {
     printf '#!%s\n' "$BASH_BIN"
     cat <<'STUB'
@@ -869,6 +869,9 @@ printf '%s\n' '---' "$0" "$@" >> "$HRT_COMMAND_LOG"
 if [[ "$1 $2" == 'tool install' ]]; then
   printf '%s\n' '---' "$0" "$@" >> "$HRT_MUTATION_LOG"
   : > "$HRT_HOME/package-installed"
+  /bin/mkdir -p "$HRT_HOME/.local/bin"
+  /bin/cp "$HRT_HEADROOM_TEMPLATE" "$HRT_HOME/.local/bin/headroom"
+  /bin/chmod 0755 "$HRT_HOME/.local/bin/headroom"
 fi
 STUB
   } > "$HRT_UV_BIN"
@@ -883,7 +886,8 @@ case "$*" in
   *'is-enabled headroom-default.service'*) [[ -f "$HRT_SYSTEMD_USER_DIR/headroom-default.service" ]] && printf 'enabled\n' || printf 'disabled\n' ;;
   *'is-active headroom-default.service'*) [[ -f "$HRT_SYSTEMD_USER_DIR/headroom-default.service" ]] && printf 'active\n' || printf 'inactive\n' ;;
   *'show headroom-default.service'*'ExecMainStatus'*) printf '0\n' ;;
-  *'is-active opencode.service'*) printf 'inactive\n' ;;
+  *'is-active opencode.service'*) printf '%s\n' "${HRT_FIX_OPENCODE_ACTIVE:-inactive}" ;;
+  *'show opencode.service'*'MainPID'*) printf '%s\n' "${HRT_FIX_OPENCODE_PID:-0}" ;;
 esac
 STUB
   } > "$HRT_SYSTEMCTL_BIN"
@@ -895,18 +899,21 @@ case "$1 $2" in
     [[ -f "$HRT_HOME/package-installed" ]] || exit 1
     printf 'headroom %s\n' "${HRT_FIX_HEADROOM_VERSION:-0.37.0}"
     ;;
-  'plugins list') ;;
+  'plugins list') printf '%s\n' "${HRT_FIX_HEADROOM_PLUGINS:-}" ;;
   'install apply')
     printf '%s\n' '---' "$0" "$@" >> "$HRT_MUTATION_LOG"
+    /bin/mkdir -p "$HRT_HEADROOM_DEPLOY_ROOT/default"
     printf '%s\n' '{"profile":"default","targets":[],"mutations":[],"memory_enabled":false,"telemetry_enabled":false,"base_env":{"HEADROOM_BEACON":"off","HEADROOM_UPDATE_CHECK":"off","HEADROOM_TELEMETRY":"off"}}' > "$HRT_HEADROOM_DEPLOY_ROOT/default/manifest.json"
     printf '%s\n' '[Unit]' > "$HRT_SYSTEMD_USER_DIR/headroom-default.service"
     ;;
 esac
 STUB
-  } > "$HRT_HEADROOM_BIN"
+  } > "$headroom_template"
+  export HRT_HEADROOM_TEMPLATE="$headroom_template"
   {
     printf '#!%s\n' "$BASH_BIN"
     cat <<'STUB'
+printf '%s\n' '---' "$0" "$@" >> "$HRT_COMMAND_LOG"
 if [[ -f "$HRT_SYSTEMD_USER_DIR/headroom-default.service" ]]; then
   printf '%s\n' 'LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("headroom",pid=42,fd=3))'
 fi
@@ -927,8 +934,12 @@ printf '%s\n' '---' "$0" "$@" >> "$HRT_COMMAND_LOG"
 printf '%s\n' '31.00 0.00' > "$HRT_UPTIME_FILE"
 STUB
   } > "$HRT_SLEEP_BIN"
-  chmod 0755 "$HRT_UNAME_BIN" "$HRT_SYSTEMCTL_BIN" "$HRT_HEADROOM_BIN" \
+  chmod 0755 "$HRT_UNAME_BIN" "$HRT_SYSTEMCTL_BIN" "$headroom_template" \
     "$HRT_SS_BIN" "$HRT_CURL_BIN" "$HRT_STAT_BIN" "$HRT_SLEEP_BIN"
+  /bin/cp "$headroom_template" "$HRT_HOME/headroom-template"
+  export HRT_HEADROOM_TEMPLATE="$HRT_HOME/headroom-template"
+  rm "$headroom_template"
+  unset HRT_HEADROOM_BIN
 }
 
 test_install_absent_uses_the_exact_approved_commands() {
@@ -943,7 +954,7 @@ install
 3.13
 headroom-ai[proxy]==0.37.0
 ---
-$HRT_HEADROOM_BIN
+$HRT_HOME/.local/bin/headroom
 install
 apply
 --preset
@@ -989,6 +1000,49 @@ test_install_rejects_an_invalid_uptime_source_before_mutation() {
   assert_equal "$(<"$HRT_MUTATION_LOG")" '' "invalid install uptime must block mutations"
 }
 
+test_absent_headroom_without_a_seam_dry_runs_with_future_path() {
+  new_installable_absent_case absent-headroom-without-seam
+  run_cli install --dry-run
+  assert_equal "$CLI_STATUS" 0 "a fresh dry-run must not require a Headroom binary"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "a fresh dry-run must not mutate"
+  assert_contains "$CLI_OUTPUT" "$HRT_HOME/.local/bin/headroom install apply" \
+    "a fresh dry-run must display the future uv tool executable"
+  assert_contains "$(<"$HRT_COMMAND_LOG")" "$HRT_SS_BIN" \
+    "a fresh dry-run must perform read-only preflight probes"
+}
+
+test_install_refuses_opencode_coupling_before_mutation() {
+  local case_name
+
+  for case_name in config package environment drop-in; do
+    new_installable_absent_case "coupling-$case_name"
+    case "$case_name" in
+      config) printf '%s\n' '{"plugin":"headroom-opencode"}' > "$HRT_OPENCODE_CONFIG_DIR/opencode.json" ;;
+      package)
+        /bin/mkdir -p "$HRT_HOME/.local/bin"
+        /bin/cp "$HRT_HEADROOM_TEMPLATE" "$HRT_HOME/.local/bin/headroom"
+        /bin/chmod 0755 "$HRT_HOME/.local/bin/headroom"
+        export HRT_HEADROOM_BIN="$HRT_HOME/.local/bin/headroom"
+        : > "$HRT_HOME/package-installed"
+        export HRT_FIX_HEADROOM_PLUGINS=headroom-opencode
+        ;;
+      environment)
+        export HRT_FIX_OPENCODE_ACTIVE=active HRT_FIX_OPENCODE_PID=88
+        mkdir -p "$HRT_PROC_ROOT/88"
+        printf 'HEADROOM_PROXY_URL=x\0' > "$HRT_PROC_ROOT/88/environ"
+        ;;
+      drop-in)
+        mkdir -p "$HRT_SYSTEMD_USER_DIR/opencode.service.d"
+        printf '%s\n' 'After=headroom-default.service' > "$HRT_SYSTEMD_USER_DIR/opencode.service.d/10-headroom.conf"
+        ;;
+    esac
+    run_cli install
+    assert_equal "$CLI_STATUS" 1 "$case_name coupling must refuse installation"
+    assert_equal "$(<"$HRT_MUTATION_LOG")" '' "$case_name coupling must block every mutation"
+    unset HRT_FIX_HEADROOM_PLUGINS HRT_FIX_OPENCODE_ACTIVE HRT_FIX_OPENCODE_PID
+  done
+}
+
 JQ_BIN="$(command -v jq || true)"
 [[ -n "$JQ_BIN" ]] || fail "jq is required for Headroom runtime tests"
 JQ_BIN="$(readlink -f "$JQ_BIN")"
@@ -1015,6 +1069,8 @@ test_shipped_file_modes_and_entrypoint_are_preserved
 test_install_absent_uses_the_exact_approved_commands
 test_install_dry_run_prints_but_does_not_mutate
 test_install_rejects_an_invalid_uptime_source_before_mutation
+test_absent_headroom_without_a_seam_dry_runs_with_future_path
+test_install_refuses_opencode_coupling_before_mutation
 test_conforming_runtime_passes
 test_json_audit_has_stable_shape
 test_audit_policy_and_error_findings

@@ -196,7 +196,7 @@ new_conforming_case() {
   export HRT_FIX_SS_OUTPUT='LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("headroom",pid=42,fd=3))'
   unset HRT_FIX_HEADROOM_PLUGINS HRT_FIX_CURL_STATUS HRT_FIX_EXEC_MAIN_STATUS \
     HRT_FIX_OPENCODE_ACTIVE HRT_FIX_OPENCODE_PID HRT_FIX_MANIFEST_MODE \
-    HRT_FIX_HEADROOM_PLUGINS_STATUS
+    HRT_FIX_HEADROOM_PLUGINS_STATUS HRT_FIX_STAT_STATUS
 
   {
     printf '#!%s\n' "$BASH_BIN"
@@ -235,6 +235,7 @@ STUB
     printf '#!%s\n' "$BASH_BIN"
     cat <<'STUB'
 printf '%s\n' "${HRT_FIX_MANIFEST_MODE:-600}"
+exit "${HRT_FIX_STAT_STATUS:-0}"
 STUB
   } > "$HRT_STAT_BIN"
   {
@@ -380,6 +381,10 @@ test_audit_policy_and_error_findings() {
   printf '%s\n' '{"profile":"default","targets":[],"mutations":[],"memory_enabled":false,"telemetry_enabled":true,"base_env":{"HEADROOM_BEACON":"off","HEADROOM_UPDATE_CHECK":"off","HEADROOM_TELEMETRY":"off"}}' > "$HRT_HEADROOM_DEPLOY_ROOT/default/manifest.json"
   assert_audit_finding 1 HEADROOM_TELEMETRY_ENABLED
 
+  new_conforming_case telemetry-environment
+  printf '%s\n' '{"profile":"default","targets":[],"mutations":[],"memory_enabled":false,"telemetry_enabled":false,"base_env":{"HEADROOM_BEACON":"off","HEADROOM_UPDATE_CHECK":"off","HEADROOM_TELEMETRY":"on"}}' > "$HRT_HEADROOM_DEPLOY_ROOT/default/manifest.json"
+  assert_audit_finding 1 HEADROOM_TELEMETRY_ENV_ENABLED
+
   new_conforming_case beacon
   printf '%s\n' '{"profile":"default","targets":[],"mutations":[],"memory_enabled":false,"telemetry_enabled":false,"base_env":{"HEADROOM_BEACON":"on","HEADROOM_UPDATE_CHECK":"off","HEADROOM_TELEMETRY":"off"}}' > "$HRT_HEADROOM_DEPLOY_ROOT/default/manifest.json"
   assert_audit_finding 1 HEADROOM_BEACON_NOT_DISABLED
@@ -455,6 +460,21 @@ test_audit_warning_and_non_invocation_boundaries() {
   new_conforming_case permissions
   export HRT_FIX_MANIFEST_MODE=644
   assert_audit_finding 0 HEADROOM_PERMISSIONS_BROAD
+
+  new_conforming_case tighter-permissions
+  export HRT_FIX_MANIFEST_MODE=400
+  run_cli audit
+  assert_equal "$CLI_STATUS" 0 "tighter manifest permissions must not warn"
+  [[ "$CLI_OUTPUT" != *HEADROOM_PERMISSIONS_BROAD* ]] ||
+    fail "tighter manifest permissions must not report broad permissions"
+
+  new_conforming_case invalid-permissions
+  export HRT_FIX_MANIFEST_MODE=invalid
+  assert_audit_finding 2 HEADROOM_PERMISSIONS_UNREADABLE
+
+  new_conforming_case unreadable-permissions
+  export HRT_FIX_STAT_STATUS=1
+  assert_audit_finding 2 HEADROOM_PERMISSIONS_UNREADABLE
 
   new_conforming_case lifecycle
   export HRT_FIX_EXEC_MAIN_STATUS=241
@@ -536,13 +556,15 @@ test_audit_command_and_flag_validation() {
   chmod 0755 "$HRT_HEADROOM_BIN"
   run_cli audit
   assert_equal "$CLI_STATUS" 2 "a resolved Headroom CLI that cannot report its version must error"
-  [[ "$CLI_OUTPUT" != *HEADROOM_VERSION_MISMATCH* ]] ||
-    fail "unreadable Headroom version must not reuse the mismatch finding"
+  assert_contains "$CLI_OUTPUT" HEADROOM_VERSION_UNREADABLE \
+    "unreadable Headroom version must have its own finding code"
 
   new_conforming_case package-list-error
   export HRT_FIX_HEADROOM_PLUGINS_STATUS=1
   run_cli audit
   assert_equal "$CLI_STATUS" 2 "package-list inspection failures must be errors"
+  assert_contains "$CLI_OUTPUT" HEADROOM_OPENCODE_PACKAGE_UNREADABLE \
+    "package-list inspection failures must report their finding code"
   [[ "$CLI_OUTPUT" != *HEADROOM_OPENCODE_PACKAGE_PRESENT* ]] ||
     fail "package-list inspection failures must not claim the package is present"
 
@@ -553,6 +575,12 @@ test_audit_command_and_flag_validation() {
   assert_equal "$CLI_STATUS" 2 "install JSON must be rejected"
   run_cli remove --json
   assert_equal "$CLI_STATUS" 2 "remove JSON must be rejected"
+
+  new_conforming_case invalid-json-audit-option
+  run_cli audit --json $'--invalid\n\001'
+  assert_equal "$CLI_STATUS" 2 "invalid audit JSON option must be a usage error"
+  assert_equal "$("$JQ_BIN" -r '.status' <<<"$CLI_OUTPUT")" ERROR \
+    "invalid audit JSON option must emit a valid error envelope"
 }
 
 test_version_is_exact() {

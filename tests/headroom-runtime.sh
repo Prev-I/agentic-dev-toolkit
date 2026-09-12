@@ -41,7 +41,7 @@ install_stubs() {
   local command
 
   mkdir -p "$CASE_DIR/bin"
-  for command in uv headroom systemctl curl ss uname sleep readlink; do
+  for command in uv headroom systemctl curl ss uname sleep readlink stat; do
     {
       printf '#!%s\n' "$BASH_BIN"
       cat <<'STUB'
@@ -73,6 +73,7 @@ new_case() {
   export HRT_HEADROOM_DEPLOY_ROOT="$CASE_DIR/deploy"
   export HRT_UPTIME_FILE="$CASE_DIR/uptime"
   export HRT_COMMAND_LOG="$CASE_DIR/commands"
+  unset OPENCODE_CONFIG
 
   install_stubs
   export HRT_UV_BIN="$CASE_DIR/bin/uv"
@@ -81,6 +82,7 @@ new_case() {
   export HRT_CURL_BIN="$CASE_DIR/bin/curl"
   export HRT_JQ_BIN="$JQ_BIN"
   export HRT_SS_BIN="$CASE_DIR/bin/ss"
+  export HRT_STAT_BIN="$CASE_DIR/bin/stat"
   export HRT_UNAME_BIN="$CASE_DIR/bin/uname"
   export HRT_SLEEP_BIN="$CASE_DIR/bin/sleep"
 }
@@ -163,6 +165,283 @@ main install --dry-run
 printf '%s\n' "$UV_BIN"
 SCRIPT
 )" && CLI_STATUS=0 || CLI_STATUS=$?
+}
+
+new_conforming_case() {
+  new_case "$1"
+  mkdir -p "$HRT_HEADROOM_DEPLOY_ROOT/default"
+  printf '%s\n' '{"profile":"default","targets":[],"mutations":[],"memory_enabled":false,"telemetry_enabled":false,"base_env":{"HEADROOM_BEACON":"off","HEADROOM_UPDATE_CHECK":"off","HEADROOM_TELEMETRY":"off"}}' \
+    > "$HRT_HEADROOM_DEPLOY_ROOT/default/manifest.json"
+  printf '%s\n' '[Unit]' > "$HRT_SYSTEMD_USER_DIR/headroom-default.service"
+  export HRT_FIX_HEADROOM_VERSION=0.37.0
+  export HRT_FIX_SERVICE_ENABLED=enabled
+  export HRT_FIX_SERVICE_ACTIVE=active
+  export HRT_FIX_CURL_BODY='{"ready":true,"version":"0.37.0"}'
+  export HRT_FIX_SS_OUTPUT='LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("headroom",pid=42,fd=3))'
+  unset HRT_FIX_HEADROOM_PLUGINS HRT_FIX_CURL_STATUS HRT_FIX_EXEC_MAIN_STATUS \
+    HRT_FIX_OPENCODE_ACTIVE HRT_FIX_OPENCODE_PID HRT_FIX_MANIFEST_MODE
+
+  {
+    printf '#!%s\n' "$BASH_BIN"
+    cat <<'STUB'
+if [[ "$1" == "--version" ]]; then printf 'headroom %s\n' "$HRT_FIX_HEADROOM_VERSION"; exit 0; fi
+if [[ "$1 $2" == "plugins list" ]]; then printf '%s\n' "${HRT_FIX_HEADROOM_PLUGINS:-}"; exit 0; fi
+exit 0
+STUB
+  } > "$HRT_HEADROOM_BIN"
+  {
+    printf '#!%s\n' "$BASH_BIN"
+    cat <<'STUB'
+case "$*" in
+  *'is-enabled headroom-default.service'*) printf '%s\n' "$HRT_FIX_SERVICE_ENABLED" ;;
+  *'is-active headroom-default.service'*) printf '%s\n' "$HRT_FIX_SERVICE_ACTIVE" ;;
+  *'show headroom-default.service'*'ExecMainStatus'*) printf '%s\n' "${HRT_FIX_EXEC_MAIN_STATUS:-0}" ;;
+  *'is-active opencode.service'*) printf '%s\n' "${HRT_FIX_OPENCODE_ACTIVE:-inactive}" ;;
+  *'show opencode.service'*'MainPID'*) printf '%s\n' "${HRT_FIX_OPENCODE_PID:-0}" ;;
+esac
+STUB
+  } > "$HRT_SYSTEMCTL_BIN"
+  {
+    printf '#!%s\n' "$BASH_BIN"
+    cat <<'STUB'
+printf '%s\n' "$HRT_FIX_CURL_BODY"
+exit "${HRT_FIX_CURL_STATUS:-0}"
+STUB
+  } > "$HRT_CURL_BIN"
+  {
+    printf '#!%s\n' "$BASH_BIN"
+    cat <<'STUB'
+printf '%s\n' "$HRT_FIX_SS_OUTPUT"
+STUB
+  } > "$HRT_SS_BIN"
+  {
+    printf '#!%s\n' "$BASH_BIN"
+    cat <<'STUB'
+printf '%s\n' "${HRT_FIX_MANIFEST_MODE:-600}"
+STUB
+  } > "$HRT_STAT_BIN"
+  {
+    printf '#!%s\n' "$BASH_BIN"
+    printf '%s\n' 'exit 99'
+  } > "$CASE_DIR/bin/telegram"
+  chmod 0755 "$CASE_DIR/bin/telegram"
+  chmod 0755 "$HRT_HEADROOM_BIN" "$HRT_SYSTEMCTL_BIN" "$HRT_CURL_BIN" "$HRT_SS_BIN" "$HRT_STAT_BIN"
+}
+
+test_conforming_runtime_passes() {
+  new_conforming_case conforming
+  run_cli audit
+  assert_equal "$CLI_STATUS" "0" "a conforming runtime must pass"
+  assert_contains "$CLI_OUTPUT" "Status: PASS" "human output must report PASS"
+}
+
+test_json_audit_has_stable_shape() {
+  new_conforming_case json
+  run_cli audit --json
+  assert_equal "$CLI_STATUS" "0" "JSON audit must pass"
+  assert_equal "$("$JQ_BIN" -r '.schemaVersion' <<<"$CLI_OUTPUT")" "1" \
+    "JSON schema version must be one"
+  assert_equal "$("$JQ_BIN" -r '.toolVersion' <<<"$CLI_OUTPUT")" "0.1.0" \
+    "toolVersion must identify the toolkit component"
+  assert_equal "$("$JQ_BIN" -r '.status' <<<"$CLI_OUTPUT")" "PASS" \
+    "JSON status must match human status"
+}
+
+assert_audit_finding() {
+  local expected_status="$1"
+  local expected_code="$2"
+
+  run_cli audit
+  assert_equal "$CLI_STATUS" "$expected_status" "audit must classify $expected_code"
+  assert_contains "$CLI_OUTPUT" "$expected_code" "audit must report $expected_code"
+}
+
+test_audit_policy_and_error_findings() {
+  new_conforming_case version
+  export HRT_FIX_HEADROOM_VERSION=0.36.0
+  assert_audit_finding 1 HEADROOM_VERSION_MISMATCH
+
+  new_conforming_case suffixed-version
+  export HRT_FIX_HEADROOM_VERSION=0.37.0-dev
+  assert_audit_finding 1 HEADROOM_VERSION_MISMATCH
+
+  new_conforming_case readiness-version
+  export HRT_FIX_CURL_BODY='{"ready":true,"version":"0.36.0"}'
+  assert_audit_finding 1 HEADROOM_READINESS_VERSION_MISMATCH
+
+  new_conforming_case disabled
+  export HRT_FIX_SERVICE_ENABLED=disabled
+  assert_audit_finding 1 HEADROOM_SERVICE_DISABLED
+
+  new_conforming_case inactive
+  export HRT_FIX_SERVICE_ACTIVE=inactive
+  assert_audit_finding 1 HEADROOM_SERVICE_INACTIVE
+
+  new_conforming_case not-ready
+  export HRT_FIX_CURL_STATUS=22
+  assert_audit_finding 1 HEADROOM_NOT_READY
+
+  new_conforming_case invalid-readiness
+  export HRT_FIX_CURL_BODY=not-json
+  assert_audit_finding 2 HEADROOM_READINESS_INVALID
+
+  new_conforming_case unsafe-bind
+  export HRT_FIX_SS_OUTPUT='LISTEN 0 4096 0.0.0.0:8787 0.0.0.0:* users:(("headroom",pid=42,fd=3))'
+  assert_audit_finding 1 HEADROOM_UNSAFE_BIND
+
+  new_conforming_case foreign-listener
+  export HRT_FIX_SS_OUTPUT='LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("other",pid=42,fd=3))'
+  assert_audit_finding 1 HEADROOM_FOREIGN_LISTENER
+
+  new_conforming_case unknown-listener
+  export HRT_FIX_SS_OUTPUT='LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:*'
+  assert_audit_finding 2 HEADROOM_LISTENER_OWNER_AMBIGUOUS
+
+  new_conforming_case unreadable-manifest
+  rm "$HRT_HEADROOM_DEPLOY_ROOT/default/manifest.json"
+  assert_audit_finding 2 HEADROOM_MANIFEST_UNREADABLE
+
+  new_conforming_case invalid-manifest
+  printf '%s\n' not-json > "$HRT_HEADROOM_DEPLOY_ROOT/default/manifest.json"
+  assert_audit_finding 2 HEADROOM_MANIFEST_INVALID
+
+  new_conforming_case profile
+  printf '%s\n' '{"profile":"other","targets":[],"mutations":[],"memory_enabled":false,"telemetry_enabled":false,"base_env":{"HEADROOM_BEACON":"off","HEADROOM_UPDATE_CHECK":"off","HEADROOM_TELEMETRY":"off"}}' > "$HRT_HEADROOM_DEPLOY_ROOT/default/manifest.json"
+  assert_audit_finding 1 HEADROOM_PROFILE_MISMATCH
+
+  new_conforming_case targets
+  printf '%s\n' '{"profile":"default","targets":["opencode"],"mutations":[],"memory_enabled":false,"telemetry_enabled":false,"base_env":{"HEADROOM_BEACON":"off","HEADROOM_UPDATE_CHECK":"off","HEADROOM_TELEMETRY":"off"}}' > "$HRT_HEADROOM_DEPLOY_ROOT/default/manifest.json"
+  assert_audit_finding 1 HEADROOM_TARGETS_CONFIGURED
+
+  new_conforming_case mutations
+  printf '%s\n' '{"profile":"default","targets":[],"mutations":["x"],"memory_enabled":false,"telemetry_enabled":false,"base_env":{"HEADROOM_BEACON":"off","HEADROOM_UPDATE_CHECK":"off","HEADROOM_TELEMETRY":"off"}}' > "$HRT_HEADROOM_DEPLOY_ROOT/default/manifest.json"
+  assert_audit_finding 1 HEADROOM_MUTATIONS_PRESENT
+
+  new_conforming_case memory
+  printf '%s\n' '{"profile":"default","targets":[],"mutations":[],"memory_enabled":true,"telemetry_enabled":false,"base_env":{"HEADROOM_BEACON":"off","HEADROOM_UPDATE_CHECK":"off","HEADROOM_TELEMETRY":"off"}}' > "$HRT_HEADROOM_DEPLOY_ROOT/default/manifest.json"
+  assert_audit_finding 1 HEADROOM_MEMORY_ENABLED
+
+  new_conforming_case telemetry
+  printf '%s\n' '{"profile":"default","targets":[],"mutations":[],"memory_enabled":false,"telemetry_enabled":true,"base_env":{"HEADROOM_BEACON":"off","HEADROOM_UPDATE_CHECK":"off","HEADROOM_TELEMETRY":"off"}}' > "$HRT_HEADROOM_DEPLOY_ROOT/default/manifest.json"
+  assert_audit_finding 1 HEADROOM_TELEMETRY_ENABLED
+
+  new_conforming_case beacon
+  printf '%s\n' '{"profile":"default","targets":[],"mutations":[],"memory_enabled":false,"telemetry_enabled":false,"base_env":{"HEADROOM_BEACON":"on","HEADROOM_UPDATE_CHECK":"off","HEADROOM_TELEMETRY":"off"}}' > "$HRT_HEADROOM_DEPLOY_ROOT/default/manifest.json"
+  assert_audit_finding 1 HEADROOM_BEACON_NOT_DISABLED
+
+  new_conforming_case update-check
+  printf '%s\n' '{"profile":"default","targets":[],"mutations":[],"memory_enabled":false,"telemetry_enabled":false,"base_env":{"HEADROOM_BEACON":"off","HEADROOM_UPDATE_CHECK":"on","HEADROOM_TELEMETRY":"off"}}' > "$HRT_HEADROOM_DEPLOY_ROOT/default/manifest.json"
+  assert_audit_finding 1 HEADROOM_UPDATE_CHECK_NOT_DISABLED
+}
+
+test_audit_opencode_isolation_findings() {
+  new_conforming_case package
+  export HRT_FIX_HEADROOM_PLUGINS=headroom-opencode
+  assert_audit_finding 1 HEADROOM_OPENCODE_PACKAGE_PRESENT
+
+  new_conforming_case config
+  printf '%s\n' '{"plugin":"headroom-opencode"}' > "$HRT_OPENCODE_CONFIG_DIR/opencode.json"
+  assert_audit_finding 1 HEADROOM_OPENCODE_CONFIG_PRESENT
+
+  new_conforming_case explicit-config
+  export OPENCODE_CONFIG="$CASE_DIR/explicit.jsonc"
+  printf '%s\n' '{"env":{"HEADROOM_PROXY_URL":"http://127.0.0.1:8787"}}' > "$OPENCODE_CONFIG"
+  assert_audit_finding 1 HEADROOM_OPENCODE_CONFIG_PRESENT
+
+  new_conforming_case environment
+  export HRT_FIX_OPENCODE_ACTIVE=active HRT_FIX_OPENCODE_PID=88
+  mkdir -p "$HRT_PROC_ROOT/88"
+  printf 'HEADROOM_PROXY_URL=http://127.0.0.1:8787\0SENSITIVE_SENTINEL_DO_NOT_PRINT=keep\0' > "$HRT_PROC_ROOT/88/environ"
+  assert_audit_finding 1 HEADROOM_OPENCODE_ENV_PRESENT
+
+  new_conforming_case unreadable-environment
+  export HRT_FIX_OPENCODE_ACTIVE=active HRT_FIX_OPENCODE_PID=88
+  assert_audit_finding 2 HEADROOM_OPENCODE_ENV_UNREADABLE
+
+  new_conforming_case coupled-unit
+  printf '%s\n' 'Requires=headroom-default.service' > "$HRT_SYSTEMD_USER_DIR/opencode.service"
+  assert_audit_finding 1 HEADROOM_OPENCODE_UNIT_COUPLED
+}
+
+test_audit_accepts_uncoupled_opencode_global_surfaces() {
+  new_conforming_case global-configs
+  printf '%s\n' '{"agent":{"default":"build"}}' > "$HRT_OPENCODE_CONFIG_DIR/opencode.json"
+  printf '%s\n' '{// reviewed JSONC configuration
+"theme":"dark"}' > "$HRT_OPENCODE_CONFIG_DIR/opencode.jsonc"
+  mkdir -p "$CASE_DIR/project/.opencode"
+  printf '%s\n' '{"plugin":"headroom-opencode"}' > "$CASE_DIR/project/opencode.json"
+  export HRT_FIX_OPENCODE_ACTIVE=inactive
+  run_cli audit
+  assert_equal "$CLI_STATUS" 0 "stopped OpenCode with uncoupled global config must pass"
+  assert_contains "$CLI_OUTPUT" "Status: PASS" "uncoupled global config must remain accepted"
+}
+
+test_audit_warning_and_non_invocation_boundaries() {
+  new_conforming_case kompress
+  export HRT_FIX_CURL_BODY='{"ready":true,"version":"0.37.0","kompress":{"ready":false}}'
+  run_cli audit --json
+  assert_equal "$CLI_STATUS" 0 "optional Kompress degradation must not fail audit"
+  assert_contains "$CLI_OUTPUT" HEADROOM_KOMPRESS_OPTIONAL_DEGRADED "Kompress warning must be reported"
+  local first_json="$CLI_OUTPUT"
+  run_cli audit --json
+  assert_equal "$CLI_OUTPUT" "$first_json" "warning JSON must be deterministic"
+
+  new_conforming_case permissions
+  export HRT_FIX_MANIFEST_MODE=644
+  assert_audit_finding 0 HEADROOM_PERMISSIONS_BROAD
+
+  new_conforming_case lifecycle
+  export HRT_FIX_EXEC_MAIN_STATUS=241
+  assert_audit_finding 0 HEADROOM_LIFECYCLE_EXIT_241
+
+  new_conforming_case telegram
+  run_cli audit
+  assert_equal "$CLI_STATUS" 0 "audit must not invoke unrelated Telegram tooling"
+
+  new_conforming_case environment-value-redaction
+  export HRT_FIX_OPENCODE_ACTIVE=active HRT_FIX_OPENCODE_PID=89
+  mkdir -p "$HRT_PROC_ROOT/89"
+  printf 'SENSITIVE_SENTINEL_DO_NOT_PRINT=keep\0' > "$HRT_PROC_ROOT/89/environ"
+  run_cli audit
+  assert_equal "$CLI_STATUS" 0 "unrelated OpenCode environment values must not affect audit"
+  [[ "$CLI_OUTPUT" != *SENSITIVE_SENTINEL_DO_NOT_PRINT* ]] || fail "human audit must not print environment values"
+  run_cli audit --json
+  [[ "$CLI_OUTPUT" != *SENSITIVE_SENTINEL_DO_NOT_PRINT* ]] || fail "JSON audit must not print environment values"
+
+  new_conforming_case status-agreement-warn
+  export HRT_FIX_EXEC_MAIN_STATUS=241
+  run_cli audit
+  local human_warn="$CLI_OUTPUT"
+  run_cli audit --json
+  assert_contains "$human_warn" "Status: WARN" "human warning status must be rendered"
+  assert_equal "$("$JQ_BIN" -r '.status' <<<"$CLI_OUTPUT")" WARN \
+    "JSON warning status must match human output"
+
+  new_conforming_case status-agreement-fail
+  export HRT_FIX_SERVICE_ENABLED=disabled
+  run_cli audit
+  local human_fail="$CLI_OUTPUT"
+  run_cli audit --json
+  assert_contains "$human_fail" "Status: FAIL" "human failure status must be rendered"
+  assert_equal "$("$JQ_BIN" -r '.status' <<<"$CLI_OUTPUT")" FAIL \
+    "JSON failure status must match human output"
+}
+
+test_audit_command_and_flag_validation() {
+  new_conforming_case missing-curl
+  rm "$HRT_CURL_BIN"
+  unset HRT_CURL_BIN
+  run_cli audit
+  assert_equal "$CLI_STATUS" 2 "missing required audit command must fail"
+  assert_contains "$CLI_OUTPUT" "curl is required but was not found" "missing command diagnostic must identify curl"
+
+  new_conforming_case invalid-flags
+  run_cli audit --dry-run
+  assert_equal "$CLI_STATUS" 2 "audit dry-run must be rejected"
+  run_cli install --json
+  assert_equal "$CLI_STATUS" 2 "install JSON must be rejected"
+  run_cli remove --json
+  assert_equal "$CLI_STATUS" 2 "remove JSON must be rejected"
 }
 
 test_version_is_exact() {
@@ -342,5 +621,12 @@ test_missing_uv_seam_cannot_fall_back_to_the_host
 test_default_uv_resolution_rejects_a_non_executable_canonical_path
 test_non_executable_override_is_rejected
 test_shipped_file_modes_and_entrypoint_are_preserved
+test_conforming_runtime_passes
+test_json_audit_has_stable_shape
+test_audit_policy_and_error_findings
+test_audit_opencode_isolation_findings
+test_audit_accepts_uncoupled_opencode_global_surfaces
+test_audit_warning_and_non_invocation_boundaries
+test_audit_command_and_flag_validation
 
 printf 'PASS: Headroom runtime tests\n'

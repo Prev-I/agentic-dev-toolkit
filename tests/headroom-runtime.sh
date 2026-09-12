@@ -256,7 +256,11 @@ printf '%s\n' '---' "$0" "$@" >> "$HRT_COMMAND_LOG"
 if [[ -n "${HRT_FIX_CURL_RESPONSES_FILE:-}" ]]; then
   mapfile -t responses < "$HRT_FIX_CURL_RESPONSES_FILE"
   IFS=$'\t' read -r status body <<<"${responses[0]}"
-  printf '%s\n' "${responses[@]:1}" > "$HRT_FIX_CURL_RESPONSES_FILE"
+  if (( ${#responses[@]} > 1 )); then
+    printf '%s\n' "${responses[@]:1}" > "$HRT_FIX_CURL_RESPONSES_FILE"
+  else
+    : > "$HRT_FIX_CURL_RESPONSES_FILE"
+  fi
   printf '%s\n' "$body"
   exit "$status"
 fi
@@ -975,7 +979,11 @@ printf '%s\n' '---' "$0" "$@" >> "$HRT_COMMAND_LOG"
 if [[ -n "${HRT_FIX_CURL_RESPONSES_FILE:-}" ]]; then
   mapfile -t responses < "$HRT_FIX_CURL_RESPONSES_FILE"
   IFS=$'\t' read -r status body <<<"${responses[0]}"
-  printf '%s\n' "${responses[@]:1}" > "$HRT_FIX_CURL_RESPONSES_FILE"
+  if (( ${#responses[@]} > 1 )); then
+    printf '%s\n' "${responses[@]:1}" > "$HRT_FIX_CURL_RESPONSES_FILE"
+  else
+    : > "$HRT_FIX_CURL_RESPONSES_FILE"
+  fi
   printf '%s\n' "$body"
   exit "$status"
 fi
@@ -1558,7 +1566,17 @@ test_install_unions_classification_and_preflight_evidence() {
 curl_request_count() {
   local curl_path="$1"
 
-  rg -F --count -- "$curl_path" "$HRT_COMMAND_LOG"
+  grep -Fxc -- "$curl_path" "$HRT_COMMAND_LOG"
+}
+
+command_arguments() {
+  local command_path="$1"
+
+  grep -F -A 8 -- "$command_path" "$HRT_COMMAND_LOG"
+}
+
+sleep_request_count() {
+  grep -Fxc -- "$HRT_SLEEP_BIN" "$HRT_COMMAND_LOG"
 }
 
 test_readiness_finalization() {
@@ -1575,14 +1593,22 @@ test_readiness_finalization() {
   assert_equal "$CLI_STATUS" 0 "an immediately ready installation must succeed"
   assert_equal "$(curl_request_count "$HRT_CURL_BIN")" 1 \
     "an immediate ready result must not receive a redundant final request"
+  assert_contains "$(command_arguments "$HRT_CURL_BIN")" $'--connect-timeout\n5.00\n--max-time\n5.00' \
+    "a full-budget probe must use five-second curl timeouts"
 
   new_installable_absent_case install-readiness-retry-success
-  export HRT_FIX_SLEEP_UPTIME=1.00 HRT_FIX_CURL_RESPONSES_FILE="$CASE_DIR/readiness-responses"
+  export HRT_FIX_SLEEP_UPTIME=29.50 HRT_FIX_CURL_RESPONSES_FILE="$CASE_DIR/readiness-responses"
   printf '%s\n' $'22\t' $'0\t{"ready":true,"version":"0.37.0"}' > "$HRT_FIX_CURL_RESPONSES_FILE"
   run_cli install
   assert_equal "$CLI_STATUS" 0 "transient readiness failures must retry to success"
   assert_equal "$(curl_request_count "$HRT_CURL_BIN")" 2 \
     "installer retry must stop at the first successful readiness result"
+  assert_contains "$(command_arguments "$HRT_CURL_BIN")" $'--connect-timeout\n0.50\n--max-time\n0.50' \
+    "a near-deadline probe must use the exact remaining budget"
+  assert_equal "$(sleep_request_count)" 1 "one transient failure must sleep once"
+  assert_contains "$(command_arguments "$HRT_SLEEP_BIN")" $'\n1' \
+    "installer retry sleep must receive one second"
+  [[ ! -s "$HRT_FIX_CURL_RESPONSES_FILE" ]] || fail "consuming the final response must leave an empty queue"
 
   new_installable_absent_case install-readiness-timeout
   export HRT_FIX_CURL_RESPONSES_FILE="$CASE_DIR/readiness-responses"
@@ -1592,6 +1618,9 @@ test_readiness_finalization() {
   assert_contains "$CLI_OUTPUT" HEADROOM_NOT_READY "permanent readiness failure must render its finding"
   assert_equal "$(curl_request_count "$HRT_CURL_BIN")" 1 \
     "installer must not request readiness after the monotonic deadline"
+  assert_equal "$(sleep_request_count)" 1 "the deadline case must sleep once before the elapsed budget expires"
+  assert_contains "$(command_arguments "$HRT_SLEEP_BIN")" $'\n1' \
+    "the deadline case must use one-second sleeps"
 
   new_installable_absent_case install-readiness-malformed
   export HRT_FIX_CURL_RESPONSES_FILE="$CASE_DIR/readiness-responses"
@@ -1599,8 +1628,31 @@ test_readiness_finalization() {
   run_cli install
   assert_equal "$CLI_STATUS" 2 "malformed readiness JSON must be an inspection error"
   assert_contains "$CLI_OUTPUT" HEADROOM_READINESS_INVALID "malformed readiness must retain its finding"
+  assert_contains "$CLI_OUTPUT" 'response was not valid JSON.' \
+    "malformed readiness JSON must have its own diagnostic"
   assert_equal "$(curl_request_count "$HRT_CURL_BIN")" 1 \
     "malformed readiness must not be retried"
+
+  new_installable_absent_case install-readiness-missing-version
+  export HRT_FIX_CURL_RESPONSES_FILE="$CASE_DIR/readiness-responses"
+  printf '%s\n' $'0\t{"ready":true}' > "$HRT_FIX_CURL_RESPONSES_FILE"
+  run_cli install
+  assert_equal "$CLI_STATUS" 2 "a ready response without a version must be an inspection error"
+  assert_contains "$CLI_OUTPUT" HEADROOM_READINESS_INVALID "missing version must retain its finding"
+  assert_contains "$CLI_OUTPUT" 'response has no usable version.' \
+    "missing readiness version must have its own diagnostic"
+  assert_equal "$(curl_request_count "$HRT_CURL_BIN")" 1 \
+    "a ready response without a version must not be retried"
+
+  new_installable_absent_case install-readiness-empty-version
+  export HRT_FIX_CURL_RESPONSES_FILE="$CASE_DIR/readiness-responses"
+  printf '%s\n' $'0\t{"ready":true,"version":""}' > "$HRT_FIX_CURL_RESPONSES_FILE"
+  run_cli install
+  assert_equal "$CLI_STATUS" 2 "a ready response with an empty version must be an inspection error"
+  assert_contains "$CLI_OUTPUT" 'response has no usable version.' \
+    "an empty readiness version must use the missing-version diagnostic"
+  assert_equal "$(curl_request_count "$HRT_CURL_BIN")" 1 \
+    "a ready response with an empty version must not be retried"
 
   new_installable_absent_case install-readiness-wrong-version
   export HRT_FIX_CURL_RESPONSES_FILE="$CASE_DIR/readiness-responses"

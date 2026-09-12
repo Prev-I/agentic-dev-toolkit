@@ -240,7 +240,7 @@ parse_listener() {
   if (( foreign_owner )); then
     LISTENER_STATE=CONFLICT
   elif (( unsafe_bind )); then
-    LISTENER_STATE=NONCONFORMING
+    LISTENER_STATE=HEADROOM_UNSAFE
   else
     LISTENER_STATE=HEADROOM
   fi
@@ -249,7 +249,7 @@ parse_listener() {
 check_listener() {
   parse_listener
   if [[ "$LISTENER_STATE" == ABSENT ]]; then
-    add_finding FAIL HEADROOM_NOT_READY "port ${HEADROOM_PORT}" \
+    add_finding FAIL HEADROOM_LISTENER_ABSENT "port ${HEADROOM_PORT}" \
       "Headroom has no listener on its configured port."
   fi
 }
@@ -541,13 +541,15 @@ resolve_headroom_tool_bin_dir() {
 headroom_tool_path() {
   local candidate
 
-  [[ -n "$HEADROOM_TOOL_BIN_DIR" ]] || resolve_headroom_tool_bin_dir
+  [[ -n "$HEADROOM_TOOL_BIN_DIR" ]] || return 1
   candidate="$HEADROOM_TOOL_BIN_DIR/headroom"
   if [[ -x "$candidate" ]]; then
     candidate="$(readlink -f "$candidate")" || return 1
     [[ "$candidate" == /* && -x "$candidate" ]] || return 1
     printf '%s\n' "$candidate"
+    return 0
   fi
+  return 1
 }
 
 headroom_package_state() {
@@ -627,6 +629,11 @@ deployment_state() {
             ERROR) DEPLOYMENT_STATE=AMBIGUOUS ;;
             FAIL) DEPLOYMENT_STATE=NONCONFORMING ;;
             PASS|WARN) DEPLOYMENT_STATE=CONFORMING ;;
+            *)
+              add_finding ERROR HEADROOM_LISTENER_OWNER_AMBIGUOUS "port ${HEADROOM_PORT}" \
+                "Headroom deployment state could not be determined."
+              DEPLOYMENT_STATE=AMBIGUOUS
+              ;;
           esac
         fi
         ;;
@@ -639,12 +646,16 @@ deployment_state() {
     ABSENT) DEPLOYMENT_STATE=ABSENT ;;
     CONFLICT) DEPLOYMENT_STATE=CONFLICT ;;
     AMBIGUOUS) DEPLOYMENT_STATE=AMBIGUOUS ;;
-    HEADROOM)
+    HEADROOM|HEADROOM_UNSAFE)
       add_finding ERROR HEADROOM_UNMANAGED_LISTENER "port ${HEADROOM_PORT}" \
         "A Headroom-owned listener exists without a managed deployment."
       DEPLOYMENT_STATE=AMBIGUOUS
       ;;
-    NONCONFORMING) DEPLOYMENT_STATE=NONCONFORMING ;;
+    *)
+      add_finding ERROR HEADROOM_LISTENER_OWNER_AMBIGUOUS "port ${HEADROOM_PORT}" \
+        "Headroom listener ownership could not be determined."
+      DEPLOYMENT_STATE=AMBIGUOUS
+      ;;
   esac
 }
 
@@ -666,7 +677,9 @@ classify_install_state() {
   F_CODE=("${package_code[@]}" "${deployment_code[@]}")
   F_SUBJECT=("${package_subject[@]}" "${deployment_subject[@]}")
   F_MESSAGE=("${package_message[@]}" "${deployment_message[@]}")
-  if [[ "$DEPLOYMENT_STATE" == NONCONFORMING ]]; then
+  if [[ "$(status_for_findings)" == ERROR ]]; then
+    INSTALL_STATE=AMBIGUOUS
+  elif [[ "$DEPLOYMENT_STATE" == NONCONFORMING ]]; then
     INSTALL_STATE=NONCONFORMING
   elif [[ "$DEPLOYMENT_STATE" == AMBIGUOUS ]]; then
     INSTALL_STATE=AMBIGUOUS
@@ -819,8 +832,7 @@ run_install() {
       return 2
       ;;
   esac
-  future_headroom="$(headroom_tool_path)"
-  if [[ -z "$future_headroom" ]]; then
+  if ! future_headroom="$(headroom_tool_path)"; then
     future_headroom="$HEADROOM_TOOL_BIN_DIR/headroom"
   fi
   if [[ "$INSTALL_STATE" == ABSENT ]]; then

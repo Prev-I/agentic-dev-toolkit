@@ -92,8 +92,24 @@ run_cli() {
     CLI_STATUS=0 || CLI_STATUS=$?
 }
 
+run_cli_from() {
+  local directory="$1"
+  shift
+  CLI_OUTPUT="$(run_in_fixture_path_from "$directory" "$BASH_BIN" "$CLI" "$@" 2>&1)" &&
+    CLI_STATUS=0 || CLI_STATUS=$?
+}
+
 run_in_fixture_path() {
   PATH="$CASE_DIR/bin" "$@"
+}
+
+run_in_fixture_path_from() {
+  local directory="$1"
+  shift
+  (
+    cd "$directory"
+    PATH="$CASE_DIR/bin" "$@"
+  )
 }
 
 source_cli_without_main() {
@@ -179,13 +195,14 @@ new_conforming_case() {
   export HRT_FIX_CURL_BODY='{"ready":true,"version":"0.37.0"}'
   export HRT_FIX_SS_OUTPUT='LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("headroom",pid=42,fd=3))'
   unset HRT_FIX_HEADROOM_PLUGINS HRT_FIX_CURL_STATUS HRT_FIX_EXEC_MAIN_STATUS \
-    HRT_FIX_OPENCODE_ACTIVE HRT_FIX_OPENCODE_PID HRT_FIX_MANIFEST_MODE
+    HRT_FIX_OPENCODE_ACTIVE HRT_FIX_OPENCODE_PID HRT_FIX_MANIFEST_MODE \
+    HRT_FIX_HEADROOM_PLUGINS_STATUS
 
   {
     printf '#!%s\n' "$BASH_BIN"
     cat <<'STUB'
 if [[ "$1" == "--version" ]]; then printf 'headroom %s\n' "$HRT_FIX_HEADROOM_VERSION"; exit 0; fi
-if [[ "$1 $2" == "plugins list" ]]; then printf '%s\n' "${HRT_FIX_HEADROOM_PLUGINS:-}"; exit 0; fi
+if [[ "$1 $2" == "plugins list" ]]; then printf '%s\n' "${HRT_FIX_HEADROOM_PLUGINS:-}"; exit "${HRT_FIX_HEADROOM_PLUGINS_STATUS:-0}"; fi
 exit 0
 STUB
   } > "$HRT_HEADROOM_BIN"
@@ -256,6 +273,16 @@ assert_audit_finding() {
   assert_contains "$CLI_OUTPUT" "$expected_code" "audit must report $expected_code"
 }
 
+assert_json_finding_array() {
+  local expected_severity="$1"
+  local expected_codes="$2"
+
+  assert_equal "$("$JQ_BIN" -r '[.findings[].severity] | join(",")' <<<"$CLI_OUTPUT")" \
+    "$expected_severity" "JSON finding severities must be ordered"
+  assert_equal "$("$JQ_BIN" -r '[.findings[].code] | join(",")' <<<"$CLI_OUTPUT")" \
+    "$expected_codes" "JSON finding codes must be ordered"
+}
+
 test_audit_policy_and_error_findings() {
   new_conforming_case version
   export HRT_FIX_HEADROOM_VERSION=0.36.0
@@ -268,6 +295,10 @@ test_audit_policy_and_error_findings() {
   new_conforming_case readiness-version
   export HRT_FIX_CURL_BODY='{"ready":true,"version":"0.36.0"}'
   assert_audit_finding 1 HEADROOM_READINESS_VERSION_MISMATCH
+
+  new_conforming_case readiness-missing-version
+  export HRT_FIX_CURL_BODY='{"ready":true}'
+  assert_audit_finding 2 HEADROOM_READINESS_INVALID
 
   new_conforming_case disabled
   export HRT_FIX_SERVICE_ENABLED=disabled
@@ -297,12 +328,36 @@ test_audit_policy_and_error_findings() {
   export HRT_FIX_SS_OUTPUT='LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:*'
   assert_audit_finding 2 HEADROOM_LISTENER_OWNER_AMBIGUOUS
 
+  new_conforming_case mixed-listeners
+  export HRT_FIX_SS_OUTPUT=$'LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("headroom",pid=42,fd=3))\nLISTEN 0 4096 0.0.0.0:8787 0.0.0.0:* users:(("headroom",pid=42,fd=3))'
+  assert_audit_finding 1 HEADROOM_UNSAFE_BIND
+
+  new_conforming_case ipv6-listener
+  export HRT_FIX_SS_OUTPUT='LISTEN 0 4096 [::1]:8787 [::]:* users:(("headroom",pid=42,fd=3))'
+  assert_audit_finding 1 HEADROOM_UNSAFE_BIND
+
+  new_conforming_case unanchored-owner
+  export HRT_FIX_SS_OUTPUT='LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("other-headroom-helper",pid=42,fd=3))'
+  assert_audit_finding 1 HEADROOM_FOREIGN_LISTENER
+
+  new_conforming_case shared-listener
+  export HRT_FIX_SS_OUTPUT='LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("headroom",pid=42,fd=3),("other",pid=43,fd=3))'
+  assert_audit_finding 1 HEADROOM_FOREIGN_LISTENER
+
   new_conforming_case unreadable-manifest
   rm "$HRT_HEADROOM_DEPLOY_ROOT/default/manifest.json"
   assert_audit_finding 2 HEADROOM_MANIFEST_UNREADABLE
 
   new_conforming_case invalid-manifest
   printf '%s\n' not-json > "$HRT_HEADROOM_DEPLOY_ROOT/default/manifest.json"
+  assert_audit_finding 2 HEADROOM_MANIFEST_INVALID
+
+  new_conforming_case manifest-missing-base-env
+  printf '%s\n' '{"profile":"default","targets":[],"mutations":[],"memory_enabled":false,"telemetry_enabled":false}' > "$HRT_HEADROOM_DEPLOY_ROOT/default/manifest.json"
+  assert_audit_finding 2 HEADROOM_MANIFEST_INVALID
+
+  new_conforming_case manifest-wrong-array-shape
+  printf '%s\n' '{"profile":"default","targets":{},"mutations":[],"memory_enabled":false,"telemetry_enabled":false,"base_env":{"HEADROOM_BEACON":"off","HEADROOM_UPDATE_CHECK":"off"}}' > "$HRT_HEADROOM_DEPLOY_ROOT/default/manifest.json"
   assert_audit_finding 2 HEADROOM_MANIFEST_INVALID
 
   new_conforming_case profile
@@ -348,11 +403,17 @@ test_audit_opencode_isolation_findings() {
   printf '%s\n' '{"env":{"HEADROOM_PROXY_URL":"http://127.0.0.1:8787"}}' > "$OPENCODE_CONFIG"
   assert_audit_finding 1 HEADROOM_OPENCODE_CONFIG_PRESENT
 
+  new_conforming_case unreadable-config
+  mkdir "$HRT_OPENCODE_CONFIG_DIR/opencode.json"
+  assert_audit_finding 2 HEADROOM_OPENCODE_CONFIG_UNREADABLE
+
   new_conforming_case environment
   export HRT_FIX_OPENCODE_ACTIVE=active HRT_FIX_OPENCODE_PID=88
   mkdir -p "$HRT_PROC_ROOT/88"
   printf 'HEADROOM_PROXY_URL=http://127.0.0.1:8787\0SENSITIVE_SENTINEL_DO_NOT_PRINT=keep\0' > "$HRT_PROC_ROOT/88/environ"
   assert_audit_finding 1 HEADROOM_OPENCODE_ENV_PRESENT
+  [[ "$CLI_OUTPUT" != *SENSITIVE_SENTINEL_DO_NOT_PRINT* ]] ||
+    fail "Headroom environment finding must not expose unrelated environment values"
 
   new_conforming_case unreadable-environment
   export HRT_FIX_OPENCODE_ACTIVE=active HRT_FIX_OPENCODE_PID=88
@@ -360,6 +421,11 @@ test_audit_opencode_isolation_findings() {
 
   new_conforming_case coupled-unit
   printf '%s\n' 'Requires=headroom-default.service' > "$HRT_SYSTEMD_USER_DIR/opencode.service"
+  assert_audit_finding 1 HEADROOM_OPENCODE_UNIT_COUPLED
+
+  new_conforming_case coupled-drop-in
+  mkdir -p "$HRT_SYSTEMD_USER_DIR/opencode.service.d"
+  printf '%s\n' 'After=headroom-default.service' > "$HRT_SYSTEMD_USER_DIR/opencode.service.d/10-headroom.conf"
   assert_audit_finding 1 HEADROOM_OPENCODE_UNIT_COUPLED
 }
 
@@ -371,7 +437,7 @@ test_audit_accepts_uncoupled_opencode_global_surfaces() {
   mkdir -p "$CASE_DIR/project/.opencode"
   printf '%s\n' '{"plugin":"headroom-opencode"}' > "$CASE_DIR/project/opencode.json"
   export HRT_FIX_OPENCODE_ACTIVE=inactive
-  run_cli audit
+  run_cli_from "$CASE_DIR/project" audit
   assert_equal "$CLI_STATUS" 0 "stopped OpenCode with uncoupled global config must pass"
   assert_contains "$CLI_OUTPUT" "Status: PASS" "uncoupled global config must remain accepted"
 }
@@ -425,6 +491,12 @@ test_audit_warning_and_non_invocation_boundaries() {
   assert_contains "$human_fail" "Status: FAIL" "human failure status must be rendered"
   assert_equal "$("$JQ_BIN" -r '.status' <<<"$CLI_OUTPUT")" FAIL \
     "JSON failure status must match human output"
+
+  new_conforming_case ordered-findings
+  export HRT_FIX_SERVICE_ENABLED=disabled HRT_FIX_SERVICE_ACTIVE=inactive
+  run_cli audit --json
+  assert_equal "$CLI_STATUS" 1 "multiple policy violations must fail audit"
+  assert_json_finding_array 'FAIL,FAIL' 'HEADROOM_SERVICE_DISABLED,HEADROOM_SERVICE_INACTIVE'
 }
 
 test_audit_command_and_flag_validation() {
@@ -434,6 +506,45 @@ test_audit_command_and_flag_validation() {
   run_cli audit
   assert_equal "$CLI_STATUS" 2 "missing required audit command must fail"
   assert_contains "$CLI_OUTPUT" "curl is required but was not found" "missing command diagnostic must identify curl"
+
+  new_conforming_case missing-headroom-json
+  rm "$HRT_HEADROOM_BIN"
+  unset HRT_HEADROOM_BIN
+  run_cli audit --json
+  assert_equal "$CLI_STATUS" 2 "missing Headroom command must error in JSON mode"
+  assert_equal "$("$JQ_BIN" -r '.status' <<<"$CLI_OUTPUT")" ERROR \
+    "JSON command failure must retain the audit envelope"
+  assert_contains "$CLI_OUTPUT" "headroom is required but was not found" \
+    "JSON command failure must retain the command-specific diagnostic"
+  assert_equal "$("$JQ_BIN" -r '[.findings[].code] | join(",")' <<<"$CLI_OUTPUT")" '' \
+    "command resolution must not invent an audit finding code"
+
+  new_conforming_case non-executable-headroom-json
+  chmod 0644 "$HRT_HEADROOM_BIN"
+  run_cli audit --json
+  assert_equal "$CLI_STATUS" 2 "a non-executable Headroom seam must error in JSON mode"
+  assert_equal "$("$JQ_BIN" -r '.status' <<<"$CLI_OUTPUT")" ERROR \
+    "non-executable command resolution must retain the audit envelope"
+  assert_contains "$CLI_OUTPUT" "HRT_HEADROOM_BIN must name an executable path" \
+    "non-executable command diagnostic must identify the seam"
+
+  new_conforming_case unavailable-headroom-command
+  {
+    printf '#!%s\n' "$BASH_BIN"
+    printf '%s\n' 'exit 127'
+  } > "$HRT_HEADROOM_BIN"
+  chmod 0755 "$HRT_HEADROOM_BIN"
+  run_cli audit
+  assert_equal "$CLI_STATUS" 2 "a resolved Headroom CLI that cannot report its version must error"
+  [[ "$CLI_OUTPUT" != *HEADROOM_VERSION_MISMATCH* ]] ||
+    fail "unreadable Headroom version must not reuse the mismatch finding"
+
+  new_conforming_case package-list-error
+  export HRT_FIX_HEADROOM_PLUGINS_STATUS=1
+  run_cli audit
+  assert_equal "$CLI_STATUS" 2 "package-list inspection failures must be errors"
+  [[ "$CLI_OUTPUT" != *HEADROOM_OPENCODE_PACKAGE_PRESENT* ]] ||
+    fail "package-list inspection failures must not claim the package is present"
 
   new_conforming_case invalid-flags
   run_cli audit --dry-run

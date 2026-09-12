@@ -89,7 +89,8 @@ new_case() {
     HRT_FIX_HEADROOM_PLUGINS HRT_FIX_HEADROOM_PLUGINS_STATUS HRT_FIX_HEADROOM_VERSION \
     HRT_FIX_MANIFEST_MODE HRT_FIX_OPENCODE_ACTIVE HRT_FIX_OPENCODE_PID \
     HRT_FIX_SERVICE_ACTIVE HRT_FIX_SERVICE_ENABLED HRT_FIX_SS_OUTPUT HRT_FIX_SS_STATUS \
-    HRT_FIX_STAT_STATUS HRT_FIX_TOOL_LINK_TARGET
+    HRT_FIX_STAT_STATUS HRT_FIX_TOOL_LINK_TARGET HRT_FIX_UV_INSTALL_NO_TOOL \
+    HRT_FIX_UV_INSTALL_PATH_TOOL HRT_FIX_UV_PATH_TOOL_BIN
 
   install_stubs
   export HRT_UV_BIN="$CASE_DIR/bin/uv"
@@ -257,6 +258,7 @@ STUB
   {
     printf '#!%s\n' "$BASH_BIN"
     cat <<'STUB'
+[[ "${HRT_FIX_SS_STATUS:-0}" == 0 ]] || exit "$HRT_FIX_SS_STATUS"
 printf '%s\n' "$HRT_FIX_SS_OUTPUT"
 STUB
   } > "$HRT_SS_BIN"
@@ -882,6 +884,7 @@ printf '%s\n' '---' "$0" "$@" >> "$HRT_COMMAND_LOG"
 if [[ "$1 $2" == 'tool install' ]]; then
   printf '%s\n' '---' "$0" "$@" >> "$HRT_MUTATION_LOG"
   : > "$HRT_HOME/package-installed"
+  [[ -z "${HRT_FIX_UV_INSTALL_NO_TOOL:-}" ]] || exit 0
   if [[ -n "${UV_TOOL_BIN_DIR:-}" ]]; then
     tool_bin="$UV_TOOL_BIN_DIR"
   elif [[ -n "${XDG_BIN_HOME:-}" ]]; then
@@ -894,6 +897,11 @@ if [[ "$1 $2" == 'tool install' ]]; then
   /bin/mkdir -p "$tool_bin"
   /bin/cp "$HRT_HEADROOM_TEMPLATE" "$tool_bin/headroom"
   /bin/chmod 0755 "$tool_bin/headroom"
+  if [[ -n "${HRT_FIX_UV_INSTALL_PATH_TOOL:-}" ]]; then
+    /bin/cp "$HRT_HEADROOM_TEMPLATE" "$HRT_FIX_UV_PATH_TOOL_BIN/headroom"
+    /bin/chmod 0755 "$HRT_FIX_UV_PATH_TOOL_BIN/headroom"
+    /bin/rm "$tool_bin/headroom"
+  fi
   if [[ -n "${HRT_FIX_TOOL_LINK_TARGET:-}" ]]; then
     /bin/ln -sf "$HRT_FIX_TOOL_LINK_TARGET" "$tool_bin/headroom"
   fi
@@ -1294,7 +1302,7 @@ test_audit_absent_listener_is_runtime_failure() {
   export HRT_FIX_SS_OUTPUT=''
   run_cli audit
   assert_equal "$CLI_STATUS" 1 "an absent listener must fail audit"
-  assert_contains "$CLI_OUTPUT" HEADROOM_NOT_READY "an absent listener must be a runtime failure"
+  assert_contains "$CLI_OUTPUT" HEADROOM_LISTENER_ABSENT "an absent listener must be a runtime failure"
   [[ "$CLI_OUTPUT" != *HEADROOM_LISTENER_OWNER_AMBIGUOUS* ]] ||
     fail "an absent listener must not be reported as an ownership error"
 }
@@ -1426,6 +1434,75 @@ test_install_canonicalizes_the_executable_created_by_uv() {
     fail "apply must not execute uv's symlink path"
 }
 
+test_install_error_evidence_overrides_manifest_refusal() {
+  new_conforming_case install-uninspectable-nonconforming
+  printf '%s\n' '0.00 0.00' > "$HRT_UPTIME_FILE"
+  printf '%s\n' '{"profile":"default","targets":["x"],"mutations":[],"memory_enabled":false,"telemetry_enabled":false,"base_env":{"HEADROOM_BEACON":"off","HEADROOM_UPDATE_CHECK":"off","HEADROOM_TELEMETRY":"off"}}' > "$HRT_HEADROOM_DEPLOY_ROOT/default/manifest.json"
+  {
+    printf '#!%s\n' "$BASH_BIN"
+    printf '%s\n' 'exit 1'
+  } > "$HRT_HEADROOM_BIN"
+  chmod 0755 "$HRT_HEADROOM_BIN"
+  run_cli install
+  assert_equal "$CLI_STATUS" 2 "package inspection errors must override manifest refusal exit status"
+  assert_contains "$CLI_OUTPUT" 'Status: ERROR' "merged package errors must render ERROR"
+  assert_contains "$CLI_OUTPUT" HEADROOM_VERSION_UNREADABLE "package inspection evidence must survive classification"
+  assert_contains "$CLI_OUTPUT" HEADROOM_TARGETS_CONFIGURED "manifest evidence must survive classification"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "merged error evidence must block every mutation"
+}
+
+test_install_missing_tool_and_path_fallback_after_uv() {
+  new_installable_absent_case install-missing-tool-after-uv
+  export HRT_FIX_UV_INSTALL_NO_TOOL=1
+  run_cli install
+  assert_equal "$CLI_STATUS" 1 "a uv install without an executable must fail cleanly"
+  assert_contains "$CLI_OUTPUT" 'uv did not install the expected pinned Headroom CLI' \
+    "missing post-uv executable must use the controlled diagnostic"
+  [[ "$CLI_OUTPUT" != *'command not found'* ]] || fail "missing tool discovery must not execute an empty command"
+  [[ "$(<"$HRT_MUTATION_LOG")" != *$'\ninstall\napply'* ]] ||
+    fail "a missing post-uv executable must not apply the service"
+
+  new_installable_absent_case install-path-fallback-after-uv
+  export HRT_FIX_UV_INSTALL_PATH_TOOL=1 HRT_FIX_UV_PATH_TOOL_BIN="$CASE_DIR/bin"
+  run_cli install
+  assert_equal "$CLI_STATUS" 0 "an exact PATH Headroom executable must remain a post-uv fallback"
+  assert_contains "$(<"$HRT_MUTATION_LOG")" "$CASE_DIR/bin/headroom" \
+    "post-uv PATH fallback must execute its canonical executable"
+}
+
+test_audit_listener_findings_are_distinct_and_ordered() {
+  new_conforming_case audit-stopped-no-listener
+  export HRT_FIX_SS_OUTPUT='' HRT_FIX_CURL_STATUS=22
+  run_cli audit --json
+  assert_equal "$CLI_STATUS" 1 "a stopped runtime with no listener must fail audit"
+  assert_json_finding_array 'FAIL,FAIL' 'HEADROOM_LISTENER_ABSENT,HEADROOM_NOT_READY'
+}
+
+test_install_unmanaged_unsafe_headroom_listener_is_ambiguous() {
+  new_installable_absent_case install-unmanaged-unsafe-headroom-listener
+  /bin/mkdir -p "$HRT_HOME/.local/bin"
+  /bin/cp "$HRT_HEADROOM_TEMPLATE" "$HRT_HOME/.local/bin/headroom"
+  /bin/chmod 0755 "$HRT_HOME/.local/bin/headroom"
+  : > "$HRT_HOME/package-installed"
+  export HRT_HEADROOM_BIN="$HRT_HOME/.local/bin/headroom"
+  export HRT_FIX_SS_OUTPUT='tcp LISTEN 0 4096 0.0.0.0:8787 0.0.0.0:* users:(("headroom",pid=42,fd=3))'
+  run_cli install
+  assert_equal "$CLI_STATUS" 2 "an unsafe unmanaged Headroom listener must be ambiguous"
+  assert_contains "$CLI_OUTPUT" HEADROOM_UNSAFE_BIND "unsafe unmanaged ownership must retain bind evidence"
+  assert_contains "$CLI_OUTPUT" HEADROOM_UNMANAGED_LISTENER "unsafe unmanaged ownership must retain ownership evidence"
+  assert_contains "$CLI_OUTPUT" 'Status: ERROR' "unsafe unmanaged ownership must render ERROR"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "unsafe unmanaged ownership must block every mutation"
+}
+
+test_audit_conforming_runtime_handles_ss_failure() {
+  new_conforming_case audit-ss-failure
+  export HRT_FIX_SS_STATUS=1
+  run_cli audit
+  assert_equal "$CLI_STATUS" 2 "an ss failure in audit must be an inspection error"
+  assert_contains "$CLI_OUTPUT" HEADROOM_LISTENER_OWNER_AMBIGUOUS \
+    "an ss failure in audit must retain its listener finding"
+}
+
 JQ_BIN="$(command -v jq || true)"
 [[ -n "$JQ_BIN" ]] || fail "jq is required for Headroom runtime tests"
 JQ_BIN="$(readlink -f "$JQ_BIN")"
@@ -1468,6 +1545,11 @@ test_install_tool_bin_environment_validation_and_discovery
 test_install_uv_tool_bin_precedence_and_canonical_preview
 test_install_uses_configured_uv_tool_bin_after_package_install
 test_install_canonicalizes_the_executable_created_by_uv
+test_install_error_evidence_overrides_manifest_refusal
+test_install_missing_tool_and_path_fallback_after_uv
+test_audit_listener_findings_are_distinct_and_ordered
+test_install_unmanaged_unsafe_headroom_listener_is_ambiguous
+test_audit_conforming_runtime_handles_ss_failure
 test_conforming_runtime_passes
 test_json_audit_has_stable_shape
 test_audit_policy_and_error_findings

@@ -108,14 +108,19 @@ source_cli_without_main() {
 run_resolve_in_conditional() {
   local source_file
   source_file="$(source_cli_without_main)"
-  CLI_OUTPUT="$(HRT_UV_BIN=relative/uv run_in_fixture_path "$BASH_BIN" -s "$source_file" 2>&1 <<'SCRIPT'
+  # shellcheck disable=SC2030,SC2031 # The local export is the behavior under test.
+  CLI_OUTPUT="$(
+    (
+      export HRT_UV_BIN=relative/uv
+      run_in_fixture_path "$BASH_BIN" -s "$source_file" <<'SCRIPT'
 source "$1"
 if resolve_executable UV_BIN HRT_UV_BIN uv; then
   printf 'unexpected success\n'
 fi
 printf 'validation was ignored\n'
 SCRIPT
-)" && CLI_STATUS=0 || CLI_STATUS=$?
+    ) 2>&1
+  )" && CLI_STATUS=0 || CLI_STATUS=$?
 }
 
 read_uptime_file() {
@@ -124,6 +129,27 @@ read_uptime_file() {
   CLI_OUTPUT="$(run_in_fixture_path "$BASH_BIN" -s "$source_file" 2>&1 <<'SCRIPT'
 source "$1"
 printf '%s\n' "$UPTIME_FILE"
+SCRIPT
+)" && CLI_STATUS=0 || CLI_STATUS=$?
+}
+
+run_validate_uptime_file() {
+  local source_file
+  source_file="$(source_cli_without_main)"
+  CLI_OUTPUT="$(run_in_fixture_path "$BASH_BIN" -s "$source_file" 2>&1 <<'SCRIPT'
+source "$1"
+validate_uptime_file
+SCRIPT
+)" && CLI_STATUS=0 || CLI_STATUS=$?
+}
+
+run_resolve_to_named_variable() {
+  local source_file
+  source_file="$(source_cli_without_main)"
+  CLI_OUTPUT="$(run_in_fixture_path "$BASH_BIN" -s "$source_file" 2>&1 <<'SCRIPT'
+source "$1"
+resolve_executable fixture_uv HRT_UV_BIN uv
+printf '%s\n' "$fixture_uv"
 SCRIPT
 )" && CLI_STATUS=0 || CLI_STATUS=$?
 }
@@ -164,6 +190,7 @@ test_unknown_command_is_usage_error() {
 
 test_relative_binary_override_is_rejected() {
   new_case relative-override
+  # shellcheck disable=SC2031 # run_cli intentionally executes the exported fixture seam in a child.
   export HRT_UV_BIN=relative/uv
   run_cli install --dry-run
   unset HRT_UV_BIN
@@ -178,6 +205,14 @@ test_install_resolves_the_fixture_uv_path() {
   assert_equal "$CLI_STATUS" "0" "install dry-run must resolve a valid fixture uv"
   assert_equal "$CLI_OUTPUT" "$HRT_UV_BIN" \
     "install must retain the absolute fixture uv path in UV_BIN"
+}
+
+test_resolver_assigns_a_caller_named_output_variable() {
+  new_case resolver-indirection
+  run_resolve_to_named_variable
+  assert_equal "$CLI_STATUS" "0" "a named resolver output variable must be supported"
+  assert_equal "$CLI_OUTPUT" "$HRT_UV_BIN" \
+    "the resolver must assign its validated path to the requested variable"
 }
 
 test_invalid_override_exits_even_in_a_conditional() {
@@ -210,11 +245,20 @@ test_uptime_file_defaults_to_proc_uptime() {
 test_relative_uptime_override_is_rejected() {
   new_case relative-uptime
   export HRT_UPTIME_FILE=relative/uptime
-  read_uptime_file
+  run_validate_uptime_file
   unset HRT_UPTIME_FILE
   assert_equal "$CLI_STATUS" "2" "an unsafe uptime seam must be rejected"
   assert_contains "$CLI_OUTPUT" "HRT_UPTIME_FILE must be an absolute readable path" \
     "the uptime seam diagnostic must identify the unsafe path"
+}
+
+test_version_does_not_require_an_uptime_file() {
+  new_case version-with-unsafe-uptime
+  export HRT_UPTIME_FILE=relative/uptime
+  run_cli --version
+  unset HRT_UPTIME_FILE
+  assert_equal "$CLI_STATUS" "0" "--version must not inspect uptime state"
+  assert_equal "$CLI_OUTPUT" "0.1.0" "--version must remain independent of uptime"
 }
 
 test_missing_uv_seam_cannot_fall_back_to_the_host() {
@@ -262,8 +306,15 @@ test_shipped_file_modes_and_entrypoint_are_preserved() {
     last_line="$line"
   done < "$CLI"
   assert_equal "$last_line" 'main "$@"' "main must remain the final production line"
-  IFS=' ' read -r cli_mode _ < <(git ls-files -s -- "$CLI_PATH")
-  IFS=' ' read -r test_mode _ < <(git ls-files -s -- "$TEST_PATH")
+  local cli_record
+  local test_record
+
+  cli_record="$(git -C "$REPOSITORY_ROOT" ls-files -s -- "$CLI_PATH")"
+  test_record="$(git -C "$REPOSITORY_ROOT" ls-files -s -- "$TEST_PATH")"
+  [[ -n "$cli_record" ]] || fail "the production CLI must have a tracked Git entry"
+  [[ -n "$test_record" ]] || fail "the test suite must have a tracked Git entry"
+  IFS=' ' read -r cli_mode _ <<<"$cli_record"
+  IFS=' ' read -r test_mode _ <<<"$test_record"
   assert_equal "$cli_mode" "100755" "the production CLI must be tracked executable"
   assert_equal "$test_mode" "100644" "the test suite must be tracked non-executable"
 }
@@ -281,10 +332,12 @@ test_help_lists_the_three_commands
 test_unknown_command_is_usage_error
 test_relative_binary_override_is_rejected
 test_install_resolves_the_fixture_uv_path
+test_resolver_assigns_a_caller_named_output_variable
 test_invalid_override_exits_even_in_a_conditional
 test_uptime_file_uses_the_fixture_override
 test_uptime_file_defaults_to_proc_uptime
 test_relative_uptime_override_is_rejected
+test_version_does_not_require_an_uptime_file
 test_missing_uv_seam_cannot_fall_back_to_the_host
 test_default_uv_resolution_rejects_a_non_executable_canonical_path
 test_non_executable_override_is_rejected

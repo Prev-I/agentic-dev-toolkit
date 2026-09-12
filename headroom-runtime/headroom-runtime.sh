@@ -38,9 +38,6 @@ die_usage() {
   exit 2
 }
 
-[[ "$UPTIME_FILE" == /* && -r "$UPTIME_FILE" ]] ||
-  die_usage "HRT_UPTIME_FILE must be an absolute readable path"
-
 quote_command() {
   printf '+'
   printf ' %q' "$@"
@@ -52,6 +49,12 @@ run() {
   if (( DRY_RUN == 0 )); then
     "$@"
   fi
+}
+
+validate_uptime_file() {
+  # Uptime is consumed by Task 3's bounded install readiness loop, not CLI metadata.
+  [[ "$UPTIME_FILE" == /* && -r "$UPTIME_FILE" ]] ||
+    die_usage "HRT_UPTIME_FILE must be an absolute readable path"
 }
 
 resolve_executable() {

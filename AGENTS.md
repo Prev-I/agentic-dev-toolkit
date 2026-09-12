@@ -26,14 +26,17 @@ repository-policy/              `.repository-policy.yaml` format, schema and val
 wsl-toolchain-doctor/           Linux-first PATH and toolchain auditor for WSL
 opencode-service/               Readiness probes for OpenCode and its Telegram
                                 sidecar, plus an optional plugin restart consumer
+headroom-runtime/               Opt-in standalone Headroom install, audit, and removal CLI
 docs/multi-agent-workspace-guide.md
 docs/wsl-toolchain-doctor.md    Operational documentation for the doctor
 docs/opencode-service.md        Running OpenCode as a persistent service, and
                                 optionally reaching it over HTTPS from the LAN
+docs/headroom-runtime.md        Headroom runtime operations, status, and rollback runbook
 tests/install.sh                Test suite for the installer
 tests/repository-policy.sh      Test suite for the policy validator
 tests/wsl-toolchain-doctor.sh   Test suite for the doctor
 tests/opencode-service.sh       Test suite for the service scripts
+tests/headroom-runtime.sh       Test suite for the Headroom runtime
 ```
 
 **`instructions/AGENTS.md` is a deliverable, not this file.** It is the template
@@ -50,17 +53,21 @@ bash tests/install.sh                   # the installer suite
 bash tests/repository-policy.sh         # the policy validator suite
 bash tests/wsl-toolchain-doctor.sh      # the WSL toolchain doctor suite
 bash tests/opencode-service.sh          # the service scripts suite
+bash tests/headroom-runtime.sh          # the Headroom runtime suite
 bash models/routing/opencode/eval/run-tests.sh   # the routing eval suite
 bash -n environments/linux/install.sh   # syntax check
+bash -n headroom-runtime/headroom-runtime.sh
+bash -n tests/headroom-runtime.sh
 shellcheck environments/linux/install.sh tests/install.sh \
   tests/repository-policy.sh repository-policy/validate.sh \
   wsl-toolchain-doctor/wsl-toolchain-doctor.sh tests/wsl-toolchain-doctor.sh \
   opencode-service/opencode-startup-ready.sh \
   opencode-service/opencode-telegram-ready.sh \
-  opencode-service/opencode-gateway-restart.sh tests/opencode-service.sh
+  opencode-service/opencode-gateway-restart.sh tests/opencode-service.sh \
+  headroom-runtime/headroom-runtime.sh tests/headroom-runtime.sh
 ```
 
-All five suites are expected to be run and reported together; the evidence
+All six suites are expected to be run and reported together; the evidence
 documents under `models/routing/opencode/docs/` transcribe them that way.
 
 `tests/install.sh` sources the installer's functions by stripping its final
@@ -125,9 +132,34 @@ not imply direct commits, which is why `examples/trunk-direct-main.yaml` and its
 test exist. And **the validator's accepted values are read out of the schema**,
 so widening the format means editing the schema, not the code.
 
-The validator needs a YAML parser and so is the one component here that is not
-dependency-free. It resolves an interpreter that has PyYAML and exits 2 when
-none does; it must never degrade to a skip.
+The validator needs a YAML parser and so is one of the components here with
+explicit host dependencies. It resolves an interpreter that has PyYAML and exits
+2 when none does; it must never degrade to a skip. The standalone Headroom
+runtime also explicitly checks Bash, uv, jq, curl, `systemctl --user`, `ss`, and
+Headroom as required by its selected command.
+
+## The Headroom Runtime
+
+`headroom-runtime/` is opt-in and remains a standalone `TRIAL` capability. Its
+install command uses `--scope provider --providers manual` with no `--target`;
+the deliberate no-target path creates only the service and avoids shell or
+provider configuration mutations. Headroom owns its generated unit and
+deployment artifacts, so they are inspected but never committed, templated, or
+hand-edited by this repository.
+
+OpenCode checks are guards against Headroom coupling, not ownership claims: the
+component does not impose JSON versus JSONC, edit OpenCode, Gateway, or shell
+configuration, or configure routing. The native OpenCode plugin is `HOLD`; MCP
+and explicit API integration are `NOT_EVALUATED`, and current OpenCode
+optimization is `NONE`. Audit uses `PASS`/`WARN`/`FAIL`/`ERROR` with exits
+`0`/`0`/`1`/`2`; removal warns about existing OpenCode integration but never
+repairs it.
+
+Any behavior or output change to `headroom-runtime.sh` bumps its semantic version
+in the same commit: patch for a fix, minor for an additive interface, and major
+for a breaking change. The `headroom-ai[proxy]==0.37.0` pin constrains the
+top-level package but does not lock or hash-verify transitive dependencies; uv
+resolves them from its configured index at installation time.
 
 ## Git credentials on WSL
 

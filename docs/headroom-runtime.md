@@ -106,15 +106,18 @@ a warning during removal only; removal never repairs OpenCode configuration.
 ## Rollback
 
 ```bash
+./headroom-runtime/headroom-runtime.sh remove --dry-run
 ./headroom-runtime/headroom-runtime.sh remove
 ./headroom-runtime/headroom-runtime.sh remove --uninstall-tool
 ```
 
-For a corrupt or unreadable manifest, automated profile removal exits 2. Do not
-use a force mode. Preserve evidence by archiving the generated profile directory
-and generated user unit, inspect ownership, then use upstream and systemd
-commands deliberately. Review OpenCode integration separately: this component
-does not remove or repair it.
+`remove --dry-run` prints the upstream removal and optional tool-uninstall
+commands without mutating anything. For a corrupt or unreadable manifest, or a
+residual profile directory without a manifest or generated unit, automated
+profile removal exits 2. Do not use a force mode. Preserve evidence by archiving
+the generated profile directory and generated user unit, inspect ownership, then
+use upstream and systemd commands deliberately. Review OpenCode integration
+separately: this component does not remove or repair it.
 
 ## Upgrade Procedure
 

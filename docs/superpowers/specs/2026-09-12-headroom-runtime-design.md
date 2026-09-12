@@ -161,7 +161,7 @@ prints only the mutation commands that the real run would execute. It never
 performs a package, service or file mutation. Audit never mutates and accepts
 no dry-run flag.
 
-The initial script version is `0.1.0`. This component defines the local rule
+The script version is `0.1.1`. This component defines the local rule
 that future behavior or output changes bump that version in the same commit:
 patch for fixes, minor for additive interface changes and major for breaking
 changes.
@@ -360,7 +360,7 @@ the doctor-style shape:
 ```json
 {
   "schemaVersion": 1,
-  "toolVersion": "0.1.0",
+  "toolVersion": "0.1.1",
   "action": "audit",
   "status": "WARN",
   "findings": [

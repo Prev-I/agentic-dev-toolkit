@@ -228,6 +228,19 @@ SCRIPT
 )" && CLI_STATUS=0 || CLI_STATUS=$?
 }
 
+run_remove_with_unknown_listener_state() {
+  local source_file
+  source_file="$(source_cli_without_main)"
+  CLI_OUTPUT="$(run_in_fixture_path "$BASH_BIN" -s "$source_file" 2>&1 <<'SCRIPT'
+source "$1"
+parse_listener() { LISTENER_STATE=UNKNOWN; }
+classify_removal_deployment
+render_human "$(status_for_findings)"
+printf 'deployment=%s\n' "$DEPLOYMENT_STATE"
+SCRIPT
+)" && CLI_STATUS=0 || CLI_STATUS=$?
+}
+
 new_conforming_case() {
   new_case "$1"
   mkdir -p "$HRT_HEADROOM_DEPLOY_ROOT/default"
@@ -330,7 +343,7 @@ test_json_audit_has_stable_shape() {
   assert_equal "$CLI_STATUS" "0" "JSON audit must pass"
   assert_equal "$("$JQ_BIN" -r '.schemaVersion' <<<"$CLI_OUTPUT")" "1" \
     "JSON schema version must be one"
-  assert_equal "$("$JQ_BIN" -r '.toolVersion' <<<"$CLI_OUTPUT")" "0.1.0" \
+  assert_equal "$("$JQ_BIN" -r '.toolVersion' <<<"$CLI_OUTPUT")" "0.1.1" \
     "toolVersion must identify the toolkit component"
   assert_equal "$("$JQ_BIN" -r '.status' <<<"$CLI_OUTPUT")" "PASS" \
     "JSON status must match human status"
@@ -626,7 +639,7 @@ STUB
   run_cli_split_streams audit --json
   assert_equal "$CLI_STATUS" 2 "a normal JSON renderer failure must fail audit"
   assert_equal "$CLI_STDOUT" \
-    '{"schemaVersion":1,"toolVersion":"0.1.0","action":"audit","status":"ERROR","findings":[],"error":"audit command resolution failed"}' \
+    '{"schemaVersion":1,"toolVersion":"0.1.1","action":"audit","status":"ERROR","findings":[],"error":"audit command resolution failed"}' \
     "a normal JSON renderer failure must emit only the fixed JSON error envelope"
   assert_equal "$("$JQ_BIN" -r '.status' <<<"$CLI_STDOUT")" ERROR \
     "a normal JSON renderer failure must leave stdout valid JSON"
@@ -738,7 +751,7 @@ test_audit_command_and_flag_validation() {
   run_cli_split_streams audit --json --invalid
   assert_equal "$CLI_STATUS" 2 "a partial jq renderer failure must preserve the usage exit code"
   assert_equal "$CLI_STDOUT" \
-    '{"schemaVersion":1,"toolVersion":"0.1.0","action":"audit","status":"ERROR","findings":[],"error":"audit command resolution failed"}' \
+    '{"schemaVersion":1,"toolVersion":"0.1.1","action":"audit","status":"ERROR","findings":[],"error":"audit command resolution failed"}' \
     "a failed jq renderer must emit only the fixed JSON error envelope"
   assert_equal "$("$JQ_BIN" -r '.status' <<<"$CLI_STDOUT")" ERROR \
     "a partial jq renderer failure must leave stdout valid JSON"
@@ -755,7 +768,7 @@ test_audit_command_and_flag_validation() {
   run_cli_split_streams audit --json --invalid
   assert_equal "$CLI_STATUS" 2 "an empty jq resolution renderer must preserve the usage exit code"
   assert_equal "$CLI_STDOUT" \
-    '{"schemaVersion":1,"toolVersion":"0.1.0","action":"audit","status":"ERROR","findings":[],"error":"audit command resolution failed"}' \
+    '{"schemaVersion":1,"toolVersion":"0.1.1","action":"audit","status":"ERROR","findings":[],"error":"audit command resolution failed"}' \
     "an empty jq resolution renderer must emit the fixed JSON error envelope"
   assert_contains "$CLI_STDERR" 'unknown audit option' \
     "an empty jq resolution renderer must preserve detail on stderr"
@@ -765,7 +778,7 @@ test_version_is_exact() {
   new_case version
   run_cli --version
   assert_equal "$CLI_STATUS" "0" "--version must succeed"
-  assert_equal "$CLI_OUTPUT" "0.1.0" "--version must print only the tool version"
+  assert_equal "$CLI_OUTPUT" "0.1.1" "--version must print only the tool version"
 }
 
 test_help_lists_the_three_commands() {
@@ -855,7 +868,7 @@ test_version_does_not_require_an_uptime_file() {
   run_cli --version
   unset HRT_UPTIME_FILE
   assert_equal "$CLI_STATUS" "0" "--version must not inspect uptime state"
-  assert_equal "$CLI_OUTPUT" "0.1.0" "--version must remain independent of uptime"
+  assert_equal "$CLI_OUTPUT" "0.1.1" "--version must remain independent of uptime"
 }
 
 test_missing_uv_seam_cannot_fall_back_to_the_host() {
@@ -1874,6 +1887,49 @@ headroom-ai" "tool-only removal must not invoke Headroom"
   assert_equal "$(<"$HRT_MUTATION_LOG")" '' "a conflicting profile must block every mutation"
 }
 
+test_remove_validates_uv_before_uninstall_mutations() {
+  new_conforming_case remove-absent-invalid-uv
+  /bin/rm -f "$HRT_SYSTEMD_USER_DIR/headroom-default.service"
+  /bin/rm -rf "$HRT_HEADROOM_DEPLOY_ROOT/default"
+  export HRT_FIX_SS_OUTPUT=''
+  export HRT_UV_BIN=relative/uv
+  run_cli remove --uninstall-tool
+  unset HRT_UV_BIN
+  assert_equal "$CLI_STATUS" 2 "tool-only removal must validate uv before mutation"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "invalid uv must block tool-only removal mutation"
+
+  new_conforming_case remove-recognized-missing-uv
+  rm "$HRT_UV_BIN"
+  unset HRT_UV_BIN
+  run_cli remove --uninstall-tool
+  assert_equal "$CLI_STATUS" 2 "recognized removal must validate uv before mutation"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "missing uv must block recognized removal mutation"
+}
+
+test_remove_warns_about_nonconforming_manifest_before_delegation() {
+  new_conforming_case remove-nonconforming-manifest
+  printf '%s\n' '{"profile":"default","targets":["opencode"],"mutations":["x"],"memory_enabled":false,"telemetry_enabled":true,"base_env":{"HEADROOM_BEACON":"off","HEADROOM_UPDATE_CHECK":"off","HEADROOM_TELEMETRY":"on"}}' > "$HRT_HEADROOM_DEPLOY_ROOT/default/manifest.json"
+  printf '%s\n' '{"plugin":"headroom-opencode"}' > "$HRT_OPENCODE_CONFIG_DIR/opencode.json"
+  run_cli remove
+  assert_equal "$CLI_STATUS" 0 "recognized nonconforming deployments must remain removable"
+  assert_contains "$CLI_OUTPUT" 'WARN: HEADROOM_TARGETS_CONFIGURED' "removal must warn about manifest targets"
+  assert_contains "$CLI_OUTPUT" 'WARN: HEADROOM_MUTATIONS_PRESENT' "removal must warn about manifest mutations"
+  assert_contains "$CLI_OUTPUT" 'WARN: HEADROOM_TELEMETRY_ENABLED' "removal must warn about telemetry drift"
+  assert_contains "$CLI_OUTPUT" 'WARN: HEADROOM_TELEMETRY_ENV_ENABLED' "removal must warn about telemetry environment drift"
+  assert_contains "$CLI_OUTPUT" 'Upstream removal may revert recorded Headroom mutations' \
+    "removal must explain mutation rollback risk"
+  assert_contains "$CLI_OUTPUT" 'WARN: HEADROOM_OPENCODE_CONFIG_PRESENT' \
+    "removal must retain OpenCode warnings without editing OpenCode"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" "---
+$HRT_HEADROOM_BIN
+install
+remove
+--profile
+default" "nonconforming removal must delegate the exact approved command"
+  assert_equal "$(<"$HRT_OPENCODE_CONFIG_DIR/opencode.json")" '{"plugin":"headroom-opencode"}' \
+    "removal must not modify OpenCode configuration"
+}
+
 test_remove_isolated_and_verified() {
   new_conforming_case remove-opencode-warning
   printf '%s\n' '{"plugin":"headroom-opencode"}' > "$HRT_OPENCODE_CONFIG_DIR/opencode.json"
@@ -1904,6 +1960,33 @@ default" "removal must not repair OpenCode integration"
   assert_equal "$CLI_STATUS" 2 "an unattributable remaining listener must be an inspection error"
   assert_contains "$CLI_OUTPUT" HEADROOM_LISTENER_OWNER_AMBIGUOUS \
     "an unattributable remaining listener must retain its finding"
+
+  new_conforming_case remove-incomplete-artifacts
+  export HRT_FIX_REMOVE_LEAVES_ARTIFACTS=1
+  run_cli remove
+  assert_equal "$CLI_STATUS" 1 "residual removal artifacts must fail verification"
+  assert_contains "$CLI_OUTPUT" HEADROOM_SERVICE_REMAINS \
+    "incomplete removal must report a remaining service"
+  assert_contains "$CLI_OUTPUT" HEADROOM_PROFILE_REMAINS \
+    "incomplete removal must report a remaining profile"
+
+  new_case remove-residual-profile
+  mkdir -p "$HRT_HEADROOM_DEPLOY_ROOT/default"
+  export HRT_FIX_SS_OUTPUT=''
+  run_cli remove
+  assert_equal "$CLI_STATUS" 2 "an orphaned profile directory must not be treated as absent"
+  assert_contains "$CLI_OUTPUT" HEADROOM_MANIFEST_UNREADABLE \
+    "an orphaned profile directory must retain its ownership error"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "an orphaned profile directory must block mutations"
+
+  new_case remove-unknown-listener-state
+  run_remove_with_unknown_listener_state
+  assert_equal "$CLI_STATUS" 0 "the classifier seam must complete"
+  assert_contains "$CLI_OUTPUT" HEADROOM_STATE_INDETERMINATE \
+    "unknown listener states must report an ownership error"
+  assert_contains "$CLI_OUTPUT" 'Status: ERROR' "unknown listener states must be errors"
+  assert_contains "$CLI_OUTPUT" 'deployment=AMBIGUOUS' \
+    "unknown listener states must fail closed as ambiguous"
 
   new_conforming_case remove-boundaries
   mkdir -p "$CASE_DIR/gateway" "$CASE_DIR/shell"
@@ -1969,6 +2052,8 @@ test_readiness_finalization
 test_readiness_response_queue_exhaustion_is_visible
 test_install_deduplicates_and_renders_secondary_refusals
 test_remove_manifest_aware_behavior
+test_remove_validates_uv_before_uninstall_mutations
+test_remove_warns_about_nonconforming_manifest_before_delegation
 test_remove_isolated_and_verified
 test_conforming_runtime_passes
 test_json_audit_has_stable_shape

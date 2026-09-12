@@ -42,6 +42,31 @@ DROP_MISSING=0
 WSL_CHANGED=0
 PATH_CHANGED=0
 
+# Task 7: the TOOLKIT_ finding domain -- receipt-derived state and
+# comparison A's parsed mise configuration, declared once at script scope
+# beside the finding accumulators below.
+#
+# TOOLKIT_MISE_DOMAIN is comparison A's exact twelve-key domain: the keys the
+# generated [tools] table is able to express. pyyaml, openspec, superpowers,
+# karpathy-ref and karpathy-sha256 are outside it because mise is not how
+# they are installed or configured.
+TOOLKIT_MISE_DOMAIN=(
+  java-17 java-21 dotnet-8 dotnet-10 python node bun maven uv dotnet-ef
+  shellcheck gitleaks
+)
+
+declare -A RECEIPT_VALUES=() RECEIPT_LINES=()
+declare -a RECEIPT_ORDER=()
+RECEIPT_ERROR=""
+
+declare -A CATALOG_VALUES=() CATALOG_LINES=()
+declare -a CATALOG_ORDER=()
+CATALOG_ERROR=""
+
+declare -A MISE_CONFIG_VALUES=()
+
+TOOLKIT_PROBE_OUTPUT=""
+
 F_SEVERITY=()
 F_CODE=()
 F_SUBJECT=()
@@ -852,6 +877,513 @@ audit_mise() {
   done <<< "$output"
 }
 
+# --- Task 7: the TOOLKIT_ finding domain -----------------------------------
+#
+# Three comparisons over an optional install receipt:
+#   A -- receipt requested.* vs the toolkit-managed global mise config file.
+#   B -- receipt installed.* vs a fresh probe, opt-in via --probe.
+#   C -- the current catalog vs receipt requested.*, over their intersection.
+# See docs/superpowers/specs/2026-09-09-software-catalog-design.md, "Doctor:
+# three comparisons", for the normative rules; the comments here cover only
+# the control flow.
+
+# load_catalog resets CATALOG_VALUES/CATALOG_LINES/CATALOG_ORDER and loads
+# WTD_CATALOG_FILE through load_kv_file, called directly (never inside a
+# subshell) so its nameref-populated arrays survive. On failure it clears the
+# three arrays back to empty rather than leaving a partial load in place:
+# validate_kv's membership check treats a non-empty MEMBERS array as "a
+# catalog is available", so a half-loaded catalog must not linger as one.
+load_catalog() {
+  CATALOG_VALUES=()
+  # shellcheck disable=SC2034 # populated by name through load_kv_file's nameref
+  CATALOG_LINES=()
+  CATALOG_ORDER=()
+  CATALOG_ERROR=""
+  if ! load_kv_file "$WTD_CATALOG_FILE" CATALOG_VALUES CATALOG_LINES CATALOG_ORDER CATALOG_ERROR; then
+    CATALOG_VALUES=()
+    # shellcheck disable=SC2034 # populated by name through load_kv_file's nameref
+    CATALOG_LINES=()
+    CATALOG_ORDER=()
+    return 1
+  fi
+  return 0
+}
+
+# load_receipt loads WTD_RECEIPT_FILE and validates it in the two ordered
+# phases the design declares. Phase 1 is one call to validate_kv with the six
+# literal required keys, in declared order, which also runs validate_kv's own
+# per-key syntax pass over every value in the file; passing CATALOG_VALUES
+# itself as the MEMBERS argument is what makes the skipped=/overridden=
+# membership check (predicate 5) run only when load_catalog above actually
+# populated it. Phase 2 is the four remaining structural predicates, which
+# this function evaluates itself, in declared order, only after phase 1
+# returns clean; predicates 2 and 4 need a catalog and are skipped without
+# one, exactly like validate_kv's own membership check.
+#
+# Takes the caller's catalog_available flag rather than re-deriving it from
+# CATALOG_VALUES' size, so the gate cannot be silently disabled by a future
+# caller capturing this differently.
+load_receipt() {
+  local catalog_available=$1
+  RECEIPT_VALUES=()
+  # shellcheck disable=SC2034 # populated by name through load_kv_file's nameref
+  RECEIPT_LINES=()
+  RECEIPT_ORDER=()
+  RECEIPT_ERROR=""
+
+  if ! load_kv_file "$WTD_RECEIPT_FILE" RECEIPT_VALUES RECEIPT_LINES RECEIPT_ORDER RECEIPT_ERROR; then
+    return 1
+  fi
+
+  # shellcheck disable=SC2034 # read by validate_kv through its nameref
+  local -a required=(script-version installed-at source-commit catalog-sha256 skipped overridden)
+  # shellcheck disable=SC2034 # read by validate_kv through its nameref
+  local -A listkeys=([skipped]=1 [overridden]=1)
+  local problem
+  if ! problem="$(validate_kv "$WTD_RECEIPT_FILE" RECEIPT_VALUES RECEIPT_LINES RECEIPT_ORDER required listkeys CATALOG_VALUES 2>&1)"; then
+    RECEIPT_ERROR="$problem"
+    return 1
+  fi
+
+  local key suffix found_requested=0
+  for key in "${RECEIPT_ORDER[@]}"; do
+    if [[ "$key" == requested.* ]]; then
+      found_requested=1
+      break
+    fi
+  done
+  if (( found_requested == 0 )); then
+    RECEIPT_ERROR="$WTD_RECEIPT_FILE: no requested.* key is present"
+    return 1
+  fi
+
+  if (( catalog_available == 1 )); then
+    for key in "${RECEIPT_ORDER[@]}"; do
+      [[ "$key" == requested.* ]] || continue
+      suffix="${key#requested.}"
+      if [[ -z "${CATALOG_VALUES[$suffix]+set}" ]]; then
+        RECEIPT_ERROR="$WTD_RECEIPT_FILE: $key is not a catalog key"
+        return 1
+      fi
+    done
+  fi
+
+  if [[ -n "${RECEIPT_VALUES[requested.karpathy-sha256]+set}" ]]; then
+    RECEIPT_ERROR="$WTD_RECEIPT_FILE: requested.karpathy-sha256 must not be present"
+    return 1
+  fi
+
+  if (( catalog_available == 1 )); then
+    for key in "${RECEIPT_ORDER[@]}"; do
+      [[ "$key" == installed.* ]] || continue
+      suffix="${key#installed.}"
+      if [[ -z "${CATALOG_VALUES[$suffix]+set}" ]]; then
+        RECEIPT_ERROR="$WTD_RECEIPT_FILE: $key is not a catalog key"
+        return 1
+      fi
+    done
+  fi
+
+  return 0
+}
+
+# toolkit_receipt_set KEY OUTVAR
+# Expands RECEIPT_VALUES[KEY] -- skipped= or overridden=, always a
+# comma-joined list of catalog keys, possibly empty -- into OUTVAR as a
+# membership set. OUTVAR is a nameref: never call this inside a subshell.
+toolkit_receipt_set() {
+  local key=$1
+  local -n out=$2
+  out=()
+  local value="${RECEIPT_VALUES[$key]:-}"
+  [[ -n "$value" ]] || return 0
+  local -a items
+  local item
+  IFS=',' read -ra items <<< "$value"
+  for item in "${items[@]}"; do
+    # shellcheck disable=SC2034 # out is the caller's nameref, read after return
+    out["$item"]=1
+  done
+}
+
+# parse_mise_toolchain_config reads WTD_MISE_TOOLCHAIN_CONFIG's [tools] table
+# directly -- never "mise ls --current", whose answer depends on the working
+# directory and would silently compare a project's own mise.toml instead of
+# the toolkit's global one. This is new parsing: audit_mise strips versions,
+# dedups per tool, and has no node/bun watchlist entry, so none of it is
+# reusable here. Recognizes exactly the four line forms
+# render_mise_configuration emits; anything else is ignored rather than
+# rejected, so a hand-edited comment or the "[tools]" header itself does not
+# abort the parse.
+#
+# Array position carries the mapping for java/dotnet: mise treats the first
+# element as the default, so element 1 is always the "-17"/"-10" key and
+# element 2 is always the "-21"/"-8" key, regardless of the values found --
+# a parser that matched by value instead of position would silently accept a
+# reordered file, which is exactly the change comparison A must report.
+parse_mise_toolchain_config() {
+  MISE_CONFIG_VALUES=()
+  [[ -r "$WTD_MISE_TOOLCHAIN_CONFIG" ]] || return 1
+
+  local line stripped key value
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    stripped="$(trim "$line")"
+    [[ -n "$stripped" ]] || continue
+    [[ "$stripped" == \#* ]] && continue
+
+    if [[ "$stripped" =~ ^java[[:space:]]*=[[:space:]]*\[[[:space:]]*\"([^\"]*)\"[[:space:]]*,[[:space:]]*\"([^\"]*)\"[[:space:]]*\]$ ]]; then
+      MISE_CONFIG_VALUES[java-17]="${BASH_REMATCH[1]}"
+      MISE_CONFIG_VALUES[java-21]="${BASH_REMATCH[2]}"
+      continue
+    fi
+    if [[ "$stripped" =~ ^dotnet[[:space:]]*=[[:space:]]*\[[[:space:]]*\"([^\"]*)\"[[:space:]]*,[[:space:]]*\"([^\"]*)\"[[:space:]]*\]$ ]]; then
+      MISE_CONFIG_VALUES[dotnet-10]="${BASH_REMATCH[1]}"
+      MISE_CONFIG_VALUES[dotnet-8]="${BASH_REMATCH[2]}"
+      continue
+    fi
+    if [[ "$stripped" =~ ^\"dotnet:dotnet-ef\"[[:space:]]*=[[:space:]]*\"([^\"]*)\"$ ]]; then
+      MISE_CONFIG_VALUES[dotnet-ef]="${BASH_REMATCH[1]}"
+      continue
+    fi
+    if [[ "$stripped" =~ ^([A-Za-z_][A-Za-z0-9_-]*)[[:space:]]*=[[:space:]]*\"([^\"]*)\"$ ]]; then
+      key="${BASH_REMATCH[1]}"
+      value="${BASH_REMATCH[2]}"
+      case "$key" in
+        python|node|bun|maven|uv|shellcheck|gitleaks)
+          MISE_CONFIG_VALUES[$key]="$value"
+          ;;
+      esac
+      continue
+    fi
+  done < "$WTD_MISE_TOOLCHAIN_CONFIG"
+
+  return 0
+}
+
+# toolkit_compare_a -- requested-configuration drift, every audit.
+toolkit_compare_a() {
+  if ! parse_mise_toolchain_config; then
+    add_finding INFO TOOLKIT_CONFIG_UNAVAILABLE "$WTD_MISE_TOOLCHAIN_CONFIG" "The toolkit-managed mise configuration is absent or unreadable; requested-configuration drift was not checked."
+    return 0
+  fi
+
+  local -A skip=()
+  toolkit_receipt_set skipped skip
+
+  local key requested config_value ok_count=0
+  for key in "${TOOLKIT_MISE_DOMAIN[@]}"; do
+    [[ -z "${skip[$key]+set}" ]] || continue
+    requested="${RECEIPT_VALUES[requested.$key]:-}"
+    [[ -n "$requested" ]] || continue
+
+    if [[ -n "${MISE_CONFIG_VALUES[$key]+set}" ]]; then
+      config_value="${MISE_CONFIG_VALUES[$key]}"
+      if [[ "$config_value" == "$requested" ]]; then
+        ok_count=$((ok_count + 1))
+      else
+        add_finding WARN TOOLKIT_CONFIG_DRIFT "$key" "Requested $requested but the mise configuration has $config_value."
+      fi
+    else
+      add_finding WARN TOOLKIT_CONFIG_MISSING "$key" "Requested $requested but $key is absent from the mise configuration."
+    fi
+  done
+
+  if (( ok_count > 0 )); then
+    add_finding INFO TOOLKIT_CONFIG_OK "mise" "$ok_count component(s) match the requested mise configuration."
+  fi
+}
+
+# toolkit_run_probe TIMEOUT_BIN CMD...
+# Runs CMD bounded by "TIMEOUT_BIN 10s", capturing combined output into
+# TOOLKIT_PROBE_OUTPUT and returning the command's status. Callers guard the
+# call in an `if`, exactly like run_bounded_probe's callers in install.sh, so
+# an expected probe failure or timeout cannot trip errexit. 124 is coreutils
+# timeout's own convention for "the bound was hit", which comparison B relies
+# on to tell TOOLKIT_PROBE_TIMEOUT apart from TOOLKIT_PROBE_UNAVAILABLE.
+toolkit_run_probe() {
+  local timeout_bin_path=$1
+  shift
+  local rc
+  if TOOLKIT_PROBE_OUTPUT="$("$timeout_bin_path" 10s "$@" 2>&1)"; then
+    rc=0
+  else
+    rc=$?
+  fi
+  return "$rc"
+}
+
+# toolkit_report_probe_rc KEY RC
+# Common handling for a probe's exit status: reports TOOLKIT_PROBE_TIMEOUT or
+# TOOLKIT_PROBE_UNAVAILABLE and returns 1, or returns 0 when RC is success and
+# TOOLKIT_PROBE_OUTPUT is ready to extract from.
+toolkit_report_probe_rc() {
+  local key=$1 rc=$2
+  if (( rc == 124 )); then
+    add_finding INFO TOOLKIT_PROBE_TIMEOUT "$key" "Probing $key timed out."
+    return 1
+  fi
+  if (( rc != 0 )); then
+    add_finding INFO TOOLKIT_PROBE_UNAVAILABLE "$key" "Could not probe $key."
+    return 1
+  fi
+  return 0
+}
+
+# toolkit_compare_probe_result KEY CANDIDATE COUNT_VAR
+# The common tail for every comparison-B probe once a candidate token has
+# been extracted: validates it against the receipt's own scalar grammar,
+# reports TOOLKIT_PROBE_UNAVAILABLE for an empty or malformed one, does
+# nothing when the receipt has no installed.<KEY> to compare against
+# (silently outside B), and otherwise reports agreement (via COUNT_VAR, a
+# nameref) or TOOLKIT_DRIFT_INSTALLED.
+toolkit_compare_probe_result() {
+  local key=$1 candidate=$2
+  local -n count_ref=$3
+  if [[ -z "$candidate" || ! "$candidate" =~ ^[A-Za-z0-9][A-Za-z0-9._:+@/-]*$ ]]; then
+    add_finding INFO TOOLKIT_PROBE_UNAVAILABLE "$key" "Probe output for $key could not be parsed into a version."
+    return 0
+  fi
+  local installed="${RECEIPT_VALUES[installed.$key]:-}"
+  [[ -n "$installed" ]] || return 0
+  if [[ "$candidate" == "$installed" ]]; then
+    count_ref=$((count_ref + 1))
+  else
+    add_finding WARN TOOLKIT_DRIFT_INSTALLED "$key" "Installed $installed but the machine now reports $candidate."
+  fi
+}
+
+# toolkit_compare_b -- installed-machine drift, --probe only. Reaches exactly
+# three executables, each resolved once through its seam at the point this
+# comparison begins, and never again.
+toolkit_compare_b() {
+  local timeout_path mise_path="" openspec_path=""
+  local -A skip=()
+  toolkit_receipt_set skipped skip
+
+  if ! timeout_path="$(timeout_bin)"; then
+    add_finding INFO TOOLKIT_PROBE_UNAVAILABLE "timeout" "No usable timeout utility is available; comparison B did not run."
+    return 0
+  fi
+
+  local mise_available=1
+  if ! mise_path="$(mise_bin)"; then
+    mise_available=0
+    add_finding INFO TOOLKIT_PROBE_UNAVAILABLE "mise" "No usable mise binary is available; mise-backed probes did not run."
+  fi
+
+  local openspec_available=1
+  if ! openspec_path="$(openspec_bin)"; then
+    openspec_available=0
+  fi
+
+  local ok_count=0 rc candidate
+
+  if (( mise_available == 1 )); then
+    if [[ -z "${skip[java-17]+set}" ]]; then
+      if toolkit_run_probe "$timeout_path" "$mise_path" exec "java@${RECEIPT_VALUES[requested.java-17]:-}" -- java -version; then rc=0; else rc=$?; fi
+      if toolkit_report_probe_rc java-17 "$rc"; then
+        candidate="$(awk -F'"' 'NF>=3{print $2; exit}' <<<"$TOOLKIT_PROBE_OUTPUT")"
+        toolkit_compare_probe_result java-17 "$candidate" ok_count
+      fi
+    fi
+
+    if [[ -z "${skip[java-21]+set}" ]]; then
+      if toolkit_run_probe "$timeout_path" "$mise_path" exec "java@${RECEIPT_VALUES[requested.java-21]:-}" -- java -version; then rc=0; else rc=$?; fi
+      if toolkit_report_probe_rc java-21 "$rc"; then
+        candidate="$(awk -F'"' 'NF>=3{print $2; exit}' <<<"$TOOLKIT_PROBE_OUTPUT")"
+        toolkit_compare_probe_result java-21 "$candidate" ok_count
+      fi
+    fi
+
+    if [[ -z "${skip[dotnet-10]+set}" || -z "${skip[dotnet-8]+set}" ]]; then
+      if toolkit_run_probe "$timeout_path" "$mise_path" exec -- dotnet --list-sdks; then rc=0; else rc=$?; fi
+      if (( rc == 124 )); then
+        [[ -n "${skip[dotnet-10]+set}" ]] || add_finding INFO TOOLKIT_PROBE_TIMEOUT "dotnet-10" "Probing dotnet-10 timed out."
+        [[ -n "${skip[dotnet-8]+set}" ]]  || add_finding INFO TOOLKIT_PROBE_TIMEOUT "dotnet-8" "Probing dotnet-8 timed out."
+      elif (( rc != 0 )); then
+        [[ -n "${skip[dotnet-10]+set}" ]] || add_finding INFO TOOLKIT_PROBE_UNAVAILABLE "dotnet-10" "Could not probe dotnet-10."
+        [[ -n "${skip[dotnet-8]+set}" ]]  || add_finding INFO TOOLKIT_PROBE_UNAVAILABLE "dotnet-8" "Could not probe dotnet-8."
+      else
+        if [[ -z "${skip[dotnet-10]+set}" ]]; then
+          candidate="$(awk '{ split($1, v, "."); if (v[1] == "10") { print $1; exit } }' <<<"$TOOLKIT_PROBE_OUTPUT")"
+          toolkit_compare_probe_result dotnet-10 "$candidate" ok_count
+        fi
+        if [[ -z "${skip[dotnet-8]+set}" ]]; then
+          candidate="$(awk '{ split($1, v, "."); if (v[1] == "8") { print $1; exit } }' <<<"$TOOLKIT_PROBE_OUTPUT")"
+          toolkit_compare_probe_result dotnet-8 "$candidate" ok_count
+        fi
+      fi
+    fi
+
+    if [[ -z "${skip[python]+set}" ]]; then
+      if toolkit_run_probe "$timeout_path" "$mise_path" exec -- python --version; then rc=0; else rc=$?; fi
+      if toolkit_report_probe_rc python "$rc"; then
+        candidate="$(awk 'NR==1{print $2}' <<<"$TOOLKIT_PROBE_OUTPUT")"
+        toolkit_compare_probe_result python "$candidate" ok_count
+      fi
+    fi
+
+    if [[ -z "${skip[node]+set}" ]]; then
+      if toolkit_run_probe "$timeout_path" "$mise_path" exec -- node --version; then rc=0; else rc=$?; fi
+      if toolkit_report_probe_rc node "$rc"; then
+        candidate="$(awk 'NR==1{ sub(/^v/, "", $1); print $1 }' <<<"$TOOLKIT_PROBE_OUTPUT")"
+        toolkit_compare_probe_result node "$candidate" ok_count
+      fi
+    fi
+
+    if [[ -z "${skip[bun]+set}" ]]; then
+      if toolkit_run_probe "$timeout_path" "$mise_path" exec -- bun --version; then rc=0; else rc=$?; fi
+      if toolkit_report_probe_rc bun "$rc"; then
+        candidate="$(awk 'NR==1{print $1}' <<<"$TOOLKIT_PROBE_OUTPUT")"
+        toolkit_compare_probe_result bun "$candidate" ok_count
+      fi
+    fi
+
+    if [[ -z "${skip[maven]+set}" ]]; then
+      if toolkit_run_probe "$timeout_path" "$mise_path" exec -- mvn -version; then rc=0; else rc=$?; fi
+      if toolkit_report_probe_rc maven "$rc"; then
+        candidate="$(awk 'NR==1{print $3}' <<<"$TOOLKIT_PROBE_OUTPUT")"
+        toolkit_compare_probe_result maven "$candidate" ok_count
+      fi
+    fi
+
+    if [[ -z "${skip[dotnet-ef]+set}" ]]; then
+      if toolkit_run_probe "$timeout_path" "$mise_path" exec -- dotnet-ef --version; then rc=0; else rc=$?; fi
+      if toolkit_report_probe_rc dotnet-ef "$rc"; then
+        candidate="$(awk 'NF{last=$1} END{print last}' <<<"$TOOLKIT_PROBE_OUTPUT")"
+        toolkit_compare_probe_result dotnet-ef "$candidate" ok_count
+      fi
+    fi
+
+    if [[ -z "${skip[uv]+set}" ]]; then
+      if toolkit_run_probe "$timeout_path" "$mise_path" exec -- uv --version; then rc=0; else rc=$?; fi
+      if toolkit_report_probe_rc uv "$rc"; then
+        candidate="$(awk 'NR==1{print $2}' <<<"$TOOLKIT_PROBE_OUTPUT")"
+        toolkit_compare_probe_result uv "$candidate" ok_count
+      fi
+    fi
+
+    if [[ -z "${skip[shellcheck]+set}" ]]; then
+      if toolkit_run_probe "$timeout_path" "$mise_path" exec -- shellcheck --version; then rc=0; else rc=$?; fi
+      if toolkit_report_probe_rc shellcheck "$rc"; then
+        candidate="$(awk '$1=="version:"{print $2; exit}' <<<"$TOOLKIT_PROBE_OUTPUT")"
+        toolkit_compare_probe_result shellcheck "$candidate" ok_count
+      fi
+    fi
+
+    if [[ -z "${skip[gitleaks]+set}" ]]; then
+      if toolkit_run_probe "$timeout_path" "$mise_path" exec -- gitleaks version; then rc=0; else rc=$?; fi
+      if toolkit_report_probe_rc gitleaks "$rc"; then
+        candidate="$(awk 'NR==1{ sub(/^v/, "", $1); print $1 }' <<<"$TOOLKIT_PROBE_OUTPUT")"
+        toolkit_compare_probe_result gitleaks "$candidate" ok_count
+      fi
+    fi
+
+    if [[ -z "${skip[pyyaml]+set}" ]]; then
+      if toolkit_run_probe "$timeout_path" "$mise_path" exec -- python -c 'import yaml; print(yaml.__version__)'; then rc=0; else rc=$?; fi
+      if toolkit_report_probe_rc pyyaml "$rc"; then
+        candidate="$(awk 'NR==1{print $1}' <<<"$TOOLKIT_PROBE_OUTPUT")"
+        toolkit_compare_probe_result pyyaml "$candidate" ok_count
+      fi
+    fi
+  fi
+
+  if (( openspec_available == 1 )); then
+    if [[ -z "${skip[openspec]+set}" ]]; then
+      if toolkit_run_probe "$timeout_path" "$openspec_path" --version; then rc=0; else rc=$?; fi
+      if toolkit_report_probe_rc openspec "$rc"; then
+        candidate="$(grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' <<<"$TOOLKIT_PROBE_OUTPUT" | head -n1 || true)"
+        toolkit_compare_probe_result openspec "$candidate" ok_count
+      fi
+    fi
+  else
+    add_finding INFO TOOLKIT_PROBE_UNAVAILABLE "openspec" "No usable openspec binary is available; installed.openspec was not measured."
+  fi
+
+  if (( ok_count > 0 )); then
+    add_finding INFO TOOLKIT_INSTALLED_OK "installed" "$ok_count component(s) match a fresh probe."
+  fi
+}
+
+# toolkit_compare_c -- catalog staleness, every audit with a catalog
+# available. Iterates the intersection of the current catalog's keys and the
+# receipt's requested.* keys: walking CATALOG_ORDER and skipping any key the
+# receipt does not carry as requested.* is what keeps both directions of
+# forward-compatibility -- a catalog key the receipt predates, and a
+# requested.* key the catalog has since dropped -- outside C by construction.
+toolkit_compare_c() {
+  local -A skip=() overridden=()
+  toolkit_receipt_set skipped skip
+  toolkit_receipt_set overridden overridden
+
+  local key requested catalog_value ok_count=0
+  local -a not_comparable=()
+
+  for key in "${CATALOG_ORDER[@]}"; do
+    [[ "$key" != "karpathy-sha256" ]] || continue
+    [[ -n "${RECEIPT_VALUES[requested.$key]+set}" ]] || continue
+    requested="${RECEIPT_VALUES[requested.$key]}"
+    catalog_value="${CATALOG_VALUES[$key]}"
+
+    if [[ -n "${skip[$key]+set}" ]]; then
+      not_comparable+=("$key (skipped)")
+    elif [[ -n "${overridden[$key]+set}" ]]; then
+      not_comparable+=("$key (overridden)")
+    elif [[ "$requested" == "latest" || "$catalog_value" == "latest" ]]; then
+      not_comparable+=("$key (latest)")
+    elif [[ "$catalog_value" == "$requested" ]]; then
+      ok_count=$((ok_count + 1))
+    else
+      add_finding WARN TOOLKIT_STALE_PIN "$key" "Requested $requested but the catalog now pins $catalog_value."
+    fi
+  done
+
+  if (( ok_count > 0 )); then
+    add_finding INFO TOOLKIT_PINS_CURRENT "catalog" "$ok_count component(s) match the current catalog."
+  fi
+  if (( ${#not_comparable[@]} > 0 )); then
+    local joined
+    joined="$(IFS=', '; printf '%s' "${not_comparable[*]}")"
+    add_finding INFO TOOLKIT_NOT_COMPARABLE "catalog" "Not compared: $joined."
+  fi
+}
+
+# audit_toolkit orchestrates the three comparisons under the design's
+# preconditions. No TOOLKIT_* finding is ever FAIL and none of this sets
+# EXEC_ERROR: a machine this toolkit never provisioned, or a receipt this
+# doctor cannot read, must never stop the rest of the audit from running.
+audit_toolkit() {
+  local catalog_available=1
+  if ! load_catalog; then
+    catalog_available=0
+    add_finding INFO TOOLKIT_CATALOG_UNAVAILABLE "$WTD_CATALOG_FILE" "The software catalog is absent or unreadable; catalog staleness was not checked. $CATALOG_ERROR"
+  fi
+
+  if [[ ! -e "$WTD_RECEIPT_FILE" ]]; then
+    add_finding INFO TOOLKIT_NOT_PROVISIONED "$WTD_RECEIPT_FILE" "No install receipt found; this machine was not provisioned by install.sh, or was provisioned before receipts existed."
+    return 0
+  fi
+
+  if ! load_receipt "$catalog_available"; then
+    add_finding INFO TOOLKIT_RECEIPT_UNREADABLE "$WTD_RECEIPT_FILE" "$RECEIPT_ERROR"
+    return 0
+  fi
+
+  if (( PROBE_MODE == 0 )); then
+    add_finding INFO TOOLKIT_INSTALLED_NOT_PROBED "$WTD_RECEIPT_FILE" "Run 'audit --probe' to compare installed versions against a fresh probe."
+  fi
+
+  toolkit_compare_a
+
+  if (( PROBE_MODE == 1 )); then
+    toolkit_compare_b
+  fi
+
+  if (( catalog_available == 1 )); then
+    toolkit_compare_c
+  fi
+}
+
 explain_command() {
   local name=$1 candidate found=0
   while IFS= read -r candidate; do
@@ -1409,6 +1941,7 @@ run_audit() {
     (( EXEC_ERROR == 0 )) && audit_container_reachability
     (( EXEC_ERROR == 0 )) && audit_mise
     (( EXEC_ERROR == 0 )) && audit_shell_profiles
+    (( EXEC_ERROR == 0 )) && audit_toolkit
   fi
   render_output
   result_exit_code
@@ -1529,9 +2062,6 @@ parse_audit_args() {
           return 1
         fi
         seen_probe=1
-        # shellcheck disable=SC2034 # consumed by the probe comparison this
-        # task does not implement; parse_audit_args' contract still requires
-        # setting it.
         PROBE_MODE=1
         ;;
       *)

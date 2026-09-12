@@ -120,6 +120,216 @@ run_doctor() {
   set -e
 }
 
+# run_doctor_status -- run_doctor's own env/fixture wiring, with the exit
+# status surfaced as this function's own return instead of only $LAST_RC, so
+# a call site can write `if run_doctor_status audit --probe; then ...`.
+run_doctor_status() {
+  run_doctor "$@"
+  return "$LAST_RC"
+}
+
+# --- Task 7 fixtures: the TOOLKIT_ finding domain --------------------------
+
+# write_test_catalog DEST
+# Writes the toolkit's real software-catalog.env verbatim, so every
+# TOOLKIT_* test compares against the same seventeen keys the installer
+# actually ships, without duplicating its content here.
+write_test_catalog() {
+  cp "$ROOT_DIR/catalog/software-catalog.env" "$1"
+}
+
+# write_test_mise_config DEST
+# Writes a [tools] table in the shape render_mise_configuration produces for
+# the real catalog's twelve mise-managed keys. Agrees with write_valid_receipt
+# below, so the two together are comparison A's "everything current" baseline.
+write_test_mise_config() {
+  cat > "$1" <<'TOML'
+[tools]
+java = ["temurin-17", "temurin-21"]
+dotnet = ["10", "8"]
+python = "3.12"
+node = "24"
+bun = "1"
+maven = "3.9.16"
+uv = "latest"
+"dotnet:dotnet-ef" = "latest"
+shellcheck = "latest"
+gitleaks = "latest"
+TOML
+}
+
+# write_valid_receipt DEST [CATALOG_FILE]
+# Writes a receipt agreeing with the real catalog (and, by extension, with
+# write_test_mise_config's rendering of it): every requested.* and
+# installed.* value matches, skipped= and overridden= are both empty. Tests
+# that want drift, staleness, a skip or an override mutate the fixture this
+# writes rather than hand-rolling their own from scratch.
+write_valid_receipt() {
+  local dest=$1
+  local catalog=${2:-$TMP_ROOT/catalog.env}
+  local sha=""
+  [[ -r "$catalog" ]] && sha="$(sha256sum -- "$catalog" 2>/dev/null | cut -d' ' -f1)"
+  [[ -n "$sha" ]] || sha="$(printf '%064d' 0)"
+  cat > "$dest" <<RECEIPT
+script-version=0.1.0
+installed-at=2026-09-09T14:22:07Z
+source-commit=1fcbb1c9a4e2b7d0f3a18c65b2e94d7f0a1c3e58
+catalog-sha256=$sha
+skipped=
+overridden=
+requested.java-17=temurin-17
+requested.java-21=temurin-21
+requested.dotnet-10=10
+requested.dotnet-8=8
+requested.python=3.12
+requested.node=24
+requested.bun=1
+requested.maven=3.9.16
+requested.dotnet-ef=latest
+requested.uv=latest
+requested.shellcheck=latest
+requested.gitleaks=latest
+requested.pyyaml=latest
+requested.openspec=1.9.0
+requested.superpowers=v6.3.0
+requested.karpathy-ref=2c606141936f1eeef17fa3043a72095b4765b9c2
+installed.java-17=17.0.13
+installed.java-21=21.0.5
+installed.dotnet-10=10.0.100
+installed.dotnet-8=8.0.404
+installed.python=3.12.1
+installed.node=24.8.1
+installed.bun=1.1.0
+installed.maven=3.9.16
+installed.dotnet-ef=9.0.100
+installed.uv=0.5.11
+installed.shellcheck=0.10.0
+installed.gitleaks=8.21.2
+installed.pyyaml=6.0.2
+installed.openspec=1.9.0
+installed.karpathy-sha256=6e22cc54cb02a5e98ae42d06d9d7292db0c1b43894831b32879beb0166b2aea7
+RECEIPT
+}
+
+# setup_toolkit_baseline
+# The "everything current" fixture: catalog, matching global mise config, and
+# a matching receipt, all agreeing. Comparison A, B and C tests start here and
+# mutate one file to introduce exactly the drift/staleness/skip/override
+# under test.
+setup_toolkit_baseline() {
+  write_test_catalog "$TMP_ROOT/catalog.env"
+  write_test_mise_config "$TMP_ROOT/mise-toolchain.toml"
+  write_valid_receipt "$TMP_ROOT/receipt.env" "$TMP_ROOT/catalog.env"
+}
+
+# receipt_skip_all_except DEST KEEP...
+# Rewrites DEST's skipped= line so every one of the sixteen requested.* keys
+# is skipped except the ones named. Isolates a single component's probe in a
+# comparison-B test without needing a fixture that answers correctly for
+# all twelve mise-backed probes at once.
+receipt_skip_all_except() {
+  local dest=$1
+  shift
+  local -a keep=("$@")
+  local -a all=(
+    java-17 java-21 dotnet-10 dotnet-8 python node bun maven dotnet-ef uv
+    shellcheck gitleaks pyyaml openspec superpowers karpathy-ref
+  )
+  local -a skip=()
+  local key k found
+  for key in "${all[@]}"; do
+    found=0
+    for k in "${keep[@]}"; do
+      [[ "$key" == "$k" ]] && { found=1; break; }
+    done
+    (( found == 1 )) || skip+=("$key")
+  done
+  local joined
+  joined="$(IFS=,; printf '%s' "${skip[*]}")"
+  sed -i "s/^skipped=.*/skipped=$joined/" "$dest"
+}
+
+# write_passthrough_timeout_stub DEST
+# A faithful drop-in for coreutils timeout, minus the actual bound: drops the
+# duration argument and execs the rest, so every real fixture command still
+# runs through it.
+write_passthrough_timeout_stub() {
+  cat > "$1" <<'STUB'
+#!/usr/bin/env bash
+shift
+exec "$@"
+STUB
+  chmod +x "$1"
+}
+
+# write_timeout_stub_always_times_out DEST
+# Ignores its arguments and reports coreutils timeout's own convention for
+# "the bound was hit" (124), so a probe wrapped in it is a timeout without
+# actually waiting ten seconds.
+write_timeout_stub_always_times_out() {
+  cat > "$1" <<'STUB'
+#!/usr/bin/env bash
+exit 124
+STUB
+  chmod +x "$1"
+}
+
+# write_baseline_mise_stub DEST LOG
+# A single fixture standing in for mise across every comparison-B probe,
+# case-dispatching on argv to return output that write_valid_receipt's
+# installed.* values already agree with -- the "everything current" B
+# baseline. Every invocation is appended to LOG first, so a test can assert
+# on which probes actually ran.
+write_baseline_mise_stub() {
+  local dest=$1 log=$2
+  cat > "$dest" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$log"
+case "\$*" in
+  "exec java@temurin-17"*)
+    printf 'openjdk version "17.0.13" 2024-10-15\n' 1>&2 ;;
+  "exec java@temurin-21"*)
+    printf 'openjdk version "21.0.5" 2024-10-15\n' 1>&2 ;;
+  "exec -- dotnet --list-sdks")
+    printf '8.0.404 [/x]\n10.0.100 [/x]\n' ;;
+  "exec -- python --version")
+    printf 'Python 3.12.1\n' ;;
+  "exec -- node --version")
+    printf 'v24.8.1\n' ;;
+  "exec -- bun --version")
+    printf '1.1.0\n' ;;
+  "exec -- mvn -version")
+    printf 'Apache Maven 3.9.16 (abcd)\n' ;;
+  "exec -- dotnet-ef --version")
+    printf 'ASCII ART BANNER\n9.0.100\n' ;;
+  "exec -- uv --version")
+    printf 'uv 0.5.11\n' ;;
+  "exec -- shellcheck --version")
+    printf 'version: 0.10.0\n' ;;
+  "exec -- gitleaks version")
+    printf 'v8.21.2\n' ;;
+  "exec -- python -c"*)
+    printf '6.0.2\n' ;;
+  *)
+    exit 1 ;;
+esac
+STUB
+  chmod +x "$dest"
+}
+
+# write_baseline_openspec_stub DEST LOG
+# openspec's half of the B baseline: logs its invocation, then answers with
+# the version write_valid_receipt already records as installed.openspec.
+write_baseline_openspec_stub() {
+  local dest=$1 log=$2
+  cat > "$dest" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$log"
+printf 'openspec version 1.9.0\n'
+STUB
+  chmod +x "$dest"
+}
+
 # Task 1: configuration and environment audit
 setup_fixture
 cat > "$TMP_ROOT/wsl.conf" <<'CONF'
@@ -1251,6 +1461,382 @@ rm -rf "$KV_ROOT"
 # and validator report through printf+return instead.
 DIE_HITS="$(grep -noE '\bdie[[:space:]]*\(' "$SCRIPT" || true)"
 assert_eq "the doctor defines no die()" "$DIE_HITS" ""
+
+
+# Task 7: the TOOLKIT_ finding domain -- comparisons A, B and C over an
+# optional install receipt.
+
+# --- Preconditions ----------------------------------------------------------
+
+setup_fixture
+run_doctor audit
+assert_contains "no receipt is informational" "$LAST_OUT" "TOOLKIT_NOT_PROVISIONED"
+assert_not_contains "no receipt is a normal state, not an error" "$LAST_OUT" "ERROR"
+assert_not_contains "no receipt produces no probe advice" "$LAST_OUT" "TOOLKIT_INSTALLED_NOT_PROBED"
+teardown_fixture
+
+setup_fixture
+printf 'garbage\n' > "$TMP_ROOT/receipt.env"
+run_doctor audit
+assert_contains "an unreadable receipt is informational" "$LAST_OUT" "TOOLKIT_RECEIPT_UNREADABLE"
+assert_contains "the audit still completes" "$LAST_OUT" "PATH_"
+teardown_fixture
+
+setup_fixture
+cat > "$TMP_ROOT/receipt.env" <<'RECEIPT'
+script-version=0.1.0
+script-version=0.1.0
+RECEIPT
+run_doctor audit
+assert_contains "a duplicate receipt key reaches RECEIPT_UNREADABLE" "$LAST_OUT" "TOOLKIT_RECEIPT_UNREADABLE"
+assert_contains "the loader's own duplicate-key text survives" "$LAST_OUT" "duplicate key: script-version"
+teardown_fixture
+
+setup_fixture
+cat > "$TMP_ROOT/receipt.env" <<'RECEIPT'
+installed-at=2026-09-09T14:22:07Z
+source-commit=1fcbb1c9a4e2b7d0f3a18c65b2e94d7f0a1c3e58
+catalog-sha256=deadbeef
+skipped=
+overridden=
+RECEIPT
+run_doctor audit
+assert_contains "a receipt missing a required key names it first, in declared order" "$LAST_OUT" \
+  "missing required key: script-version"
+teardown_fixture
+
+setup_fixture
+cat > "$TMP_ROOT/receipt.env" <<'RECEIPT'
+script-version=0.1.0
+installed-at=2026-09-09T14:22:07Z
+source-commit=1fcbb1c9a4e2b7d0f3a18c65b2e94d7f0a1c3e58
+catalog-sha256=deadbeef
+skipped=
+overridden=
+RECEIPT
+run_doctor audit
+assert_contains "a receipt with no requested.* key is unreadable" "$LAST_OUT" "TOOLKIT_RECEIPT_UNREADABLE"
+teardown_fixture
+
+setup_fixture
+write_test_catalog "$TMP_ROOT/catalog.env"
+cat > "$TMP_ROOT/receipt.env" <<'RECEIPT'
+script-version=0.1.0
+installed-at=2026-09-09T14:22:07Z
+source-commit=1fcbb1c9a4e2b7d0f3a18c65b2e94d7f0a1c3e58
+catalog-sha256=deadbeef
+skipped=
+overridden=
+requested.java-17=temurin-17
+requested.karpathy-sha256=abc123
+RECEIPT
+run_doctor audit
+assert_contains "requested.karpathy-sha256 is rejected" "$LAST_OUT" "TOOLKIT_RECEIPT_UNREADABLE"
+assert_contains "the diagnostic names the forbidden key" "$LAST_OUT" "requested.karpathy-sha256"
+teardown_fixture
+
+setup_fixture
+write_test_catalog "$TMP_ROOT/catalog.env"
+cat > "$TMP_ROOT/receipt.env" <<'RECEIPT'
+script-version=0.1.0
+installed-at=2026-09-09T14:22:07Z
+source-commit=1fcbb1c9a4e2b7d0f3a18c65b2e94d7f0a1c3e58
+catalog-sha256=deadbeef
+skipped=
+overridden=
+requested.not-a-catalog-key=1
+RECEIPT
+run_doctor audit
+assert_contains "an unknown requested.* suffix is rejected (catalog available)" "$LAST_OUT" "TOOLKIT_RECEIPT_UNREADABLE"
+teardown_fixture
+
+# No catalog: C is skipped, A still runs (it needs the mise config, not the
+# catalog), and a valid receipt is still accepted (predicates 2/4/5 are
+# skipped without a catalog, exactly like validate_kv's own membership check).
+setup_fixture
+write_test_mise_config "$TMP_ROOT/mise-toolchain.toml"
+write_valid_receipt "$TMP_ROOT/receipt.env"
+run_doctor audit
+assert_contains "no catalog is informational" "$LAST_OUT" "TOOLKIT_CATALOG_UNAVAILABLE"
+assert_contains "A still runs without a catalog" "$LAST_OUT" "TOOLKIT_CONFIG_OK"
+assert_not_contains "C does not run without a catalog" "$LAST_OUT" "TOOLKIT_PINS_CURRENT"
+assert_not_contains "no catalog is not a receipt validation failure" "$LAST_OUT" "TOOLKIT_RECEIPT_UNREADABLE"
+teardown_fixture
+
+setup_fixture
+setup_toolkit_baseline
+run_doctor audit
+assert_contains "a readable receipt advises --probe" "$LAST_OUT" "TOOLKIT_INSTALLED_NOT_PROBED"
+teardown_fixture
+
+# --- Comparison A: requested-configuration drift -----------------------------
+
+setup_fixture
+setup_toolkit_baseline
+run_doctor audit
+assert_contains "agreement reports TOOLKIT_CONFIG_OK" "$LAST_OUT" "TOOLKIT_CONFIG_OK"
+assert_not_contains "agreement reports no drift" "$LAST_OUT" "TOOLKIT_CONFIG_DRIFT"
+teardown_fixture
+
+setup_fixture
+setup_toolkit_baseline
+sed -i 's/^node = "24"$/node = "22"/' "$TMP_ROOT/mise-toolchain.toml"
+run_doctor audit
+assert_contains "a changed node in the global config is drift" "$LAST_OUT" "TOOLKIT_CONFIG_DRIFT"
+assert_contains "the drift finding names both values" "$LAST_OUT" "Requested 24 but the mise configuration has 22."
+teardown_fixture
+
+setup_fixture
+setup_toolkit_baseline
+sed -i 's/^java = \["temurin-17", "temurin-21"\]$/java = ["temurin-21", "temurin-17"]/' "$TMP_ROOT/mise-toolchain.toml"
+run_doctor audit
+assert_contains "a reordered java array drifts on java-17" "$LAST_OUT" \
+  "Requested temurin-17 but the mise configuration has temurin-21."
+assert_contains "a reordered java array drifts on java-21" "$LAST_OUT" \
+  "Requested temurin-21 but the mise configuration has temurin-17."
+teardown_fixture
+
+setup_fixture
+setup_toolkit_baseline
+sed -i '/^shellcheck = /d' "$TMP_ROOT/mise-toolchain.toml"
+run_doctor audit
+assert_contains "a config missing a requested key is reported" "$LAST_OUT" "TOOLKIT_CONFIG_MISSING"
+teardown_fixture
+
+setup_fixture
+setup_toolkit_baseline
+run_doctor audit
+assert_not_contains "openspec is outside the twelve and never reports CONFIG_MISSING" "$LAST_OUT" \
+  "openspec is absent from the mise configuration"
+teardown_fixture
+
+setup_fixture
+setup_toolkit_baseline
+sed -i 's/^overridden=$/overridden=node/' "$TMP_ROOT/receipt.env"
+sed -i 's/^node = "24"$/node = "22"/' "$TMP_ROOT/mise-toolchain.toml"
+run_doctor audit
+assert_contains "an overridden component still participates in A" "$LAST_OUT" \
+  "Requested 24 but the mise configuration has 22."
+teardown_fixture
+
+# The case that proves A reads the global file: a project-local mise.toml,
+# sitting in the working directory the doctor is invoked from, must never be
+# read -- WTD_MISE_TOOLCHAIN_CONFIG names the global file regardless of cwd.
+setup_fixture
+setup_toolkit_baseline
+mkdir -p "$TMP_ROOT/project"
+cat > "$TMP_ROOT/project/mise.toml" <<'TOML'
+[tools]
+node = "18"
+TOML
+TOOLKIT_PREV_PWD="$PWD"
+cd "$TMP_ROOT/project"
+run_doctor audit
+cd "$TOOLKIT_PREV_PWD"
+assert_contains "a project-local mise config still reports agreement" "$LAST_OUT" "TOOLKIT_CONFIG_OK"
+assert_not_contains "a project-local mise config produces no A finding" "$LAST_OUT" "TOOLKIT_CONFIG_DRIFT"
+teardown_fixture
+
+# --- Comparison B: installed-machine drift, --probe only --------------------
+
+setup_fixture
+setup_toolkit_baseline
+MISE_LOG="$TMP_ROOT/mise.log"; : > "$MISE_LOG"
+OPENSPEC_LOG="$TMP_ROOT/openspec.log"; : > "$OPENSPEC_LOG"
+write_baseline_mise_stub "$TMP_ROOT/fake-mise" "$MISE_LOG"
+write_baseline_openspec_stub "$TMP_ROOT/fake-openspec" "$OPENSPEC_LOG"
+write_passthrough_timeout_stub "$TMP_ROOT/fake-timeout"
+WTD_TEST_MISE_BIN="$TMP_ROOT/fake-mise" WTD_TEST_OPENSPEC_BIN="$TMP_ROOT/fake-openspec" \
+  WTD_TEST_TIMEOUT_BIN="$TMP_ROOT/fake-timeout" run_doctor audit
+# The pre-existing audit_mise check (unrelated to comparison B) also uses the
+# WTD_MISE_BIN seam and logs one "ls --current --no-header" line regardless
+# of --probe; comparison B's own invocations are the "exec ..." lines, so
+# their absence is what "plain audit invokes no probe stub" actually means.
+assert_not_contains "plain audit invokes no comparison-B mise probe" "$(cat "$MISE_LOG")" "exec "
+assert_eq "plain audit invokes no openspec probe stub" "$(cat "$OPENSPEC_LOG")" ""
+assert_not_contains "plain audit reports no comparison-B findings" "$LAST_OUT" "TOOLKIT_INSTALLED_OK"
+teardown_fixture
+
+setup_fixture
+setup_toolkit_baseline
+MISE_LOG="$TMP_ROOT/mise.log"; : > "$MISE_LOG"
+OPENSPEC_LOG="$TMP_ROOT/openspec.log"; : > "$OPENSPEC_LOG"
+write_baseline_mise_stub "$TMP_ROOT/fake-mise" "$MISE_LOG"
+write_baseline_openspec_stub "$TMP_ROOT/fake-openspec" "$OPENSPEC_LOG"
+write_passthrough_timeout_stub "$TMP_ROOT/fake-timeout"
+WTD_TEST_MISE_BIN="$TMP_ROOT/fake-mise" WTD_TEST_OPENSPEC_BIN="$TMP_ROOT/fake-openspec" \
+  WTD_TEST_TIMEOUT_BIN="$TMP_ROOT/fake-timeout" run_doctor audit --probe
+if [[ -s "$MISE_LOG" ]]; then pass "--probe invokes the mise probe stub (log non-empty)"
+else fail "--probe invokes the mise probe stub (log non-empty)" "log was empty"; fi
+if [[ -s "$OPENSPEC_LOG" ]]; then pass "--probe invokes the openspec probe stub (log non-empty)"
+else fail "--probe invokes the openspec probe stub (log non-empty)" "log was empty"; fi
+assert_contains "full agreement reports TOOLKIT_INSTALLED_OK" "$LAST_OUT" "TOOLKIT_INSTALLED_OK"
+assert_not_contains "full agreement reports no drift" "$LAST_OUT" "TOOLKIT_DRIFT_INSTALLED"
+assert_contains "a latest-pinned component (uv) is still probed" "$(cat "$MISE_LOG")" "exec -- uv --version"
+teardown_fixture
+
+setup_fixture
+setup_toolkit_baseline
+run_doctor audit
+assert_contains "no receipt/probe advice becomes probe advice once readable" "$LAST_OUT" "TOOLKIT_INSTALLED_NOT_PROBED"
+teardown_fixture
+
+setup_fixture
+setup_toolkit_baseline
+receipt_skip_all_except "$TMP_ROOT/receipt.env" node
+cat > "$TMP_ROOT/fake-mise" <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+  "exec -- node --version") printf 'v22.0.0\n' ;;
+  *) exit 1 ;;
+esac
+STUB
+chmod +x "$TMP_ROOT/fake-mise"
+write_passthrough_timeout_stub "$TMP_ROOT/fake-timeout"
+WTD_TEST_MISE_BIN="$TMP_ROOT/fake-mise" WTD_TEST_OPENSPEC_BIN="" \
+  WTD_TEST_TIMEOUT_BIN="$TMP_ROOT/fake-timeout" run_doctor audit --probe
+assert_contains "a changed probe result is drift" "$LAST_OUT" "TOOLKIT_DRIFT_INSTALLED"
+assert_contains "the drift finding names both values" "$LAST_OUT" "Installed 24.8.1 but the machine now reports 22.0.0."
+teardown_fixture
+
+setup_fixture
+setup_toolkit_baseline
+receipt_skip_all_except "$TMP_ROOT/receipt.env" node
+write_baseline_mise_stub "$TMP_ROOT/fake-mise" "$TMP_ROOT/mise.log"
+write_timeout_stub_always_times_out "$TMP_ROOT/fake-timeout"
+WTD_TEST_MISE_BIN="$TMP_ROOT/fake-mise" WTD_TEST_OPENSPEC_BIN="" \
+  WTD_TEST_TIMEOUT_BIN="$TMP_ROOT/fake-timeout" run_doctor audit --probe
+assert_contains "a timeout is reported, not a failure" "$LAST_OUT" "TOOLKIT_PROBE_TIMEOUT"
+assert_contains "a timeout does not abort the audit" "$LAST_OUT" "PATH_"
+assert_not_contains "a timeout is never FAIL" "$LAST_OUT" "FAIL  TOOLKIT_"
+teardown_fixture
+
+setup_fixture
+setup_toolkit_baseline
+receipt_skip_all_except "$TMP_ROOT/receipt.env" java-17 pyyaml
+cat > "$TMP_ROOT/fake-mise" <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+  "exec java@temurin-17"*) exit 1 ;;
+  "exec -- python -c"*) printf '6.0.2\n' ;;
+  *) exit 1 ;;
+esac
+STUB
+chmod +x "$TMP_ROOT/fake-mise"
+write_passthrough_timeout_stub "$TMP_ROOT/fake-timeout"
+WTD_TEST_MISE_BIN="$TMP_ROOT/fake-mise" WTD_TEST_OPENSPEC_BIN="" \
+  WTD_TEST_TIMEOUT_BIN="$TMP_ROOT/fake-timeout" run_doctor audit --probe
+assert_contains "an earlier failing probe is reported" "$LAST_OUT" "TOOLKIT_PROBE_UNAVAILABLE"
+assert_contains "a later probe still runs and agrees" "$LAST_OUT" "TOOLKIT_INSTALLED_OK"
+teardown_fixture
+
+setup_fixture
+setup_toolkit_baseline
+# node is deliberately excluded from "keep" -- it stays in skipped= -- while
+# python is kept, so one run proves both halves: the skipped component's
+# probe never fires, and a non-skipped component in the same run still does.
+receipt_skip_all_except "$TMP_ROOT/receipt.env" python
+NODE_LOG="$TMP_ROOT/mise.log"; : > "$NODE_LOG"
+write_baseline_mise_stub "$TMP_ROOT/fake-mise" "$NODE_LOG"
+write_passthrough_timeout_stub "$TMP_ROOT/fake-timeout"
+WTD_TEST_MISE_BIN="$TMP_ROOT/fake-mise" WTD_TEST_OPENSPEC_BIN="" \
+  WTD_TEST_TIMEOUT_BIN="$TMP_ROOT/fake-timeout" run_doctor audit --probe
+assert_not_contains "a skipped= component is never probed" "$(cat "$NODE_LOG")" "exec -- node --version"
+assert_contains "a non-skipped component in the same run is still probed" "$(cat "$NODE_LOG")" "exec -- python --version"
+teardown_fixture
+
+setup_fixture
+write_test_catalog "$TMP_ROOT/catalog.env"
+MISE_LOG="$TMP_ROOT/mise.log"; : > "$MISE_LOG"
+OPENSPEC_LOG="$TMP_ROOT/openspec.log"; : > "$OPENSPEC_LOG"
+write_baseline_mise_stub "$TMP_ROOT/fake-mise" "$MISE_LOG"
+write_baseline_openspec_stub "$TMP_ROOT/fake-openspec" "$OPENSPEC_LOG"
+write_passthrough_timeout_stub "$TMP_ROOT/fake-timeout"
+WTD_TEST_MISE_BIN="$TMP_ROOT/fake-mise" WTD_TEST_OPENSPEC_BIN="$TMP_ROOT/fake-openspec" \
+  WTD_TEST_TIMEOUT_BIN="$TMP_ROOT/fake-timeout" run_doctor audit --probe
+assert_contains "no receipt is still informational under --probe" "$LAST_OUT" "TOOLKIT_NOT_PROVISIONED"
+# As above: the pre-existing audit_mise check logs its own unrelated
+# "ls --current --no-header" line regardless of the receipt; comparison B's
+# own invocations are the "exec ..." lines.
+assert_not_contains "no receipt invokes no comparison-B mise probe" "$(cat "$MISE_LOG")" "exec "
+assert_eq "no receipt invokes no openspec probe stub" "$(cat "$OPENSPEC_LOG")" ""
+teardown_fixture
+
+setup_fixture
+setup_toolkit_baseline
+WTD_TEST_TIMEOUT_BIN="" run_doctor audit --probe
+assert_contains "no resolvable timeout means B does not run" "$LAST_OUT" "TOOLKIT_PROBE_UNAVAILABLE"
+assert_not_contains "no resolvable timeout reports no drift" "$LAST_OUT" "TOOLKIT_DRIFT_INSTALLED"
+assert_not_contains "no resolvable timeout is never FAIL" "$LAST_OUT" "FAIL  TOOLKIT_"
+teardown_fixture
+
+setup_fixture
+setup_toolkit_baseline
+write_baseline_openspec_stub "$TMP_ROOT/fake-openspec" "$TMP_ROOT/openspec.log"
+write_passthrough_timeout_stub "$TMP_ROOT/fake-timeout"
+WTD_TEST_MISE_BIN="" WTD_TEST_OPENSPEC_BIN="$TMP_ROOT/fake-openspec" \
+  WTD_TEST_TIMEOUT_BIN="$TMP_ROOT/fake-timeout" run_doctor audit --probe
+assert_eq "no resolvable mise reports exactly one TOOLKIT_PROBE_UNAVAILABLE for mise" \
+  "$(printf '%s\n' "$LAST_OUT" | grep -c 'TOOLKIT_PROBE_UNAVAILABLE *mise')" "1"
+if [[ -s "$TMP_ROOT/openspec.log" ]]; then pass "the openspec probe still runs without mise"
+else fail "the openspec probe still runs without mise" "log was empty"; fi
+teardown_fixture
+
+# --- Comparison C: catalog staleness ----------------------------------------
+
+setup_fixture
+setup_toolkit_baseline
+sed -i 's/^node=24$/node=26/' "$TMP_ROOT/catalog.env"
+run_doctor audit
+assert_contains "a catalog ahead of the receipt is a stale pin" "$LAST_OUT" "TOOLKIT_STALE_PIN"
+assert_contains "the stale pin names both values" "$LAST_OUT" "Requested 24 but the catalog now pins 26."
+teardown_fixture
+
+setup_fixture
+setup_toolkit_baseline
+sed -i 's/^node=24$/node=26/' "$TMP_ROOT/catalog.env"
+sed -i 's/^overridden=$/overridden=node/' "$TMP_ROOT/receipt.env"
+run_doctor audit
+assert_not_contains "an overridden stale pin produces no finding" "$LAST_OUT" "TOOLKIT_STALE_PIN"
+teardown_fixture
+
+setup_fixture
+setup_toolkit_baseline
+sed -i 's/^node=24$/node=26/' "$TMP_ROOT/catalog.env"
+sed -i 's/^skipped=$/skipped=node/' "$TMP_ROOT/receipt.env"
+run_doctor audit
+assert_not_contains "a skipped stale pin produces no finding" "$LAST_OUT" "TOOLKIT_STALE_PIN"
+teardown_fixture
+
+setup_fixture
+setup_toolkit_baseline
+run_doctor audit
+assert_contains "latest components are grouped as not comparable" "$LAST_OUT" "TOOLKIT_NOT_COMPARABLE"
+assert_contains "the not-comparable finding names uv" "$LAST_OUT" "uv (latest)"
+assert_eq "a latest component is never a stale pin" \
+  "$(printf '%s\n' "$LAST_OUT" | grep -c 'TOOLKIT_STALE_PIN *uv' || true)" "0"
+teardown_fixture
+
+setup_fixture
+setup_toolkit_baseline
+printf 'brand-new-tool=1\n' >> "$TMP_ROOT/catalog.env"
+run_doctor audit
+assert_not_contains "a catalog key the receipt predates produces no finding" "$LAST_OUT" "brand-new-tool"
+teardown_fixture
+
+# --- Severity: no TOOLKIT_ finding is ever FAIL ------------------------------
+
+setup_fixture
+setup_toolkit_baseline
+run_doctor audit
+assert_not_contains "toolkit findings are never FAIL (plain audit)" "$LAST_OUT" "FAIL  TOOLKIT_"
+teardown_fixture
+
+setup_fixture
+setup_toolkit_baseline
+WTD_TEST_OPENSPEC_BIN="" WTD_TEST_TIMEOUT_BIN="" run_doctor audit --probe
+assert_not_contains "toolkit findings are never FAIL (--probe)" "$LAST_OUT" "FAIL  TOOLKIT_"
+teardown_fixture
 
 
 printf '\n%d passed, %d failed\n' "$PASS_COUNT" "$FAIL_COUNT"

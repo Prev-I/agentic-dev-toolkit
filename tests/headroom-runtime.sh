@@ -56,8 +56,8 @@ if [[ "$0" == */readlink && ( "$1" == "-f" || "$1" == "-m" ) ]]; then
 fi
 printf '%s\n' '---' "$0" "$@" >> "$HRT_COMMAND_LOG"
 case "${0##*/}:$*" in
-  uv:'tool install '*) printf '%s\n' '---' "$0" "$@" >> "$HRT_MUTATION_LOG" ;;
-  headroom:'install apply '*) printf '%s\n' '---' "$0" "$@" >> "$HRT_MUTATION_LOG" ;;
+  uv:'tool install '*|uv:'tool uninstall '*) printf '%s\n' '---' "$0" "$@" >> "$HRT_MUTATION_LOG" ;;
+  headroom:'install apply '*|headroom:'install remove '*) printf '%s\n' '---' "$0" "$@" >> "$HRT_MUTATION_LOG" ;;
   uname:*) printf '%s\n' Linux ;;
 esac
 STUB
@@ -91,7 +91,7 @@ new_case() {
     HRT_FIX_SERVICE_ACTIVE HRT_FIX_SERVICE_ENABLED HRT_FIX_SS_OUTPUT HRT_FIX_SS_OUTPUT_AFTER_APPLY HRT_FIX_SS_STATUS \
     HRT_FIX_STAT_STATUS HRT_FIX_TOOL_LINK_TARGET HRT_FIX_UV_INSTALL_NO_TOOL \
     HRT_FIX_UV_INSTALL_PATH_TOOL HRT_FIX_UV_PATH_TOOL_BIN HRT_FIX_CURL_RESPONSES_FILE \
-    HRT_FIX_SLEEP_UPTIME
+    HRT_FIX_SLEEP_UPTIME HRT_FIX_REMOVE_LEAVES_LISTENER HRT_FIX_REMOVE_LEAVES_ARTIFACTS
 
   install_stubs
   export HRT_UV_BIN="$CASE_DIR/bin/uv"
@@ -248,6 +248,15 @@ new_conforming_case() {
     cat <<'STUB'
 if [[ "$1" == "--version" ]]; then printf 'headroom %s\n' "$HRT_FIX_HEADROOM_VERSION"; exit 0; fi
 if [[ "$1 $2" == "plugins list" ]]; then printf '%s\n' "${HRT_FIX_HEADROOM_PLUGINS:-}"; exit "${HRT_FIX_HEADROOM_PLUGINS_STATUS:-0}"; fi
+if [[ "$1 $2" == "install remove" ]]; then
+  printf '%s\n' '---' "$0" "$@" >> "$HRT_MUTATION_LOG"
+  [[ -n "${HRT_FIX_REMOVE_LEAVES_ARTIFACTS:-}" ]] || {
+    /bin/rm -f "$HRT_SYSTEMD_USER_DIR/headroom-default.service"
+    /bin/rm -rf "$HRT_HEADROOM_DEPLOY_ROOT/default"
+  }
+  : > "$HRT_HOME/remove-applied"
+  exit 0
+fi
 exit 0
 STUB
   } > "$HRT_HEADROOM_BIN"
@@ -287,6 +296,9 @@ STUB
     printf '#!%s\n' "$BASH_BIN"
     cat <<'STUB'
 [[ "${HRT_FIX_SS_STATUS:-0}" == 0 ]] || exit "$HRT_FIX_SS_STATUS"
+if [[ -f "$HRT_HOME/remove-applied" && -z "${HRT_FIX_REMOVE_LEAVES_LISTENER:-}" ]]; then
+  exit 0
+fi
 printf '%s\n' "$HRT_FIX_SS_OUTPUT"
 STUB
   } > "$HRT_SS_BIN"
@@ -975,6 +987,14 @@ case "$1 $2" in
     printf '%s\n' '{"profile":"default","targets":[],"mutations":[],"memory_enabled":false,"telemetry_enabled":false,"base_env":{"HEADROOM_BEACON":"off","HEADROOM_UPDATE_CHECK":"off","HEADROOM_TELEMETRY":"off"}}' > "$HRT_HEADROOM_DEPLOY_ROOT/default/manifest.json"
     printf '%s\n' '[Unit]' > "$HRT_SYSTEMD_USER_DIR/headroom-default.service"
     : > "$HRT_HOME/service-applied"
+    ;;
+  'install remove')
+    printf '%s\n' '---' "$0" "$@" >> "$HRT_MUTATION_LOG"
+    [[ -n "${HRT_FIX_REMOVE_LEAVES_ARTIFACTS:-}" ]] || {
+      /bin/rm -f "$HRT_SYSTEMD_USER_DIR/headroom-default.service"
+      /bin/rm -rf "$HRT_HEADROOM_DEPLOY_ROOT/default"
+    }
+    [[ -z "${HRT_FIX_REMOVE_LEAVES_LISTENER:-}" ]] || : > "$HRT_HOME/service-applied"
     ;;
 esac
 STUB
@@ -1807,6 +1827,96 @@ test_install_deduplicates_and_renders_secondary_refusals() {
     "coupling must not suppress orphaned-deployment guidance"
 }
 
+test_remove_manifest_aware_behavior() {
+  new_conforming_case remove-recognized
+  run_cli remove
+  assert_equal "$CLI_STATUS" 0 "a recognized default deployment must be removable"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" "---
+$HRT_HEADROOM_BIN
+install
+remove
+--profile
+default" "default removal must delegate only the approved profile command"
+  [[ ! -e "$HRT_SYSTEMD_USER_DIR/headroom-default.service" && ! -e "$HRT_HEADROOM_DEPLOY_ROOT/default" ]] ||
+    fail "the removal stub must clear the managed deployment fixture"
+
+  new_case remove-absent
+  export HRT_FIX_SS_OUTPUT=''
+  run_cli remove
+  assert_equal "$CLI_STATUS" 0 "an absent deployment must be an idempotent removal"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "an absent deployment must not invoke Headroom"
+
+  new_conforming_case remove-tool-only
+  /bin/rm -f "$HRT_SYSTEMD_USER_DIR/headroom-default.service"
+  /bin/rm -rf "$HRT_HEADROOM_DEPLOY_ROOT/default"
+  export HRT_FIX_SS_OUTPUT=''
+  run_cli remove --uninstall-tool
+  assert_equal "$CLI_STATUS" 0 "an exact standalone tool must be removable"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" "---
+$HRT_UV_BIN
+tool
+uninstall
+headroom-ai" "tool-only removal must not invoke Headroom"
+
+  new_conforming_case remove-corrupt-manifest
+  printf '%s\n' not-json > "$HRT_HEADROOM_DEPLOY_ROOT/default/manifest.json"
+  run_cli remove
+  assert_equal "$CLI_STATUS" 2 "a corrupt manifest must block automated removal"
+  assert_contains "$CLI_OUTPUT" 'docs/headroom-runtime.md#rollback' \
+    "a corrupt manifest must name the manual runbook fallback"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "a corrupt manifest must block every mutation"
+
+  new_conforming_case remove-conflicting-profile
+  printf '%s\n' '{"profile":"other","targets":[],"mutations":[],"memory_enabled":false,"telemetry_enabled":false,"base_env":{"HEADROOM_BEACON":"off","HEADROOM_UPDATE_CHECK":"off","HEADROOM_TELEMETRY":"off"}}' > "$HRT_HEADROOM_DEPLOY_ROOT/default/manifest.json"
+  run_cli remove
+  assert_equal "$CLI_STATUS" 1 "a conflicting profile must refuse removal"
+  assert_contains "$CLI_OUTPUT" HEADROOM_PROFILE_MISMATCH "a conflicting profile must retain its finding"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "a conflicting profile must block every mutation"
+}
+
+test_remove_isolated_and_verified() {
+  new_conforming_case remove-opencode-warning
+  printf '%s\n' '{"plugin":"headroom-opencode"}' > "$HRT_OPENCODE_CONFIG_DIR/opencode.json"
+  run_cli remove
+  assert_equal "$CLI_STATUS" 0 "detected OpenCode coupling must not block runtime removal"
+  assert_contains "$CLI_OUTPUT" 'WARN: HEADROOM_OPENCODE_CONFIG_PRESENT' \
+    "detected OpenCode coupling must be reported as a warning during removal"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" "---
+$HRT_HEADROOM_BIN
+install
+remove
+--profile
+default" "removal must not repair OpenCode integration"
+
+  new_conforming_case remove-dry-run
+  run_cli remove --dry-run --uninstall-tool
+  assert_equal "$CLI_STATUS" 0 "a recognized removal dry-run must succeed"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "removal dry-run must not mutate"
+  assert_contains "$CLI_OUTPUT" 'install remove --profile default' "dry-run must print the profile removal"
+  assert_contains "$CLI_OUTPUT" 'tool uninstall headroom-ai' "dry-run must print tool uninstall when requested"
+  [[ -f "$HRT_SYSTEMD_USER_DIR/headroom-default.service" && -d "$HRT_HEADROOM_DEPLOY_ROOT/default" ]] ||
+    fail "removal dry-run must preserve managed deployment fixtures"
+
+  new_conforming_case remove-ambiguous-listener
+  export HRT_FIX_REMOVE_LEAVES_LISTENER=1
+  export HRT_FIX_SS_OUTPUT='LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:*'
+  run_cli remove
+  assert_equal "$CLI_STATUS" 2 "an unattributable remaining listener must be an inspection error"
+  assert_contains "$CLI_OUTPUT" HEADROOM_LISTENER_OWNER_AMBIGUOUS \
+    "an unattributable remaining listener must retain its finding"
+
+  new_conforming_case remove-boundaries
+  mkdir -p "$CASE_DIR/gateway" "$CASE_DIR/shell"
+  printf '%s\n' unchanged > "$CASE_DIR/gateway/config"
+  printf '%s\n' unchanged > "$CASE_DIR/shell/.bashrc"
+  run_cli remove
+  assert_equal "$CLI_STATUS" 0 "a boundary fixture removal must succeed"
+  assert_equal "$(<"$CASE_DIR/gateway/config")" unchanged "removal must not write Gateway fixtures"
+  assert_equal "$(<"$CASE_DIR/shell/.bashrc")" unchanged "removal must not write shell fixtures"
+  [[ ! -e "$HRT_OPENCODE_CONFIG_DIR/opencode.json" ]] || fail "removal must not write OpenCode fixtures"
+  [[ ! -e "$CASE_DIR/removal-artifact" ]] || fail "the toolkit must not write a removal artifact"
+}
+
 JQ_BIN="$(command -v jq || true)"
 [[ -n "$JQ_BIN" ]] || fail "jq is required for Headroom runtime tests"
 JQ_BIN="$(readlink -f "$JQ_BIN")"
@@ -1858,6 +1968,8 @@ test_install_unions_classification_and_preflight_evidence
 test_readiness_finalization
 test_readiness_response_queue_exhaustion_is_visible
 test_install_deduplicates_and_renders_secondary_refusals
+test_remove_manifest_aware_behavior
+test_remove_isolated_and_verified
 test_conforming_runtime_passes
 test_json_audit_has_stable_shape
 test_audit_policy_and_error_findings

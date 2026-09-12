@@ -747,6 +747,153 @@ classify_install_state() {
   fi
 }
 
+classify_removal_deployment() {
+  local code
+
+  F_SEVERITY=() F_CODE=() F_SUBJECT=() F_MESSAGE=()
+  if [[ -e "$MANIFEST_PATH" || -e "$SYSTEMD_USER_DIR/headroom-default.service" ]]; then
+    check_manifest
+    case "$(status_for_findings)" in
+      ERROR) DEPLOYMENT_STATE=AMBIGUOUS ;;
+      FAIL)
+        for code in "${F_CODE[@]}"; do
+          if [[ "$code" == HEADROOM_PROFILE_MISMATCH ]]; then
+            DEPLOYMENT_STATE=CONFLICT
+            return
+          fi
+        done
+        DEPLOYMENT_STATE=RECOGNIZED
+        ;;
+      PASS|WARN) DEPLOYMENT_STATE=RECOGNIZED ;;
+    esac
+    return
+  fi
+  parse_listener
+  case "$LISTENER_STATE" in
+    ABSENT) DEPLOYMENT_STATE=ABSENT ;;
+    CONFLICT) DEPLOYMENT_STATE=CONFLICT ;;
+    AMBIGUOUS) DEPLOYMENT_STATE=AMBIGUOUS ;;
+    HEADROOM|HEADROOM_UNSAFE)
+      add_finding ERROR HEADROOM_UNMANAGED_LISTENER "port ${HEADROOM_PORT}" \
+        "A Headroom-owned listener exists without a managed deployment."
+      DEPLOYMENT_STATE=AMBIGUOUS
+      ;;
+  esac
+}
+
+demote_opencode_findings() {
+  local index
+
+  for index in "${!F_CODE[@]}"; do
+    [[ "${F_CODE[$index]}" == HEADROOM_OPENCODE_* ]] || continue
+    F_SEVERITY[index]=WARN
+  done
+}
+
+report_removal_opencode_warnings() {
+  F_SEVERITY=() F_CODE=() F_SUBJECT=() F_MESSAGE=()
+  check_opencode_config
+  check_opencode_environment
+  check_unit_independence
+  [[ -z "${HEADROOM_BIN:-}" ]] || check_opencode_package
+  demote_opencode_findings
+  deduplicate_findings
+  [[ ${#F_CODE[@]} -eq 0 ]] || render_human "$(status_for_findings)"
+  F_SEVERITY=() F_CODE=() F_SUBJECT=() F_MESSAGE=()
+}
+
+verify_removed() {
+  local status
+
+  F_SEVERITY=() F_CODE=() F_SUBJECT=() F_MESSAGE=()
+  [[ ! -e "$SYSTEMD_USER_DIR/headroom-default.service" ]] ||
+    add_finding FAIL HEADROOM_SERVICE_REMAINS headroom-default.service \
+      "Headroom service remains after removal."
+  [[ ! -e "$HEADROOM_DEPLOY_ROOT/$HEADROOM_PROFILE" ]] ||
+    add_finding FAIL HEADROOM_PROFILE_REMAINS "$HEADROOM_DEPLOY_ROOT/$HEADROOM_PROFILE" \
+      "Headroom profile remains after removal."
+  parse_listener
+  case "$LISTENER_STATE" in
+    HEADROOM|HEADROOM_UNSAFE)
+      add_finding FAIL HEADROOM_LISTENER_REMAINS "port ${HEADROOM_PORT}" \
+        "Headroom port remains occupied after removal."
+      ;;
+  esac
+  status="$(status_for_findings)"
+  [[ "$status" == PASS ]] || render_human "$status"
+  case "$status" in PASS|WARN) return 0 ;; FAIL) return 1 ;; ERROR) return 2 ;; esac
+}
+
+run_remove() {
+  local status
+
+  resolve_executable JQ_BIN HRT_JQ_BIN jq
+  resolve_executable SYSTEMCTL_BIN HRT_SYSTEMCTL_BIN systemctl
+  resolve_executable SS_BIN HRT_SS_BIN ss
+  # Resolve the uv destination before headroom_tool_path can classify its ownership.
+  resolve_headroom_tool_bin_dir
+  classify_removal_deployment
+  status="$(status_for_findings)"
+  case "$DEPLOYMENT_STATE" in
+    AMBIGUOUS)
+      render_human "$status"
+      printf '%s\n' 'ERROR: automated removal is unsafe; see docs/headroom-runtime.md#rollback for the manual fallback.' >&2
+      return 2
+      ;;
+    CONFLICT)
+      render_human "$status"
+      return 1
+      ;;
+    ABSENT)
+      if (( UNINSTALL_TOOL == 0 )); then
+        return 0
+      fi
+      headroom_package_state
+      case "$PACKAGE_STATE" in
+        ABSENT) return 0 ;;
+        EXACT)
+          resolve_executable UV_BIN HRT_UV_BIN uv
+          run "$UV_BIN" tool uninstall headroom-ai
+          return 0
+          ;;
+        UNINSPECTABLE)
+          render_human "$(status_for_findings)"
+          return 2
+          ;;
+        WRONG_VERSION)
+          printf '%s\n' 'ERROR: Headroom tool is not the pinned version; automatic uninstall is refused.' >&2
+          return 1
+          ;;
+      esac
+      ;;
+  esac
+
+  headroom_package_state
+  case "$PACKAGE_STATE" in
+    EXACT) ;;
+    UNINSPECTABLE)
+      render_human "$(status_for_findings)"
+      return 2
+      ;;
+    ABSENT)
+      printf '%s\n' 'ERROR: Headroom deployment exists without the pinned runtime.' >&2
+      return 1
+      ;;
+    WRONG_VERSION)
+      printf '%s\n' 'ERROR: Headroom tool is not the pinned version; automatic removal is refused.' >&2
+      return 1
+      ;;
+  esac
+  report_removal_opencode_warnings
+  run "$HEADROOM_BIN" install remove --profile "$HEADROOM_PROFILE"
+  if (( UNINSTALL_TOOL )); then
+    resolve_executable UV_BIN HRT_UV_BIN uv
+    run "$UV_BIN" tool uninstall headroom-ai
+  fi
+  (( DRY_RUN )) && return 0
+  verify_removed
+}
+
 install_package() {
   run "$UV_BIN" tool install --python "$HEADROOM_PYTHON" "$HEADROOM_PACKAGE"
 }
@@ -1004,7 +1151,7 @@ main() {
       run_install
       ;;
     audit) run_audit ;;
-    remove) : "$UNINSTALL_TOOL" "$UPTIME_FILE" ;;
+    remove) run_remove ;;
     *) die_usage "unsupported command: $COMMAND" ;;
   esac
 }

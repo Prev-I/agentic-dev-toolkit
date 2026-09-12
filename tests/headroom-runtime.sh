@@ -88,9 +88,10 @@ new_case() {
     HRT_FIX_CURL_BODY HRT_FIX_CURL_STATUS HRT_FIX_EXEC_MAIN_STATUS \
     HRT_FIX_HEADROOM_PLUGINS HRT_FIX_HEADROOM_PLUGINS_STATUS HRT_FIX_HEADROOM_VERSION \
     HRT_FIX_MANIFEST_MODE HRT_FIX_OPENCODE_ACTIVE HRT_FIX_OPENCODE_PID \
-    HRT_FIX_SERVICE_ACTIVE HRT_FIX_SERVICE_ENABLED HRT_FIX_SS_OUTPUT HRT_FIX_SS_STATUS \
+    HRT_FIX_SERVICE_ACTIVE HRT_FIX_SERVICE_ENABLED HRT_FIX_SS_OUTPUT HRT_FIX_SS_OUTPUT_AFTER_APPLY HRT_FIX_SS_STATUS \
     HRT_FIX_STAT_STATUS HRT_FIX_TOOL_LINK_TARGET HRT_FIX_UV_INSTALL_NO_TOOL \
-    HRT_FIX_UV_INSTALL_PATH_TOOL HRT_FIX_UV_PATH_TOOL_BIN
+    HRT_FIX_UV_INSTALL_PATH_TOOL HRT_FIX_UV_PATH_TOOL_BIN HRT_FIX_CURL_RESPONSES_FILE \
+    HRT_FIX_SLEEP_UPTIME
 
   install_stubs
   export HRT_UV_BIN="$CASE_DIR/bin/uv"
@@ -251,6 +252,14 @@ STUB
   {
     printf '#!%s\n' "$BASH_BIN"
     cat <<'STUB'
+printf '%s\n' '---' "$0" "$@" >> "$HRT_COMMAND_LOG"
+if [[ -n "${HRT_FIX_CURL_RESPONSES_FILE:-}" ]]; then
+  mapfile -t responses < "$HRT_FIX_CURL_RESPONSES_FILE"
+  IFS=$'\t' read -r status body <<<"${responses[0]}"
+  printf '%s\n' "${responses[@]:1}" > "$HRT_FIX_CURL_RESPONSES_FILE"
+  printf '%s\n' "$body"
+  exit "$status"
+fi
 printf '%s\n' "$HRT_FIX_CURL_BODY"
 exit "${HRT_FIX_CURL_STATUS:-0}"
 STUB
@@ -950,7 +959,9 @@ STUB
 printf '%s\n' '---' "$0" "$@" >> "$HRT_COMMAND_LOG"
 printf '%s\n' 'Netid State Recv-Q Send-Q Local Address:Port Peer Address:Port Process'
 [[ "${HRT_FIX_SS_STATUS:-0}" == 0 ]] || exit "$HRT_FIX_SS_STATUS"
-if [[ -n "${HRT_FIX_SS_OUTPUT:-}" ]]; then
+if [[ -f "$HRT_HOME/service-applied" && -n "${HRT_FIX_SS_OUTPUT_AFTER_APPLY:-}" ]]; then
+  printf '%s\n' "$HRT_FIX_SS_OUTPUT_AFTER_APPLY"
+elif [[ -n "${HRT_FIX_SS_OUTPUT:-}" ]]; then
   printf '%s\n' "$HRT_FIX_SS_OUTPUT"
 elif [[ -f "$HRT_HOME/service-applied" ]]; then
   printf '%s\n' 'tcp LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("headroom",pid=42,fd=3))'
@@ -959,7 +970,18 @@ STUB
   } > "$HRT_SS_BIN"
   {
     printf '#!%s\n' "$BASH_BIN"
-    printf '%s\n' "printf '%s\\n' '{\"ready\":true,\"version\":\"0.37.0\"}'"
+    cat <<'STUB'
+printf '%s\n' '---' "$0" "$@" >> "$HRT_COMMAND_LOG"
+if [[ -n "${HRT_FIX_CURL_RESPONSES_FILE:-}" ]]; then
+  mapfile -t responses < "$HRT_FIX_CURL_RESPONSES_FILE"
+  IFS=$'\t' read -r status body <<<"${responses[0]}"
+  printf '%s\n' "${responses[@]:1}" > "$HRT_FIX_CURL_RESPONSES_FILE"
+  printf '%s\n' "$body"
+  exit "$status"
+fi
+printf '%s\n' "${HRT_FIX_CURL_BODY:-{\"ready\":true,\"version\":\"0.37.0\"}}"
+exit "${HRT_FIX_CURL_STATUS:-0}"
+STUB
   } > "$HRT_CURL_BIN"
   {
     printf '#!%s\n' "$BASH_BIN"
@@ -969,7 +991,7 @@ STUB
     printf '#!%s\n' "$BASH_BIN"
     cat <<'STUB'
 printf '%s\n' '---' "$0" "$@" >> "$HRT_COMMAND_LOG"
-printf '%s\n' '31.00 0.00' > "$HRT_UPTIME_FILE"
+printf '%s\n' "${HRT_FIX_SLEEP_UPTIME:-31.00} 0.00" > "$HRT_UPTIME_FILE"
 STUB
   } > "$HRT_SLEEP_BIN"
   chmod 0755 "$HRT_UNAME_BIN" "$HRT_SYSTEMCTL_BIN" "$headroom_template" \
@@ -1533,6 +1555,104 @@ test_install_unions_classification_and_preflight_evidence() {
   assert_equal "$(<"$HRT_MUTATION_LOG")" '' "a pure OpenCode coupling must block every mutation"
 }
 
+curl_request_count() {
+  local curl_path="$1"
+
+  rg -F --count -- "$curl_path" "$HRT_COMMAND_LOG"
+}
+
+test_readiness_finalization() {
+  # This fails if generic audit adds retry behavior or invokes a second readiness request.
+  new_conforming_case audit-one-readiness-request
+  run_cli audit
+  assert_equal "$CLI_STATUS" 0 "a conforming audit must pass"
+  assert_equal "$(curl_request_count "$HRT_CURL_BIN")" 1 \
+    "generic audit must make exactly one readiness request"
+
+  # These cases fail if installer readiness does not retain terminal probe findings.
+  new_installable_absent_case install-readiness-immediate-success
+  run_cli install
+  assert_equal "$CLI_STATUS" 0 "an immediately ready installation must succeed"
+  assert_equal "$(curl_request_count "$HRT_CURL_BIN")" 1 \
+    "an immediate ready result must not receive a redundant final request"
+
+  new_installable_absent_case install-readiness-retry-success
+  export HRT_FIX_SLEEP_UPTIME=1.00 HRT_FIX_CURL_RESPONSES_FILE="$CASE_DIR/readiness-responses"
+  printf '%s\n' $'22\t' $'0\t{"ready":true,"version":"0.37.0"}' > "$HRT_FIX_CURL_RESPONSES_FILE"
+  run_cli install
+  assert_equal "$CLI_STATUS" 0 "transient readiness failures must retry to success"
+  assert_equal "$(curl_request_count "$HRT_CURL_BIN")" 2 \
+    "installer retry must stop at the first successful readiness result"
+
+  new_installable_absent_case install-readiness-timeout
+  export HRT_FIX_CURL_RESPONSES_FILE="$CASE_DIR/readiness-responses"
+  printf '%s\n' $'22\t' > "$HRT_FIX_CURL_RESPONSES_FILE"
+  run_cli install
+  assert_equal "$CLI_STATUS" 1 "permanently not-ready install must fail"
+  assert_contains "$CLI_OUTPUT" HEADROOM_NOT_READY "permanent readiness failure must render its finding"
+  assert_equal "$(curl_request_count "$HRT_CURL_BIN")" 1 \
+    "installer must not request readiness after the monotonic deadline"
+
+  new_installable_absent_case install-readiness-malformed
+  export HRT_FIX_CURL_RESPONSES_FILE="$CASE_DIR/readiness-responses"
+  printf '%s\n' $'0\tnot-json' > "$HRT_FIX_CURL_RESPONSES_FILE"
+  run_cli install
+  assert_equal "$CLI_STATUS" 2 "malformed readiness JSON must be an inspection error"
+  assert_contains "$CLI_OUTPUT" HEADROOM_READINESS_INVALID "malformed readiness must retain its finding"
+  assert_equal "$(curl_request_count "$HRT_CURL_BIN")" 1 \
+    "malformed readiness must not be retried"
+
+  new_installable_absent_case install-readiness-wrong-version
+  export HRT_FIX_CURL_RESPONSES_FILE="$CASE_DIR/readiness-responses"
+  printf '%s\n' $'0\t{"ready":true,"version":"0.36.0"}' > "$HRT_FIX_CURL_RESPONSES_FILE"
+  run_cli install
+  assert_equal "$CLI_STATUS" 1 "wrong readiness version must fail installation"
+  assert_contains "$CLI_OUTPUT" HEADROOM_READINESS_VERSION_MISMATCH \
+    "wrong readiness version must retain its finding"
+  assert_equal "$(curl_request_count "$HRT_CURL_BIN")" 1 \
+    "wrong readiness version must not be retried"
+
+  new_installable_absent_case install-readiness-preserves-audit-failure
+  export HRT_FIX_SS_OUTPUT_AFTER_APPLY='tcp LISTEN 0 4096 0.0.0.0:8787 0.0.0.0:* users:(("headroom",pid=42,fd=3))'
+  run_cli install
+  assert_equal "$CLI_STATUS" 1 "an unrelated post-apply audit failure must fail installation"
+  assert_contains "$CLI_OUTPUT" HEADROOM_UNSAFE_BIND \
+    "post-apply audit failures must be preserved alongside readiness"
+}
+
+test_install_deduplicates_and_renders_secondary_refusals() {
+  new_conforming_case install-deduplicate-coupling
+  printf '%s\n' '0.00 0.00' > "$HRT_UPTIME_FILE"
+  printf '%s\n' '{"plugin":"headroom-opencode"}' > "$HRT_OPENCODE_CONFIG_DIR/opencode.json"
+  run_cli install
+  assert_equal "$CLI_STATUS" 1 "a pre-existing coupling must fail installation"
+  assert_equal "$(rg -F --count -- HEADROOM_OPENCODE_CONFIG_PRESENT <<<"$CLI_OUTPUT")" 1 \
+    "classification and preflight union must deduplicate identical findings"
+
+  new_conforming_case install-wrong-version-secondary-guidance
+  printf '%s\n' '0.00 0.00' > "$HRT_UPTIME_FILE"
+  export HRT_FIX_HEADROOM_VERSION=0.36.0
+  printf '%s\n' '{"plugin":"headroom-opencode"}' > "$HRT_OPENCODE_CONFIG_DIR/opencode.json"
+  run_cli install
+  assert_equal "$CLI_STATUS" 1 "wrong version with coupling must fail"
+  assert_contains "$CLI_OUTPUT" HEADROOM_OPENCODE_CONFIG_PRESENT \
+    "wrong-version refusal must retain secondary findings"
+  assert_contains "$CLI_OUTPUT" 'implicit upgrades are refused' \
+    "coupling must not suppress wrong-version guidance"
+
+  new_conforming_case install-orphaned-secondary-guidance
+  printf '%s\n' '0.00 0.00' > "$HRT_UPTIME_FILE"
+  rm "$HRT_HEADROOM_BIN"
+  unset HRT_HEADROOM_BIN
+  printf '%s\n' '{"plugin":"headroom-opencode"}' > "$HRT_OPENCODE_CONFIG_DIR/opencode.json"
+  run_cli install
+  assert_equal "$CLI_STATUS" 1 "an orphaned deployment with coupling must fail"
+  assert_contains "$CLI_OUTPUT" HEADROOM_OPENCODE_CONFIG_PRESENT \
+    "orphaned refusal must retain secondary findings"
+  assert_contains "$CLI_OUTPUT" 'deployment exists without the pinned runtime' \
+    "coupling must not suppress orphaned-deployment guidance"
+}
+
 JQ_BIN="$(command -v jq || true)"
 [[ -n "$JQ_BIN" ]] || fail "jq is required for Headroom runtime tests"
 JQ_BIN="$(readlink -f "$JQ_BIN")"
@@ -1581,6 +1701,8 @@ test_audit_listener_findings_are_distinct_and_ordered
 test_install_unmanaged_unsafe_headroom_listener_is_ambiguous
 test_audit_conforming_runtime_handles_ss_failure
 test_install_unions_classification_and_preflight_evidence
+test_readiness_finalization
+test_install_deduplicates_and_renders_secondary_refusals
 test_conforming_runtime_passes
 test_json_audit_has_stable_shape
 test_audit_policy_and_error_findings

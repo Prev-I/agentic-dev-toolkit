@@ -115,6 +115,24 @@ add_finding() {
   F_MESSAGE+=("$4")
 }
 
+deduplicate_findings() {
+  local index key
+  local -A seen=()
+  local -a finding_severity=() finding_code=() finding_subject=() finding_message=()
+
+  for index in "${!F_CODE[@]}"; do
+    key="${F_SEVERITY[$index]}"$'\034'"${F_CODE[$index]}"$'\034'"${F_SUBJECT[$index]}"$'\034'"${F_MESSAGE[$index]}"
+    [[ -z "${seen[$key]:-}" ]] || continue
+    seen[$key]=1
+    finding_severity+=("${F_SEVERITY[$index]}")
+    finding_code+=("${F_CODE[$index]}")
+    finding_subject+=("${F_SUBJECT[$index]}")
+    finding_message+=("${F_MESSAGE[$index]}")
+  done
+  F_SEVERITY=("${finding_severity[@]}") F_CODE=("${finding_code[@]}")
+  F_SUBJECT=("${finding_subject[@]}") F_MESSAGE=("${finding_message[@]}")
+}
+
 check_headroom_version() {
   local output
 
@@ -155,34 +173,59 @@ check_service_state() {
   fi
 }
 
-check_readiness() {
-  local body ready version kompress
+READINESS_RESULT=""
+READINESS_BODY=""
+READINESS_KOMPRESS_DEGRADED=0
+
+probe_readiness() {
+  local timeout="$1" ready version
   local subject="http://127.0.0.1:${HEADROOM_PORT}/readyz"
 
-  if ! body="$("$CURL_BIN" --silent --show-error --fail --connect-timeout 5 --max-time 5 "$subject")"; then
-    add_finding FAIL HEADROOM_NOT_READY "$subject" "Headroom readiness endpoint did not succeed."
+  READINESS_RESULT=TRANSPORT READINESS_BODY="" READINESS_KOMPRESS_DEGRADED=0
+  if ! READINESS_BODY="$("$CURL_BIN" --silent --show-error --fail --connect-timeout "$timeout" --max-time "$timeout" "$subject")"; then
     return
   fi
-  if ! "$JQ_BIN" -e . >/dev/null <<<"$body"; then
-    add_finding ERROR HEADROOM_READINESS_INVALID "$subject" \
-      "Headroom readiness response was not valid JSON."
+  if ! "$JQ_BIN" -e . >/dev/null <<<"$READINESS_BODY"; then
+    READINESS_RESULT=INVALID
     return
   fi
-  if ready="$("$JQ_BIN" -er '.ready' <<<"$body")" && [[ "$ready" == true ]]; then
-    if ! version="$("$JQ_BIN" -er '.version | strings | select(length > 0)' <<<"$body")"; then
-      add_finding ERROR HEADROOM_READINESS_INVALID "$subject" \
-        "Headroom readiness response has no usable version."
-    elif [[ "$version" != "$HEADROOM_VERSION" ]]; then
-      add_finding FAIL HEADROOM_READINESS_VERSION_MISMATCH "$subject" \
-        "Headroom readiness version does not match the pinned runtime."
-    fi
-    if kompress="$("$JQ_BIN" -er '.kompress.ready == false' <<<"$body")" && [[ "$kompress" == true ]]; then
-      add_finding WARN HEADROOM_KOMPRESS_OPTIONAL_DEGRADED "$subject" \
-        "Optional Kompress is degraded; the required runtime is ready."
-    fi
-  else
-    add_finding FAIL HEADROOM_NOT_READY "$subject" "Headroom readiness endpoint did not report ready."
+  if ! ready="$("$JQ_BIN" -er '.ready' <<<"$READINESS_BODY")" || [[ "$ready" != true ]]; then
+    READINESS_RESULT=NOT_READY
+    return
   fi
+  if ! version="$("$JQ_BIN" -er '.version | strings | select(length > 0)' <<<"$READINESS_BODY")"; then
+    READINESS_RESULT=INVALID
+    return
+  fi
+  if [[ "$version" != "$HEADROOM_VERSION" ]]; then
+    READINESS_RESULT=VERSION_MISMATCH
+    return
+  fi
+  if "$JQ_BIN" -e '.kompress.ready == false' >/dev/null <<<"$READINESS_BODY"; then
+    READINESS_KOMPRESS_DEGRADED=1
+  fi
+  READINESS_RESULT=READY
+}
+
+add_readiness_findings() {
+  local subject="http://127.0.0.1:${HEADROOM_PORT}/readyz"
+
+  case "$READINESS_RESULT" in
+    TRANSPORT) add_finding FAIL HEADROOM_NOT_READY "$subject" "Headroom readiness endpoint did not succeed." ;;
+    NOT_READY) add_finding FAIL HEADROOM_NOT_READY "$subject" "Headroom readiness endpoint did not report ready." ;;
+    INVALID) add_finding ERROR HEADROOM_READINESS_INVALID "$subject" "Headroom readiness response was not valid JSON with a usable version." ;;
+    VERSION_MISMATCH) add_finding FAIL HEADROOM_READINESS_VERSION_MISMATCH "$subject" "Headroom readiness version does not match the pinned runtime." ;;
+    READY)
+      (( READINESS_KOMPRESS_DEGRADED == 0 )) ||
+        add_finding WARN HEADROOM_KOMPRESS_OPTIONAL_DEGRADED "$subject" \
+          "Optional Kompress is degraded; the required runtime is ready."
+      ;;
+  esac
+}
+
+check_readiness() {
+  probe_readiness 5
+  add_readiness_findings
 }
 
 parse_listener() {
@@ -421,6 +464,7 @@ audit_runtime_without_readiness() {
 audit_runtime() {
   audit_runtime_without_readiness
   check_readiness
+  deduplicate_findings
 }
 
 status_for_findings() {
@@ -680,18 +724,18 @@ classify_install_state() {
   F_MESSAGE=("${package_message[@]}" "${deployment_message[@]}")
   if [[ "$(status_for_findings)" == ERROR ]]; then
     INSTALL_STATE=AMBIGUOUS
-  elif [[ "$DEPLOYMENT_STATE" == NONCONFORMING ]]; then
-    INSTALL_STATE=NONCONFORMING
   elif [[ "$DEPLOYMENT_STATE" == AMBIGUOUS ]]; then
     INSTALL_STATE=AMBIGUOUS
   elif [[ "$DEPLOYMENT_STATE" == CONFLICT ]]; then
     INSTALL_STATE=CONFLICT
   elif [[ "$PACKAGE_STATE" == UNINSPECTABLE ]]; then
     INSTALL_STATE=AMBIGUOUS
-  elif [[ "$PACKAGE_STATE" == WRONG_VERSION ]]; then
-    INSTALL_STATE=WRONG_VERSION
   elif [[ "$PACKAGE_STATE" == ABSENT && "$DEPLOYMENT_STATE" != ABSENT ]]; then
     INSTALL_STATE=ORPHANED_DEPLOYMENT
+  elif [[ "$PACKAGE_STATE" == WRONG_VERSION ]]; then
+    INSTALL_STATE=WRONG_VERSION
+  elif [[ "$DEPLOYMENT_STATE" == NONCONFORMING ]]; then
+    INSTALL_STATE=NONCONFORMING
   elif [[ "$PACKAGE_STATE" == EXACT && "$DEPLOYMENT_STATE" == STOPPED ]]; then
     INSTALL_STATE=STOPPED
   elif [[ "$PACKAGE_STATE" == EXACT && "$DEPLOYMENT_STATE" == CONFORMING ]]; then
@@ -727,31 +771,27 @@ uptime_centiseconds() {
   printf '%d\n' "$((10#${uptime%%.*} * 100 + 10#${fraction:0:2}))"
 }
 
-readiness_is_ready() {
-  local timeout="$1" body
-  local subject="http://127.0.0.1:${HEADROOM_PORT}/readyz"
-
-  if ! body="$("$CURL_BIN" --silent --show-error --fail --connect-timeout "$timeout" --max-time "$timeout" "$subject")"; then
-    return 1
-  fi
-  # shellcheck disable=SC2016 # jq variables must remain literal for jq, not Bash.
-  "$JQ_BIN" -e --arg version "$HEADROOM_VERSION" \
-    '.ready == true and .version == $version' >/dev/null <<<"$body"
-}
-
 wait_for_readiness() {
-  local started now elapsed remaining timeout
+  local started now elapsed remaining timeout_seconds timeout_fraction
 
   started="$(uptime_centiseconds)"
   while :; do
     now="$(uptime_centiseconds)"
     elapsed=$((now - started))
     (( elapsed < 3000 )) || return 1
-    remaining=$(((3000 - elapsed + 99) / 100))
-    timeout=$(( remaining < 5 ? remaining : 5 ))
-    if readiness_is_ready "$timeout"; then
+    remaining=$((3000 - elapsed))
+    if (( remaining > 500 )); then
+      timeout_seconds=5
+      timeout_fraction=00
+    else
+      timeout_seconds=$((remaining / 100))
+      timeout_fraction=$(printf '%02d' "$((remaining % 100))")
+    fi
+    probe_readiness "${timeout_seconds}.${timeout_fraction}"
+    if [[ "$READINESS_RESULT" == READY ]]; then
       return 0
     fi
+    [[ "$READINESS_RESULT" == TRANSPORT || "$READINESS_RESULT" == NOT_READY ]] || return 1
     now="$(uptime_centiseconds)"
     (( now - started < 3000 )) || return 1
     "$SLEEP_BIN" 1
@@ -759,7 +799,7 @@ wait_for_readiness() {
 }
 
 run_install() {
-  local package_state final_status future_headroom preflight_status state_findings_status
+  local package_state final_status future_headroom state_findings_status
   local -a state_findings_severity=() state_findings_code=() state_findings_subject=() state_findings_message=()
 
   resolve_executable UNAME_BIN HRT_UNAME_BIN uname
@@ -790,22 +830,22 @@ run_install() {
   if [[ "$PACKAGE_STATE" != ABSENT && "$PACKAGE_STATE" != UNINSPECTABLE ]]; then
     check_opencode_package
   fi
-  preflight_status="$(status_for_findings)"
   F_SEVERITY=("${state_findings_severity[@]}" "${F_SEVERITY[@]}")
   F_CODE=("${state_findings_code[@]}" "${F_CODE[@]}")
   F_SUBJECT=("${state_findings_subject[@]}" "${F_SUBJECT[@]}")
   F_MESSAGE=("${state_findings_message[@]}" "${F_MESSAGE[@]}")
+  deduplicate_findings
   final_status="$(status_for_findings)"
   if [[ "$final_status" == ERROR ]]; then
     render_human "$final_status"
     return 2
   fi
-  if [[ "$preflight_status" == FAIL ]]; then
-    render_human "$final_status"
-    return 1
-  fi
   case "$INSTALL_STATE" in
     CONFORMING)
+      case "$final_status" in
+        FAIL) render_human "$final_status"; return 1 ;;
+        ERROR) render_human "$final_status"; return 2 ;;
+      esac
       if [[ "$state_findings_status" == WARN ]]; then
         F_SEVERITY=("${state_findings_severity[@]}") F_CODE=("${state_findings_code[@]}")
         F_SUBJECT=("${state_findings_subject[@]}") F_MESSAGE=("${state_findings_message[@]}")
@@ -820,10 +860,12 @@ run_install() {
       return 1
       ;;
     ORPHANED_DEPLOYMENT)
+      render_human "$final_status"
       printf '%s\n' 'ERROR: Headroom deployment exists without the pinned runtime.' >&2
       return 1
       ;;
     WRONG_VERSION)
+      render_human "$final_status"
       printf '%s\n' 'ERROR: Headroom is not the pinned version; implicit upgrades are refused.' >&2
       return 1
       ;;
@@ -835,6 +877,17 @@ run_install() {
     AMBIGUOUS)
       render_human "$final_status"
       printf '%s\n' 'ERROR: Headroom installation ownership could not be established.' >&2
+      return 2
+      ;;
+  esac
+  case "$final_status" in
+    PASS|WARN) ;;
+    FAIL)
+      render_human "$final_status"
+      return 1
+      ;;
+    ERROR)
+      render_human "$final_status"
       return 2
       ;;
   esac
@@ -865,10 +918,20 @@ run_install() {
   apply_deployment "$HEADROOM_BIN"
   if [[ "$DRY_RUN" -eq 1 ]]; then return 0; fi
   if ! wait_for_readiness; then
-    printf '%s\n' 'ERROR: Headroom did not become ready within 30 seconds.' >&2
-    return 1
+    audit_runtime_without_readiness
+    add_readiness_findings
+    deduplicate_findings
+    final_status="$(status_for_findings)"
+    render_human "$final_status"
+    case "$final_status" in
+      PASS|WARN) return 0 ;;
+      FAIL) return 1 ;;
+      ERROR) return 2 ;;
+    esac
   fi
   audit_runtime_without_readiness
+  add_readiness_findings
+  deduplicate_findings
   final_status="$(status_for_findings)"
   render_human "$final_status"
   case "$final_status" in

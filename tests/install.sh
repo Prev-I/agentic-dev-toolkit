@@ -1229,6 +1229,62 @@ test_validator_reports_the_first_defect_in_source_order() {
   done
 }
 
+test_every_pin_is_wired_to_its_own_catalog_key() {
+  # The default assertions above point at the catalog file, which proves only
+  # what the catalog CONTAINS. This is what proves the WIRING: that
+  # PYTHON_VERSION reads the python key rather than the node one. A swapped key
+  # in any of the assignments passes every other test in this file, because
+  # they all assign the pin globals themselves before rendering.
+  #
+  # Expectations are read from the catalog file, never hardcoded: a literal
+  # here would merely duplicate the catalog and would still match a swap
+  # between two keys that happen to be edited together.
+  local -A values=() lines=()
+  local -a order=()
+  local err=""
+  local entry key variable override expected
+
+  load_kv_file "$CATALOG_FILE" values lines order err \
+    || fail "the shipped catalog must load: $err"
+
+  # key | installer global | the environment variable that overrides it
+  local -a wiring=(
+    'java-17|JAVA_17_VERSION|ADT_JAVA_17_VERSION'
+    'java-21|JAVA_21_VERSION|ADT_JAVA_21_VERSION'
+    'dotnet-10|DOTNET_10_VERSION|ADT_DOTNET_10_VERSION'
+    'dotnet-8|DOTNET_8_VERSION|ADT_DOTNET_8_VERSION'
+    'python|PYTHON_VERSION|ADT_PYTHON_VERSION'
+    'node|NODE_VERSION|ADT_NODE_VERSION'
+    'bun|BUN_VERSION|ADT_BUN_VERSION'
+    'maven|MAVEN_VERSION|ADT_MAVEN_VERSION'
+    'dotnet-ef|DOTNET_EF_VERSION|ADT_DOTNET_EF_VERSION'
+    'uv|UV_VERSION|ADT_UV_VERSION'
+    'shellcheck|SHELLCHECK_VERSION|ADT_SHELLCHECK_VERSION'
+    'gitleaks|GITLEAKS_VERSION|ADT_GITLEAKS_VERSION'
+    'pyyaml|PYYAML_VERSION|ADT_PYYAML_VERSION'
+    'openspec|OPENSPEC_VERSION|ADT_OPENSPEC_VERSION'
+    'superpowers|SUPERPOWERS_REF|ADT_SUPERPOWERS_REF'
+    'karpathy-ref|KARPATHY_DEFAULT_REF|'
+    'karpathy-sha256|KARPATHY_DEFAULT_SHA256|'
+  )
+
+  for entry in "${wiring[@]}"; do
+    IFS='|' read -r key variable override <<<"$entry"
+
+    # An override in the environment legitimately wins over the catalog, which
+    # would make the comparison below prove nothing. Refuse loudly rather than
+    # weaken the assertion or skip in silence.
+    if [[ -n "$override" && -n "${!override:-}" ]]; then
+      fail "$override is set in this environment and overrides the catalog; unset it to run this suite"
+    fi
+
+    expected="${values[$key]:-}"
+    [[ -n "$expected" ]] || fail "the catalog has no $key key to wire $variable to"
+    assert_equal "${!variable}" "$expected" \
+      "$variable must hold the catalog's $key value"
+  done
+}
+
 run_installer_with_catalog() {
   # run_installer_with_catalog CONTENT -> prints combined output, never fails
   local path="$TEMP_DIR/bad-catalog.env"
@@ -1337,6 +1393,10 @@ if [[ -n "$unexpected" ]]; then
     "$unexpected" >&2
   exit 1
 fi
+
+# Runs here, not down in the list below, because the many tests that follow
+# reassign the pin globals; by then the loaded values would be gone.
+test_every_pin_is_wired_to_its_own_catalog_key
 
 test_lttng_selector_prefers_time64_package_when_available
 test_lttng_selector_falls_back_to_legacy_package

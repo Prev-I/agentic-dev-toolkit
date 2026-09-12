@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-VERSION="0.3.0"
+SCRIPT_VERSION="0.4.0"
 SCHEMA_VERSION=1
 WSL_CONF="${WTD_WSL_CONF:-/etc/wsl.conf}"
 MOUNTS_FILE="${WTD_MOUNTS_FILE:-/proc/self/mounts}"
@@ -17,7 +17,23 @@ SCAN_PATH="${WTD_SCAN_PATH:-${PATH:-}}"
 # /var/run/docker.sock and make those cases pass or fail according to whether
 # the developer running them happens to have a runtime installed.
 DOCKER_SOCKET="${WTD_DOCKER_SOCKET-/var/run/docker.sock}"
+
+# Component root of the doctor itself, resolved once so the catalog seam below
+# has a real default. This mirrors install.sh's ADT_INSTALL_ROOT, one
+# directory up from where a project-relative catalog default is anchored.
+COMPONENT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+# File-path seams, following the same script-scope `${VAR:-default}` shape as
+# WSL_CONF/MOUNTS_FILE/WSL_INTEROP_FILE above. This is safe here in a way it
+# is NOT for the executable seams below (WTD_OPENSPEC_BIN, WTD_TIMEOUT_BIN):
+# there is no "search PATH for a catalog file" fallback to preserve, so an
+# always-set default does not collapse a three-state contract into two.
+WTD_CATALOG_FILE="${WTD_CATALOG_FILE:-$COMPONENT_ROOT/../catalog/software-catalog.env}"
+WTD_RECEIPT_FILE="${WTD_RECEIPT_FILE:-${XDG_STATE_HOME:-$HOME/.local/state}/agentic-dev-toolkit/install-receipt.env}"
+WTD_MISE_TOOLCHAIN_CONFIG="${WTD_MISE_TOOLCHAIN_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/mise/conf.d/agentic-dev-toolkit.toml}"
+
 JSON_MODE=0
+PROBE_MODE=0
 CURRENT_ACTION=""
 EXEC_ERROR=0
 FIX_SCOPE="wsl"
@@ -34,7 +50,7 @@ F_MESSAGE=()
 usage() {
   cat <<'USAGE'
 Usage:
-  wsl-toolchain-doctor.sh audit [--json]
+  wsl-toolchain-doctor.sh audit [--json] [--probe]
   wsl-toolchain-doctor.sh fix [--path|--all] [--dry-run] [--drop-missing] [--json]
   wsl-toolchain-doctor.sh explain <command> [--json]
   wsl-toolchain-doctor.sh --version
@@ -584,6 +600,157 @@ mise_bin() {
     return 0
   fi
   command -v mise 2>/dev/null
+}
+
+# openspec_bin and timeout_bin follow mise_bin's shape verbatim -- ${VAR+x}
+# for set-ness, printf '%s' with no trailing newline, command -v as the
+# fall-through -- plus one addition mise_bin does not make: an -x usability
+# check. A seam pointing at a path that exists but is not executable is
+# unusable, and is treated exactly like an empty seam: return 1, search
+# nothing. Never assign WTD_OPENSPEC_BIN/WTD_TIMEOUT_BIN at script scope --
+# doing so would make ${VAR+x} always true and the command -v branch
+# unreachable, leaving --probe inert in production while every fixture test
+# still passes.
+openspec_bin() {
+  if [[ ${WTD_OPENSPEC_BIN+x} ]]; then
+    [[ -n "$WTD_OPENSPEC_BIN" && -x "$WTD_OPENSPEC_BIN" ]] || return 1
+    printf '%s' "$WTD_OPENSPEC_BIN"
+    return 0
+  fi
+  command -v openspec 2>/dev/null
+}
+
+timeout_bin() {
+  if [[ ${WTD_TIMEOUT_BIN+x} ]]; then
+    [[ -n "$WTD_TIMEOUT_BIN" && -x "$WTD_TIMEOUT_BIN" ]] || return 1
+    printf '%s' "$WTD_TIMEOUT_BIN"
+    return 0
+  fi
+  command -v timeout 2>/dev/null
+}
+
+# load_kv_file and validate_kv are ported from install.sh's readers of the
+# same name, adapted to the doctor's one hard rule: it never calls `die` and
+# must not acquire one. Every `die "$msg"` becomes
+# `printf '%s\n' "$msg" >&2; return 1`, and the caller captures the message
+# through its own scalar rather than a global. The doctor holds two files at
+# once (catalog, receipt), so callers pass a distinct array trio for each.
+#
+# load_kv_file must be called DIRECTLY in the current shell -- never inside
+# $( ), a pipeline, process substitution, or a grouped subshell. Its arrays
+# are populated through namerefs and would die with a subshell, handing the
+# caller an empty map and a zero status.
+#
+# kv_* nameref locals, exactly as in install.sh: a nameref whose own
+# identifier equals the name the caller passed is a circular reference, so no
+# caller may pass kv_values, kv_lines, kv_order or kv_errname.
+load_kv_file() {
+  local file=$1
+  local -n kv_values=$2
+  local -n kv_lines=$3
+  local -n kv_order=$4
+  local kv_errname=$5
+  local line key value lineno=0
+
+  printf -v "$kv_errname" '%s' ''
+
+  if [[ ! -r "$file" ]]; then
+    printf -v "$kv_errname" '%s' "cannot read $file"
+    return 1
+  fi
+
+  # `|| [[ -n "$line" ]]` keeps a final line that has no trailing newline.
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    lineno=$(( lineno + 1 ))
+    line="${line%$'\r'}"
+    if [[ -z "${line//[[:space:]]/}" || "${line#"${line%%[![:space:]]*}"}" == '#'* ]]; then
+      continue
+    fi
+    if [[ "$line" != *=* ]]; then
+      printf -v "$kv_errname" '%s' "$file:$lineno: missing '=' separator"
+      return 1
+    fi
+    key="${line%%=*}"
+    value="${line#*=}"
+    value="${value%"${value##*[![:space:]]}"}"
+    if [[ ! "$key" =~ ^[a-z0-9][a-z0-9.-]*$ ]]; then
+      printf -v "$kv_errname" '%s' "$file:$lineno: malformed key: $key"
+      return 1
+    fi
+    if [[ -n "${kv_values[$key]+set}" ]]; then
+      printf -v "$kv_errname" '%s' \
+        "$file:$lineno: duplicate key: $key (first seen at line ${kv_lines[$key]})"
+      return 1
+    fi
+    kv_values["$key"]="$value"
+    kv_lines["$key"]="$lineno"
+    kv_order+=("$key")
+  done < "$file"
+}
+
+# validate_kv mutates nothing the caller can see -- its outputs are its exit
+# status and its message -- so, unlike load_kv_file, it MAY be captured:
+# `if ! problem="$(validate_kv … 2>&1)"; then`.
+#
+# v_* nameref locals: no caller may pass v_values, v_lines, v_order,
+# v_required, v_listkeys or v_members.
+validate_kv() {
+  local file=$1
+  local -n v_values=$2 v_lines=$3 v_order=$4
+  local -n v_required=$5 v_listkeys=$6 v_members=$7
+  local key value element
+  local -a elements
+  local -A seen
+
+  # Phase 1: required keys, in the caller's declared order. A key that is
+  # absent has no source line, so none is printed.
+  for key in "${v_required[@]}"; do
+    if [[ -z "${v_values[$key]+set}" ]]; then
+      printf '%s\n' "$file: missing required key: $key" >&2
+      return 1
+    fi
+  done
+
+  # Phase 2: per-key syntax, walked in SOURCE order so the first problem
+  # reported is the first problem in the file.
+  for key in "${v_order[@]}"; do
+    value="${v_values[$key]}"
+
+    if [[ -n "${v_listkeys[$key]+set}" ]]; then
+      if [[ -z "$value" ]]; then
+        continue                                   # an empty list is valid
+      fi
+      if [[ ! "$value" =~ ^[a-z0-9][a-z0-9.-]*(,[a-z0-9][a-z0-9.-]*)*$ ]]; then
+        printf '%s\n' "$file:${v_lines[$key]}: malformed list for key: $key" >&2
+        return 1
+      fi
+      IFS=, read -ra elements <<<"$value"
+      seen=()
+      for element in "${elements[@]}"; do
+        if [[ -n "${seen[$element]+set}" ]]; then
+          printf '%s\n' "$file:${v_lines[$key]}: duplicate element in $key: $element" >&2
+          return 1
+        fi
+        seen["$element"]=1
+        if (( ${#v_members[@]} > 0 )) && [[ -z "${v_members[$element]+set}" ]]; then
+          printf '%s\n' "$file:${v_lines[$key]}: unknown catalog key in $key: $element" >&2
+          return 1
+        fi
+      done
+      continue
+    fi
+
+    if [[ -z "$value" ]]; then
+      printf '%s\n' "$file:${v_lines[$key]}: empty value for key: $key" >&2
+      return 1
+    fi
+    if [[ ! "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._:+@/-]*$ ]]; then
+      printf '%s\n' "$file:${v_lines[$key]}: malformed value for key: $key" >&2
+      return 1
+    fi
+  done
+
+  return 0
 }
 
 mise_is_activated() {
@@ -1201,7 +1368,7 @@ render_human() {
 render_json() {
   local status=$1 i comma=""
   printf '{"schemaVersion":%d,"toolVersion":"%s","action":"%s","status":"%s","findings":[' \
-    "$SCHEMA_VERSION" "$(json_escape "$VERSION")" "$(json_escape "$CURRENT_ACTION")" "$(json_escape "$status")"
+    "$SCHEMA_VERSION" "$(json_escape "$SCRIPT_VERSION")" "$(json_escape "$CURRENT_ACTION")" "$(json_escape "$status")"
   for ((i=0; i<${#F_SEVERITY[@]}; i++)); do
     printf '%s{"severity":"%s","code":"%s","subject":"%s","message":"%s"}' \
       "$comma" \
@@ -1330,6 +1497,52 @@ parse_fix_args() {
   return 0
 }
 
+# parse_audit_args replaces the arm's former inline `(( $# > 1 ))` test. It is
+# not merely "shaped like parse_fix_args": that one tolerates a repeated
+# flag, while `audit` has always rejected a second argument outright, and
+# that strictness is kept here for both --json and --probe. Every arithmetic
+# test sits inside an `if` condition, never as a standalone `(( … ))`
+# command -- a standalone arithmetic command returns 1 when its expression is
+# zero, which would abort the parse itself under `set -e`. The function ends
+# with an explicit `return 0`, because relying on the `case` inside the last
+# loop iteration to supply the status is how a parser starts failing on its
+# own success.
+parse_audit_args() {
+  local arg
+  local seen_json=0
+  local seen_probe=0
+
+  JSON_MODE=0
+  PROBE_MODE=0
+
+  for arg in "$@"; do
+    case "$arg" in
+      --json)
+        if (( seen_json == 1 )); then
+          return 1
+        fi
+        seen_json=1
+        JSON_MODE=1
+        ;;
+      --probe)
+        if (( seen_probe == 1 )); then
+          return 1
+        fi
+        seen_probe=1
+        # shellcheck disable=SC2034 # consumed by the probe comparison this
+        # task does not implement; parse_audit_args' contract still requires
+        # setting it.
+        PROBE_MODE=1
+        ;;
+      *)
+        return 1
+        ;;
+    esac
+  done
+
+  return 0
+}
+
 main() {
   local action=${1:-}
   [[ -n "$action" ]] || { usage >&2; return 2; }
@@ -1337,8 +1550,12 @@ main() {
   shift || true
   case "$action" in
     audit)
-      if (( $# > 1 )) || { (( $# == 1 )) && [[ "$1" != "--json" ]]; }; then usage >&2; return 2; fi
-      [[ "${1:-}" == "--json" ]] && JSON_MODE=1
+      # A rejected parse may leave a partial JSON_MODE/PROBE_MODE assignment
+      # behind (e.g. `audit --probe --probe` sets PROBE_MODE=1 before the
+      # repeat is detected). That is harmless: usage/return 2 below runs
+      # before run_audit, so no audit runs and no probe is invoked on this
+      # command line, and the next invocation resets both flags regardless.
+      parse_audit_args "$@" || { usage >&2; return 2; }
       run_audit
       ;;
     fix)
@@ -1359,7 +1576,7 @@ main() {
       ;;
     --version)
       (( $# == 0 )) || { usage >&2; return 2; }
-      printf '%s\n' "$VERSION"
+      printf '%s\n' "$SCRIPT_VERSION"
       ;;
     *)
       usage >&2

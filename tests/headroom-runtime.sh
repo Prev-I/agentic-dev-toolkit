@@ -45,9 +45,13 @@ install_stubs() {
     {
       printf '#!%s\n' "$BASH_BIN"
       cat <<'STUB'
-if [[ "$0" == */readlink && "$1" == "-f" ]]; then
+if [[ "$0" == */readlink && ( "$1" == "-f" || "$1" == "-m" ) ]]; then
   printf '%s\n' '---' "$0" "$@" >> "$HRT_COMMAND_LOG"
-  printf '%s\n' "${HRT_READLINK_TARGET:-$2}"
+  if [[ -n "${HRT_READLINK_TARGET:-}" ]]; then
+    printf '%s\n' "$HRT_READLINK_TARGET"
+  else
+    /usr/bin/readlink "$1" "$2"
+  fi
   exit 0
 fi
 printf '%s\n' '---' "$0" "$@" >> "$HRT_COMMAND_LOG"
@@ -80,7 +84,7 @@ new_case() {
   export HRT_UPTIME_FILE="$CASE_DIR/uptime"
   export HRT_COMMAND_LOG="$CASE_DIR/commands"
   export HRT_MUTATION_LOG="$CASE_DIR/mutations"
-  unset OPENCODE_CONFIG
+  unset OPENCODE_CONFIG UV_TOOL_BIN_DIR XDG_BIN_HOME XDG_DATA_HOME
 
   install_stubs
   export HRT_UV_BIN="$CASE_DIR/bin/uv"
@@ -808,8 +812,8 @@ test_missing_uv_seam_cannot_fall_back_to_the_host() {
   assert_equal "$CLI_STATUS" "2" "an unavailable fixture command must be a usage error"
   assert_contains "$CLI_OUTPUT" "uv is required but was not found" \
     "missing uv must not resolve from the host PATH"
-  assert_contains "$CLI_OUTPUT" "uv is required but was not found" \
-    "an omitted seam must not invoke a host uv command"
+  [[ "$(<"$HRT_COMMAND_LOG")" != *"/uv"* ]] ||
+    fail "an omitted uv seam must not execute a host uv command"
 }
 
 test_default_uv_resolution_rejects_a_non_executable_canonical_path() {
@@ -873,10 +877,18 @@ printf '%s\n' '---' "$0" "$@" >> "$HRT_COMMAND_LOG"
 if [[ "$1 $2" == 'tool install' ]]; then
   printf '%s\n' '---' "$0" "$@" >> "$HRT_MUTATION_LOG"
   : > "$HRT_HOME/package-installed"
-  /bin/mkdir -p "$HRT_HOME/.local/bin"
-  /bin/cp "$HRT_HEADROOM_TEMPLATE" "$HRT_HOME/.local/bin/headroom"
-  /bin/chmod 0755 "$HRT_HOME/.local/bin/headroom"
-  : > "$HRT_HOME/service-applied"
+  if [[ -n "${UV_TOOL_BIN_DIR:-}" ]]; then
+    tool_bin="$UV_TOOL_BIN_DIR"
+  elif [[ -n "${XDG_BIN_HOME:-}" ]]; then
+    tool_bin="$XDG_BIN_HOME"
+  elif [[ -n "${XDG_DATA_HOME:-}" ]]; then
+    tool_bin="${XDG_DATA_HOME%/*}/bin"
+  else
+    tool_bin="$HRT_HOME/.local/bin"
+  fi
+  /bin/mkdir -p "$tool_bin"
+  /bin/cp "$HRT_HEADROOM_TEMPLATE" "$tool_bin/headroom"
+  /bin/chmod 0755 "$tool_bin/headroom"
 fi
 STUB
   } > "$HRT_UV_BIN"
@@ -1022,7 +1034,7 @@ test_absent_headroom_without_a_seam_dry_runs_with_future_path() {
 }
 
 test_install_refuses_opencode_coupling_before_mutation() {
-  local case_name
+  local case_name expected_code
 
   for case_name in config package environment drop-in; do
     new_installable_absent_case "coupling-$case_name"
@@ -1046,8 +1058,15 @@ test_install_refuses_opencode_coupling_before_mutation() {
         printf '%s\n' 'After=headroom-default.service' > "$HRT_SYSTEMD_USER_DIR/opencode.service.d/10-headroom.conf"
         ;;
     esac
+    case "$case_name" in
+      config) expected_code=HEADROOM_OPENCODE_CONFIG_PRESENT ;;
+      package) expected_code=HEADROOM_OPENCODE_PACKAGE_PRESENT ;;
+      environment) expected_code=HEADROOM_OPENCODE_ENV_PRESENT ;;
+      drop-in) expected_code=HEADROOM_OPENCODE_UNIT_COUPLED ;;
+    esac
     run_cli install
     assert_equal "$CLI_STATUS" 1 "$case_name coupling must refuse installation"
+    assert_contains "$CLI_OUTPUT" "$expected_code" "$case_name coupling must retain its finding code"
     assert_equal "$(<"$HRT_MUTATION_LOG")" '' "$case_name coupling must block every mutation"
     unset HRT_FIX_HEADROOM_PLUGINS HRT_FIX_OPENCODE_ACTIVE HRT_FIX_OPENCODE_PID
   done
@@ -1061,6 +1080,7 @@ test_install_state_matrix_core_refusals() {
   assert_equal "$CLI_STATUS" 1 "a valid stopped deployment must be refused"
   assert_contains "$CLI_OUTPUT" 'systemctl --user start and enable' \
     "a stopped deployment must name the explicit operator action"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "a stopped deployment must block every mutation"
 
   new_conforming_case install-orphaned
   printf '%s\n' '0.00 0.00' > "$HRT_UPTIME_FILE"
@@ -1071,6 +1091,7 @@ test_install_state_matrix_core_refusals() {
   assert_equal "$CLI_STATUS" 1 "a deployment without a runtime must be orphaned"
   assert_contains "$CLI_OUTPUT" 'deployment exists without the pinned runtime' \
     "an orphaned deployment must have a specific diagnostic"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "an orphaned deployment must block every mutation"
   unset HRT_FIX_SS_OUTPUT
 
   new_conforming_case install-nonconforming
@@ -1080,6 +1101,7 @@ test_install_state_matrix_core_refusals() {
   assert_equal "$CLI_STATUS" 1 "a nonconforming deployment must be refused"
   assert_contains "$CLI_OUTPUT" HEADROOM_TARGETS_CONFIGURED \
     "a nonconforming deployment must retain its precise finding"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "a nonconforming deployment must block every mutation"
 }
 
 test_install_manifest_and_listener_precedence() {
@@ -1092,6 +1114,7 @@ test_install_manifest_and_listener_precedence() {
   run_cli install
   assert_equal "$CLI_STATUS" 2 "a malformed manifest must override an absent package"
   assert_contains "$CLI_OUTPUT" HEADROOM_MANIFEST_INVALID "manifest ownership failure must be rendered"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "a malformed manifest must block every mutation"
 
   new_conforming_case install-unreadable-overlap
   printf '%s\n' '0.00 0.00' > "$HRT_UPTIME_FILE"
@@ -1100,16 +1123,23 @@ test_install_manifest_and_listener_precedence() {
   run_cli install
   assert_equal "$CLI_STATUS" 2 "an unreadable manifest must override a wrong package"
   assert_contains "$CLI_OUTPUT" HEADROOM_MANIFEST_UNREADABLE "unreadable ownership must be rendered"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "an unreadable manifest must block every mutation"
 
   new_installable_absent_case install-foreign-listener
   export HRT_FIX_SS_OUTPUT='tcp LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:* users:(("other",pid=1,fd=3))'
   run_cli install
   assert_equal "$CLI_STATUS" 1 "an attributed foreign listener must be a conflict"
+  assert_contains "$CLI_OUTPUT" HEADROOM_FOREIGN_LISTENER "foreign ownership must be rendered"
+  assert_contains "$CLI_OUTPUT" 'Status: FAIL' "foreign ownership must render failure status"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "foreign ownership must block mutations"
 
   new_installable_absent_case install-ambiguous-listener
   export HRT_FIX_SS_OUTPUT='tcp LISTEN 0 4096 127.0.0.1:8787 0.0.0.0:*'
   run_cli install
   assert_equal "$CLI_STATUS" 2 "an unattributed listener must be ambiguous"
+  assert_contains "$CLI_OUTPUT" HEADROOM_LISTENER_OWNER_AMBIGUOUS "ambiguous ownership must be rendered"
+  assert_contains "$CLI_OUTPUT" 'Status: ERROR' "ambiguous ownership must render error status"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "ambiguous ownership must block mutations"
   unset HRT_FIX_SS_OUTPUT
 }
 
@@ -1128,16 +1158,18 @@ test_install_core_matrix_completion() {
 
   new_conforming_case install-pass-noop
   printf '%s\n' '0.00 0.00' > "$HRT_UPTIME_FILE"
-  run_cli install --dry-run
+  run_cli install
   assert_equal "$CLI_STATUS" 0 "a PASS deployment must be idempotent"
   assert_equal "$(<"$HRT_MUTATION_LOG")" '' "a PASS deployment must not mutate"
 
   new_conforming_case install-warn-noop
   printf '%s\n' '0.00 0.00' > "$HRT_UPTIME_FILE"
   export HRT_FIX_EXEC_MAIN_STATUS=241
-  run_cli install --dry-run
+  run_cli install
   assert_equal "$CLI_STATUS" 0 "a WARN deployment must be idempotent"
   assert_equal "$(<"$HRT_MUTATION_LOG")" '' "a WARN deployment must not mutate"
+  run_cli audit
+  assert_contains "$CLI_OUTPUT" 'Status: WARN' "the WARN no-op fixture must be a genuine warning"
 
   new_conforming_case install-wrong-version
   printf '%s\n' '0.00 0.00' > "$HRT_UPTIME_FILE"
@@ -1145,6 +1177,7 @@ test_install_core_matrix_completion() {
   run_cli install
   assert_equal "$CLI_STATUS" 1 "a wrong package version must be refused"
   assert_contains "$CLI_OUTPUT" 'implicit upgrades are refused' "wrong version must be explicit"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "a wrong package version must block every mutation"
 
   new_conforming_case install-unreadable-config
   printf '%s\n' '0.00 0.00' > "$HRT_UPTIME_FILE"
@@ -1152,11 +1185,15 @@ test_install_core_matrix_completion() {
   run_cli install
   assert_equal "$CLI_STATUS" 2 "an unreadable OpenCode config must be an inspection error"
   assert_contains "$CLI_OUTPUT" HEADROOM_OPENCODE_CONFIG_UNREADABLE "preflight error must retain its code"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "an unreadable OpenCode config must block every mutation"
 
   new_installable_absent_case install-non-linux
   printf '%s\n' "printf 'Darwin\\n'" > "$HRT_UNAME_BIN"
   run_cli install
   assert_equal "$CLI_STATUS" 2 "a non-Linux platform must be rejected"
+  assert_contains "$CLI_OUTPUT" 'Headroom runtime installation requires Linux' \
+    "a non-Linux platform must identify the unsupported environment"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "a non-Linux platform must block every mutation"
 
   new_installable_absent_case install-no-systemd
   {
@@ -1166,6 +1203,9 @@ test_install_core_matrix_completion() {
   chmod 0755 "$HRT_SYSTEMCTL_BIN"
   run_cli install
   assert_equal "$CLI_STATUS" 2 "an unusable user systemd must be rejected"
+  assert_contains "$CLI_OUTPUT" 'usable user systemd is required' \
+    "an unusable user systemd must identify the unavailable supervisor"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "an unusable user systemd must block every mutation"
 
   new_installable_absent_case install-uv-tool-bin
   export UV_TOOL_BIN_DIR="$HRT_HOME/custom-bin"
@@ -1175,6 +1215,114 @@ test_install_core_matrix_completion() {
   assert_contains "$CLI_OUTPUT" "$UV_TOOL_BIN_DIR/headroom install apply" \
     "dry-run must use the configured uv tool-bin path"
   unset UV_TOOL_BIN_DIR
+}
+
+test_install_final_state_and_tool_bin_regressions() {
+  new_installable_absent_case install-uninspectable-package
+  /bin/mkdir -p "$HRT_HOME/.local/bin"
+  /bin/cp "$HRT_HEADROOM_TEMPLATE" "$HRT_HOME/.local/bin/headroom"
+  /bin/chmod 0755 "$HRT_HOME/.local/bin/headroom"
+  export HRT_HEADROOM_BIN="$HRT_HOME/.local/bin/headroom"
+  run_cli install
+  assert_equal "$CLI_STATUS" 2 "an uninspectable package must be an error"
+  assert_contains "$CLI_OUTPUT" HEADROOM_VERSION_UNREADABLE "uninspectable package must be rendered"
+  assert_contains "$CLI_OUTPUT" 'Status: ERROR' "uninspectable package must render error status"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "uninspectable package must block mutations"
+
+  new_conforming_case install-profile-conflict
+  printf '%s\n' '0.00 0.00' > "$HRT_UPTIME_FILE"
+  printf '%s\n' '{"profile":"other","targets":[],"mutations":[],"memory_enabled":false,"telemetry_enabled":false,"base_env":{"HEADROOM_BEACON":"off","HEADROOM_UPDATE_CHECK":"off","HEADROOM_TELEMETRY":"off"}}' > "$HRT_HEADROOM_DEPLOY_ROOT/default/manifest.json"
+  run_cli install
+  assert_equal "$CLI_STATUS" 1 "a profile mismatch must be a conflict"
+  assert_contains "$CLI_OUTPUT" HEADROOM_PROFILE_MISMATCH "profile conflict must retain its code"
+  assert_contains "$CLI_OUTPUT" 'installation is conflict' "profile mismatch must retain the CONFLICT state"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "profile conflict must block mutations"
+
+  new_installable_absent_case install-xdg-bin
+  export XDG_BIN_HOME="$HRT_HOME/xdg-bin"
+  /bin/mkdir -p "$XDG_BIN_HOME"
+  run_cli install --dry-run
+  assert_equal "$CLI_STATUS" 0 "XDG bin home must select a tool path"
+  assert_contains "$CLI_OUTPUT" "$XDG_BIN_HOME/headroom install apply" "XDG bin home must take precedence"
+
+  new_installable_absent_case install-xdg-data
+  export XDG_DATA_HOME="$HRT_HOME/.local/share"
+  run_cli install --dry-run
+  assert_equal "$CLI_STATUS" 0 "XDG data home must select the uv bin path"
+  assert_contains "$CLI_OUTPUT" "$HRT_HOME/.local/bin/headroom install apply" \
+    "XDG data home must derive its sibling bin directory"
+}
+
+test_install_package_only_applies_without_reinstalling() {
+  new_installable_absent_case install-package-only-real
+  /bin/mkdir -p "$HRT_HOME/.local/bin"
+  /bin/cp "$HRT_HEADROOM_TEMPLATE" "$HRT_HOME/.local/bin/headroom"
+  /bin/chmod 0755 "$HRT_HOME/.local/bin/headroom"
+  : > "$HRT_HOME/package-installed"
+  export HRT_HEADROOM_BIN="$HRT_HOME/.local/bin/headroom"
+  run_cli install
+  assert_equal "$CLI_STATUS" 0 "an exact package without deployment must apply"
+  [[ "$(<"$HRT_MUTATION_LOG")" != *"$HRT_UV_BIN"* ]] ||
+    fail "a package-only installation must not reinstall the package"
+  assert_contains "$(<"$HRT_MUTATION_LOG")" "$HRT_HOME/.local/bin/headroom" \
+    "a package-only installation must apply with the discovered CLI"
+  [[ -f "$HRT_HOME/service-applied" ]] || fail "only apply may mark the service applied"
+}
+
+test_install_tool_bin_environment_validation_and_discovery() {
+  new_installable_absent_case install-relative-uv-tool-bin
+  export UV_TOOL_BIN_DIR=relative/bin
+  run_cli install --dry-run
+  assert_equal "$CLI_STATUS" 2 "a relative UV tool directory must be rejected"
+  assert_contains "$CLI_OUTPUT" 'Headroom tool bin directory must be absolute' \
+    "the UV tool directory diagnostic must identify unsafe resolution"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "a relative UV tool directory must block every mutation"
+
+  new_installable_absent_case install-relative-xdg-bin
+  export XDG_BIN_HOME=relative/bin
+  run_cli install --dry-run
+  assert_equal "$CLI_STATUS" 2 "a relative XDG bin directory must be rejected"
+  assert_contains "$CLI_OUTPUT" 'Headroom tool bin directory must be absolute' \
+    "the XDG bin directory diagnostic must identify unsafe resolution"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "a relative XDG bin directory must block every mutation"
+
+  new_installable_absent_case install-xdg-data-discovery
+  export XDG_DATA_HOME="$HRT_HOME/xdg-data"
+  /bin/mkdir -p "$HRT_HOME/bin"
+  /bin/cp "$HRT_HEADROOM_TEMPLATE" "$HRT_HOME/bin/headroom"
+  /bin/chmod 0755 "$HRT_HOME/bin/headroom"
+  : > "$HRT_HOME/package-installed"
+  run_cli install
+  assert_equal "$CLI_STATUS" 0 "XDG data home must discover uv's sibling-bin executable"
+  [[ "$(<"$HRT_MUTATION_LOG")" != *"$HRT_UV_BIN"* ]] ||
+    fail "positive XDG data discovery must not reinstall the package"
+  assert_contains "$(<"$HRT_MUTATION_LOG")" "$HRT_HOME/bin/headroom" \
+    "positive XDG data discovery must apply with the discovered executable"
+}
+
+test_install_uv_tool_bin_precedence_and_canonical_preview() {
+  new_installable_absent_case install-uv-tool-precedence
+  export UV_TOOL_BIN_DIR="$HRT_HOME/uv-tools/../uv-tools"
+  export XDG_BIN_HOME="$HRT_HOME/xdg-bin"
+  export XDG_DATA_HOME="$HRT_HOME/xdg-data"
+  /bin/mkdir -p "$HRT_HOME/uv-tools" "$XDG_BIN_HOME" "$HRT_HOME/bin"
+  run_cli install --dry-run
+  assert_equal "$CLI_STATUS" 0 "an absolute UV tool directory must support dry-run installation"
+  assert_contains "$CLI_OUTPUT" "$HRT_HOME/uv-tools/headroom install apply" \
+    "the canonical UV tool directory must override both XDG locations"
+  [[ "$CLI_OUTPUT" != *"../uv-tools/headroom"* ]] ||
+    fail "a future executable preview must not contain an uncanonical path"
+  assert_equal "$(<"$HRT_MUTATION_LOG")" '' "the precedence preview must not mutate"
+}
+
+test_install_uses_configured_uv_tool_bin_after_package_install() {
+  new_installable_absent_case install-configured-uv-tool-bin-real
+  export UV_TOOL_BIN_DIR="$HRT_HOME/uv-bin"
+  run_cli install
+  assert_equal "$CLI_STATUS" 0 "an absent configured-uv-bin runtime must install"
+  assert_contains "$(<"$HRT_MUTATION_LOG")" "$UV_TOOL_BIN_DIR/headroom" \
+    "apply must execute the executable placed in UV_TOOL_BIN_DIR"
+  [[ -f "$HRT_HOME/service-applied" ]] || fail "the configured-bin apply must create the deployment"
 }
 
 JQ_BIN="$(command -v jq || true)"
@@ -1208,6 +1356,11 @@ test_install_refuses_opencode_coupling_before_mutation
 test_install_state_matrix_core_refusals
 test_install_manifest_and_listener_precedence
 test_install_core_matrix_completion
+test_install_final_state_and_tool_bin_regressions
+test_install_package_only_applies_without_reinstalling
+test_install_tool_bin_environment_validation_and_discovery
+test_install_uv_tool_bin_precedence_and_canonical_preview
+test_install_uses_configured_uv_tool_bin_after_package_install
 test_conforming_runtime_passes
 test_json_audit_has_stable_shape
 test_audit_policy_and_error_findings

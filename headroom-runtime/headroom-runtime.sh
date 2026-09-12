@@ -185,7 +185,7 @@ check_readiness() {
   fi
 }
 
-check_listener() {
+parse_listener() {
   local output row owners owner owner_seen local_address
   local listener_found=0 unsafe_bind=0 foreign_owner=0 ambiguous_owner=0
 
@@ -195,7 +195,7 @@ check_listener() {
     return
   fi
   while IFS= read -r row; do
-    # ss prints state, queues, local address, peer address, then process details.
+    # ss -ltnp emits either the traditional or Netid-prefixed row shape.
     if [[ "$row" == tcp* || "$row" == udp* ]]; then
       IFS=' ' read -r _ _ _ _ local_address _ <<<"$row"
     else
@@ -218,9 +218,15 @@ check_listener() {
     done
     (( owner_seen )) || ambiguous_owner=1
   done <<<"$output"
-  if (( listener_found == 0 || ambiguous_owner )); then
+  if (( listener_found == 0 )); then
+    LISTENER_STATE=ABSENT
+    return
+  fi
+  if (( ambiguous_owner )); then
     add_finding ERROR HEADROOM_LISTENER_OWNER_AMBIGUOUS "port ${HEADROOM_PORT}" \
       "Headroom listener ownership could not be determined."
+    LISTENER_STATE=AMBIGUOUS
+    return
   fi
   if (( unsafe_bind )); then
     add_finding FAIL HEADROOM_UNSAFE_BIND "port ${HEADROOM_PORT}" \
@@ -230,39 +236,17 @@ check_listener() {
     add_finding FAIL HEADROOM_FOREIGN_LISTENER "port ${HEADROOM_PORT}" \
       "Headroom port is owned by another process."
   fi
+  if (( foreign_owner )); then
+    LISTENER_STATE=CONFLICT
+  elif (( unsafe_bind )); then
+    LISTENER_STATE=NONCONFORMING
+  else
+    LISTENER_STATE=HEADROOM
+  fi
 }
 
-listener_install_state() {
-  local output row local_address owner
-
-  if ! output="$("$SS_BIN" -ltnp "sport = :${HEADROOM_PORT}")"; then
-    printf '%s\n' AMBIGUOUS
-    return
-  fi
-  while IFS= read -r row; do
-    if [[ "$row" == tcp* || "$row" == udp* ]]; then
-      IFS=' ' read -r _ _ _ _ local_address _ <<<"$row"
-    else
-      IFS=' ' read -r _ _ _ local_address _ <<<"$row"
-    fi
-    [[ "$local_address" == *":${HEADROOM_PORT}" ]] || continue
-    if [[ "$row" != *'users:(('* ]]; then
-      printf '%s\n' AMBIGUOUS
-      return
-    fi
-    owners="${row#*users:}"
-    while [[ "$owners" =~ \"([^\"]+)\" ]]; do
-      owner="${BASH_REMATCH[1]}"
-      if [[ "$owner" != headroom ]]; then
-        printf '%s\n' CONFLICT
-        return
-      fi
-      owners="${owners#*"${BASH_REMATCH[0]}"}"
-    done
-    printf '%s\n' CONFLICT
-    return
-  done <<<"$output"
-  printf '%s\n' ABSENT
+check_listener() {
+  parse_listener
 }
 
 check_manifest() {
@@ -526,13 +510,35 @@ run_audit() {
 PACKAGE_STATE=""
 DEPLOYMENT_STATE=""
 
+headroom_tool_bin_dir() {
+  local bin_dir data_parent
+
+  if [[ -n "${UV_TOOL_BIN_DIR:-}" ]]; then
+    bin_dir="$UV_TOOL_BIN_DIR"
+  elif [[ -n "${XDG_BIN_HOME:-}" ]]; then
+    bin_dir="$XDG_BIN_HOME"
+  elif [[ -n "${XDG_DATA_HOME:-}" ]]; then
+    data_parent="${XDG_DATA_HOME%/*}"
+    bin_dir="$data_parent/bin"
+  else
+    bin_dir="$RUNTIME_HOME/.local/bin"
+  fi
+  [[ "$bin_dir" == /* ]] || die_usage "Headroom tool bin directory must be absolute"
+  if ! bin_dir="$(readlink -m "$bin_dir")" || [[ "$bin_dir" != /* ]]; then
+    die_usage "Headroom tool bin directory could not be canonicalized"
+  fi
+  printf '%s\n' "$bin_dir"
+}
+
 headroom_tool_path() {
   local bin_dir candidate
 
-  bin_dir="${UV_TOOL_BIN_DIR:-${XDG_BIN_HOME:-$RUNTIME_HOME/.local/bin}}"
+  bin_dir="$(headroom_tool_bin_dir)"
   candidate="$bin_dir/headroom"
   if [[ -x "$candidate" ]]; then
-    readlink -f "$candidate"
+    candidate="$(readlink -f "$candidate")" || return 1
+    [[ "$candidate" == /* && -x "$candidate" ]] || return 1
+    printf '%s\n' "$candidate"
   fi
 }
 
@@ -542,6 +548,12 @@ headroom_package_state() {
   candidate="${HRT_HEADROOM_BIN:-}"
   if [[ -n "$candidate" ]]; then
     resolve_executable HEADROOM_BIN HRT_HEADROOM_BIN headroom
+    if ! HEADROOM_BIN="$(readlink -f "$HEADROOM_BIN")" || [[ "$HEADROOM_BIN" != /* || ! -x "$HEADROOM_BIN" ]]; then
+      PACKAGE_STATE=UNINSPECTABLE
+      add_finding ERROR HEADROOM_VERSION_UNREADABLE headroom \
+        "Headroom CLI version could not be inspected."
+      return
+    fi
   else
     candidate="$(headroom_tool_path || true)"
     if [[ -z "$candidate" ]]; then
@@ -553,11 +565,15 @@ headroom_package_state() {
     fi
     if ! HEADROOM_BIN="$(readlink -f "$candidate")" || [[ ! -x "$HEADROOM_BIN" ]]; then
       PACKAGE_STATE=UNINSPECTABLE
+      add_finding ERROR HEADROOM_VERSION_UNREADABLE headroom \
+        "Headroom CLI version could not be inspected."
       return
     fi
   fi
   if ! output="$("$HEADROOM_BIN" --version)"; then
     PACKAGE_STATE=UNINSPECTABLE
+    add_finding ERROR HEADROOM_VERSION_UNREADABLE headroom \
+      "Headroom CLI version could not be inspected."
   elif [[ "$output" == "headroom ${HEADROOM_VERSION}" ]]; then
     PACKAGE_STATE=EXACT
   else
@@ -566,7 +582,7 @@ headroom_package_state() {
 }
 
 deployment_state() {
-  local output enabled active
+  local enabled active code
 
   if [[ -e "$MANIFEST_PATH" || -e "$SYSTEMD_USER_DIR/headroom-default.service" ]]; then
     F_SEVERITY=() F_CODE=() F_SUBJECT=() F_MESSAGE=()
@@ -577,6 +593,12 @@ deployment_state() {
         return
         ;;
       FAIL)
+        for code in "${F_CODE[@]}"; do
+          if [[ "$code" == HEADROOM_PROFILE_MISMATCH ]]; then
+            DEPLOYMENT_STATE=CONFLICT
+            return
+          fi
+        done
         DEPLOYMENT_STATE=NONCONFORMING
         return
         ;;
@@ -605,7 +627,14 @@ deployment_state() {
     esac
     return
   fi
-  DEPLOYMENT_STATE="$(listener_install_state)"
+  F_SEVERITY=() F_CODE=() F_SUBJECT=() F_MESSAGE=()
+  parse_listener
+  case "$LISTENER_STATE" in
+    ABSENT) DEPLOYMENT_STATE=ABSENT ;;
+    CONFLICT) DEPLOYMENT_STATE=CONFLICT ;;
+    AMBIGUOUS) DEPLOYMENT_STATE=AMBIGUOUS ;;
+    *) DEPLOYMENT_STATE=CONFLICT ;;
+  esac
 }
 
 classify_install_state() {
@@ -690,7 +719,7 @@ wait_for_readiness() {
 }
 
 run_install() {
-  local package_state final_status future_headroom
+  local package_state final_status future_headroom state_findings_status
   local -a state_findings_severity=() state_findings_code=() state_findings_subject=() state_findings_message=()
 
   resolve_executable UNAME_BIN HRT_UNAME_BIN uname
@@ -708,6 +737,11 @@ run_install() {
   resolve_executable CURL_BIN HRT_CURL_BIN curl
   resolve_executable STAT_BIN HRT_STAT_BIN stat
   classify_install_state
+  # Deployment classification uses the shared findings arrays for its own evidence.
+  if [[ "$PACKAGE_STATE" == UNINSPECTABLE && "$(status_for_findings)" == PASS ]]; then
+    add_finding ERROR HEADROOM_VERSION_UNREADABLE headroom \
+      "Headroom CLI version could not be inspected."
+  fi
   state_findings_status="$(status_for_findings)"
   state_findings_severity=("${F_SEVERITY[@]}")
   state_findings_code=("${F_CODE[@]}")
@@ -758,7 +792,10 @@ run_install() {
       return 2
       ;;
   esac
-  future_headroom="${UV_TOOL_BIN_DIR:-${XDG_BIN_HOME:-$RUNTIME_HOME/.local/bin}}/headroom"
+  future_headroom="$(headroom_tool_path)"
+  if [[ -z "$future_headroom" ]]; then
+    future_headroom="$(headroom_tool_bin_dir)/headroom"
+  fi
   if [[ "$INSTALL_STATE" == ABSENT ]]; then
     install_package
     if [[ "$DRY_RUN" -eq 1 ]]; then

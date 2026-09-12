@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-readonly SCRIPT_VERSION="0.1.0"
+readonly SCRIPT_VERSION="0.1.1"
 readonly HEADROOM_VERSION="0.37.0"
 readonly HEADROOM_PYTHON="3.13"
 readonly HEADROOM_PROFILE="default"
@@ -751,7 +751,7 @@ classify_removal_deployment() {
   local code
 
   F_SEVERITY=() F_CODE=() F_SUBJECT=() F_MESSAGE=()
-  if [[ -e "$MANIFEST_PATH" || -e "$SYSTEMD_USER_DIR/headroom-default.service" ]]; then
+  if [[ -e "$HEADROOM_DEPLOY_ROOT/$HEADROOM_PROFILE" || -e "$SYSTEMD_USER_DIR/headroom-default.service" ]]; then
     check_manifest
     case "$(status_for_findings)" in
       ERROR) DEPLOYMENT_STATE=AMBIGUOUS ;;
@@ -778,6 +778,11 @@ classify_removal_deployment() {
         "A Headroom-owned listener exists without a managed deployment."
       DEPLOYMENT_STATE=AMBIGUOUS
       ;;
+    *)
+      add_finding ERROR HEADROOM_STATE_INDETERMINATE headroom \
+        "Headroom deployment state could not be determined."
+      DEPLOYMENT_STATE=AMBIGUOUS
+      ;;
   esac
 }
 
@@ -790,8 +795,22 @@ demote_opencode_findings() {
   done
 }
 
-report_removal_opencode_warnings() {
-  F_SEVERITY=() F_CODE=() F_SUBJECT=() F_MESSAGE=()
+report_removal_warnings() {
+  local code mutation_risk=0
+
+  for code in "${F_CODE[@]}"; do
+    case "$code" in
+      HEADROOM_TARGETS_CONFIGURED|HEADROOM_MUTATIONS_PRESENT) mutation_risk=1 ;;
+    esac
+  done
+  demote_opencode_findings
+  for code in "${!F_SEVERITY[@]}"; do
+    F_SEVERITY[code]=WARN
+  done
+  if (( mutation_risk )); then
+    add_finding WARN HEADROOM_REMOVAL_MAY_REVERT_MUTATIONS "$MANIFEST_PATH" \
+      "Upstream removal may revert recorded Headroom mutations."
+  fi
   check_opencode_config
   check_opencode_environment
   check_unit_independence
@@ -832,6 +851,7 @@ run_remove() {
   resolve_executable SS_BIN HRT_SS_BIN ss
   # Resolve the uv destination before headroom_tool_path can classify its ownership.
   resolve_headroom_tool_bin_dir
+  (( UNINSTALL_TOOL == 0 )) || resolve_executable UV_BIN HRT_UV_BIN uv
   classify_removal_deployment
   status="$(status_for_findings)"
   case "$DEPLOYMENT_STATE" in
@@ -852,7 +872,6 @@ run_remove() {
       case "$PACKAGE_STATE" in
         ABSENT) return 0 ;;
         EXACT)
-          resolve_executable UV_BIN HRT_UV_BIN uv
           run "$UV_BIN" tool uninstall headroom-ai
           return 0
           ;;
@@ -884,10 +903,9 @@ run_remove() {
       return 1
       ;;
   esac
-  report_removal_opencode_warnings
+  report_removal_warnings
   run "$HEADROOM_BIN" install remove --profile "$HEADROOM_PROFILE"
   if (( UNINSTALL_TOOL )); then
-    resolve_executable UV_BIN HRT_UV_BIN uv
     run "$UV_BIN" tool uninstall headroom-ai
   fi
   (( DRY_RUN )) && return 0

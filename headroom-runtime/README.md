@@ -1,6 +1,6 @@
 # Headroom Runtime
 
-Version `0.1.0` installs, audits, and removes the opt-in Headroom `0.37.0`
+Version `0.1.1` installs, audits, and removes the opt-in Headroom `0.37.0`
 runtime. It runs Headroom as an independent loopback-only user service; it does
 not optimize any OpenCode traffic.
 

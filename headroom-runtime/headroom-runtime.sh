@@ -802,7 +802,7 @@ wait_for_readiness() {
 }
 
 run_install() {
-  local package_state final_status future_headroom state_findings_status
+  local package_state final_status future_headroom readiness_indeterminate=0 state_findings_status
   local -a state_findings_severity=() state_findings_code=() state_findings_subject=() state_findings_message=()
 
   resolve_executable UNAME_BIN HRT_UNAME_BIN uname
@@ -921,18 +921,18 @@ run_install() {
   apply_deployment "$HEADROOM_BIN"
   if [[ "$DRY_RUN" -eq 1 ]]; then return 0; fi
   if ! wait_for_readiness; then
-    audit_runtime_without_readiness
-    add_readiness_findings
-    deduplicate_findings
-    final_status="$(status_for_findings)"
-    render_human "$final_status"
-    case "$final_status" in
-      PASS|WARN) return 0 ;;
-      FAIL) return 1 ;;
-      ERROR) return 2 ;;
+    case "$READINESS_RESULT" in
+      TRANSPORT|NOT_READY|INVALID_JSON|NO_VERSION|VERSION_MISMATCH) ;;
+      *)
+        readiness_indeterminate=1
+        ;;
     esac
   fi
   audit_runtime_without_readiness
+  if (( readiness_indeterminate )); then
+    add_finding ERROR HEADROOM_STATE_INDETERMINATE headroom-default.service \
+      "Headroom readiness result could not be determined."
+  fi
   add_readiness_findings
   deduplicate_findings
   final_status="$(status_for_findings)"

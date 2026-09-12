@@ -64,7 +64,11 @@ resolve_executable() {
   else
     candidate="$(command -v "$default_name" || true)"
     [[ -n "$candidate" ]] || die_usage "$default_name is required but was not found"
-    candidate="$(readlink -f "$candidate")"
+    if ! candidate="$(readlink -f "$candidate")"; then
+      die_usage "$default_name could not be resolved to an executable path"
+    fi
+    [[ -n "$candidate" && -x "$candidate" ]] ||
+      die_usage "$default_name resolved to a non-executable path"
   fi
 
   printf -v "$output_name" '%s' "$candidate"

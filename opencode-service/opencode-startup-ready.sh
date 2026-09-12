@@ -4,19 +4,16 @@ IFS=$'\n\t'
 
 # Bounded startup-readiness probe for a persistent OpenCode server.
 #
-# READY = the HTTP API answers healthy AND the plugin surface has registered.
+# READY = the HTTP API answers healthy AND a required tool has registered.
 # Exits 0 only when both hold, non-zero once the bounded window closes.
 #
 # Run it from `ExecStartPost=`. Without it `systemctl start` returns as soon as
 # the process exists, so the next command in a script races a server that is
 # listening but not ready.
 #
-# WHY BOTH CHECKS. A server can answer HTTP 200 while a plugin failed to load:
-# plugins build their tool table after their runtime initialises, and that
-# initialisation is what throws when a plugin's own configuration is wrong — a
-# missing channel token, for instance. If the server reports the plugin's tool,
-# the plugin initialised. The server's *declared* configuration is not usable
-# for this: it lists a plugin as configured even when that plugin failed.
+# WHY BOTH CHECKS. A server can answer HTTP 200 before its tool table is usable.
+# The built-in `bash` tool is the gateway-neutral default. Set READY_TOOL_MARKER
+# to a plugin-owned tool when the service must also prove that plugin initialised.
 #
 # DELIBERATELY LOCAL ONLY. No external call of any kind. An outage at a message
 # channel a plugin talks to is a degraded dependency, not a reason to fail a
@@ -30,7 +27,7 @@ HOST="${READY_HOST:-127.0.0.1}"
 PORT="${READY_PORT:-4096}"
 TIMEOUT="${READY_TIMEOUT:-90}"
 INTERVAL="${READY_INTERVAL:-2}"
-MARKER="${READY_TOOL_MARKER:-gateway_status}"
+MARKER="${READY_TOOL_MARKER:-bash}"
 
 readonly BASE="http://${HOST}:${PORT}"
 readonly USERNAME="${OPENCODE_SERVER_USERNAME:-opencode}"
@@ -45,21 +42,28 @@ curl_auth() { # $1 = path; prints the body, returns curl's status
 main() {
   local deadline=$(( SECONDS + TIMEOUT ))
   local http_ok=0 tools_ok=0
+  local health_body="" tools_body=""
 
-  while (( SECONDS < deadline )); do
-    if (( ! http_ok )) && curl_auth /global/health | grep -q '"healthy":true'; then
-      http_ok=1
-      printf 'readiness: OpenCode HTTP ready\n'
+  while true; do
+    if (( ! http_ok )); then
+      if health_body="$(curl_auth /global/health)" &&
+          grep -q '"healthy":true' <<<"$health_body"; then
+        http_ok=1
+        printf 'readiness: OpenCode HTTP ready\n'
+      fi
     fi
-    if (( http_ok )) && (( ! tools_ok )) &&
-        curl_auth /experimental/tool/ids | grep -q "\"${MARKER}\""; then
-      tools_ok=1
-      printf "readiness: plugin initialised (tool '%s' registered)\n" "$MARKER"
+    if (( http_ok )) && (( ! tools_ok )); then
+      if tools_body="$(curl_auth /experimental/tool/ids)" &&
+          grep -q "\"${MARKER}\"" <<<"$tools_body"; then
+        tools_ok=1
+        printf "readiness: tool '%s' registered\n" "$MARKER"
+      fi
     fi
     if (( http_ok )) && (( tools_ok )); then
       printf 'readiness: READY\n'
       return 0
     fi
+    (( SECONDS >= deadline )) && break
     sleep "$INTERVAL"
   done
 
@@ -68,9 +72,9 @@ main() {
     printf 'readiness: NOT READY after %ss — no healthy HTTP response on %s\n' \
       "$TIMEOUT" "$BASE" >&2
   else
-    printf 'readiness: NOT READY after %ss — HTTP is healthy but the plugin did not register %s\n' \
+    printf 'readiness: NOT READY after %ss — HTTP is healthy but tool %s is absent\n' \
       "$TIMEOUT" "$MARKER" >&2
-    printf 'readiness: server alive, plugin dead. Check the plugin config and any token it needs.\n' >&2
+    printf 'readiness: server alive, required tool unavailable. Check OpenCode and plugin logs.\n' >&2
   fi
   return 1
 }

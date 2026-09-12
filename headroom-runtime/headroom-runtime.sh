@@ -174,34 +174,33 @@ check_service_state() {
 }
 
 READINESS_RESULT=""
-READINESS_BODY=""
 READINESS_KOMPRESS_DEGRADED=0
 
 probe_readiness() {
-  local timeout="$1" ready version
+  local timeout="$1" body ready version
   local subject="http://127.0.0.1:${HEADROOM_PORT}/readyz"
 
-  READINESS_RESULT=TRANSPORT READINESS_BODY="" READINESS_KOMPRESS_DEGRADED=0
-  if ! READINESS_BODY="$("$CURL_BIN" --silent --show-error --fail --connect-timeout "$timeout" --max-time "$timeout" "$subject")"; then
+  READINESS_RESULT=TRANSPORT READINESS_KOMPRESS_DEGRADED=0
+  if ! body="$("$CURL_BIN" --silent --show-error --fail --connect-timeout "$timeout" --max-time "$timeout" "$subject")"; then
     return
   fi
-  if ! "$JQ_BIN" -e . >/dev/null <<<"$READINESS_BODY"; then
-    READINESS_RESULT=INVALID
+  if ! "$JQ_BIN" -e . >/dev/null <<<"$body"; then
+    READINESS_RESULT=INVALID_JSON
     return
   fi
-  if ! ready="$("$JQ_BIN" -er '.ready' <<<"$READINESS_BODY")" || [[ "$ready" != true ]]; then
+  if ! ready="$("$JQ_BIN" -er '.ready' <<<"$body")" || [[ "$ready" != true ]]; then
     READINESS_RESULT=NOT_READY
     return
   fi
-  if ! version="$("$JQ_BIN" -er '.version | strings | select(length > 0)' <<<"$READINESS_BODY")"; then
-    READINESS_RESULT=INVALID
+  if ! version="$("$JQ_BIN" -er '.version | strings | select(length > 0)' <<<"$body")"; then
+    READINESS_RESULT=NO_VERSION
     return
   fi
   if [[ "$version" != "$HEADROOM_VERSION" ]]; then
     READINESS_RESULT=VERSION_MISMATCH
     return
   fi
-  if "$JQ_BIN" -e '.kompress.ready == false' >/dev/null <<<"$READINESS_BODY"; then
+  if "$JQ_BIN" -e '.kompress.ready == false' >/dev/null <<<"$body"; then
     READINESS_KOMPRESS_DEGRADED=1
   fi
   READINESS_RESULT=READY
@@ -213,7 +212,8 @@ add_readiness_findings() {
   case "$READINESS_RESULT" in
     TRANSPORT) add_finding FAIL HEADROOM_NOT_READY "$subject" "Headroom readiness endpoint did not succeed." ;;
     NOT_READY) add_finding FAIL HEADROOM_NOT_READY "$subject" "Headroom readiness endpoint did not report ready." ;;
-    INVALID) add_finding ERROR HEADROOM_READINESS_INVALID "$subject" "Headroom readiness response was not valid JSON with a usable version." ;;
+    INVALID_JSON) add_finding ERROR HEADROOM_READINESS_INVALID "$subject" "Headroom readiness response was not valid JSON." ;;
+    NO_VERSION) add_finding ERROR HEADROOM_READINESS_INVALID "$subject" "Headroom readiness response has no usable version." ;;
     VERSION_MISMATCH) add_finding FAIL HEADROOM_READINESS_VERSION_MISMATCH "$subject" "Headroom readiness version does not match the pinned runtime." ;;
     READY)
       (( READINESS_KOMPRESS_DEGRADED == 0 )) ||
@@ -791,7 +791,10 @@ wait_for_readiness() {
     if [[ "$READINESS_RESULT" == READY ]]; then
       return 0
     fi
-    [[ "$READINESS_RESULT" == TRANSPORT || "$READINESS_RESULT" == NOT_READY ]] || return 1
+    case "$READINESS_RESULT" in
+      TRANSPORT|NOT_READY) ;;
+      *) return 1 ;;
+    esac
     now="$(uptime_centiseconds)"
     (( now - started < 3000 )) || return 1
     "$SLEEP_BIN" 1

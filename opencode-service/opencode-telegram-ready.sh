@@ -11,6 +11,22 @@ readonly INTERVAL="${TELEGRAM_READY_INTERVAL:-1}"
 readonly OPENCODE_URL="${OPENCODE_API_URL:-http://127.0.0.1:4096}"
 readonly USERNAME="${OPENCODE_SERVER_USERNAME:-opencode}"
 readonly PASSWORD="${OPENCODE_SERVER_PASSWORD:-}"
+readonly SCRIPT_VERSION="0.1.0"
+
+# Answered here, at the top level, rather than as the first statement of main
+# like the sibling helpers do: the INVOCATION_ID requirement below runs before
+# main is ever called, so a guard inside main would let `--version` die on a
+# missing systemd invocation id instead of printing the version.
+#
+# An `if` rather than `[[ ... ]] && { ...; }`, matching the sibling helpers.
+# At this top-level position the `&&` form would in fact be safe -- `set -e`
+# exempts a command that is part of an `&&` list -- but the `if` is safe in
+# EVERY position, including the one where the `&&` form does bite: as a
+# function's last statement, where it returns non-zero and fails the caller.
+if [[ "${1:-}" == "--version" ]]; then
+  printf '%s\n' "$SCRIPT_VERSION"
+  exit 0
+fi
 
 : "${INVOCATION_ID:?systemd invocation id is required}"
 

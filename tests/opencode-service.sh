@@ -438,7 +438,7 @@ test_shipped_scripts_are_executable_and_syntactically_valid() {
 
 test_service_helpers_declare_and_print_their_versions() {
   local script
-  for script in "$CONSUMER" "$READY"; do
+  for script in "$CONSUMER" "$READY" "$TELEGRAM_READY"; do
     grep -qE '^readonly SCRIPT_VERSION="[0-9]+\.[0-9]+\.[0-9]+"$' "$script" \
       || fail "$script must declare a semantic SCRIPT_VERSION"
 
@@ -455,15 +455,48 @@ test_service_helpers_declare_and_print_their_versions() {
 
 test_service_helpers_survive_no_arguments_under_set_u() {
   # The systemd units invoke these with no arguments at all. The --version
-  # guard must not dereference an unset $1, and its false path must not
-  # terminate the script under set -e.
-  local script output
-  for script in "$CONSUMER" "$READY"; do
-    output="$(bash "$script" 2>&1 || true)"
+  # guard must not dereference an unset $1, and -- the part that matters --
+  # its FALSE path must not terminate the script under set -e.
+  #
+  # Asserting only that the output lacks "unbound variable" and "--version" is
+  # weak: an empty output satisfies both. Each script therefore carries a
+  # positive marker proving main was actually reached -- the two probes emit a
+  # diagnostic, while the restart consumer legitimately writes nothing and
+  # exits 0 on its no-work path.
+  #
+  # What this does NOT prove, despite an earlier claim in this suite: it does
+  # not catch a guard rewritten as `[[ ... ]] && { ...; }`. That form was
+  # measured against bash 5.2 and is exempt from errexit both at top level and
+  # as a function's first statement; it only fails the caller when it is a
+  # function's LAST statement, which no guard here is. The markers catch a
+  # guard that always fires, and any other early exit before main.
+  local entry script marker output status
+  for entry in \
+    "$CONSUMER|" \
+    "$READY|readiness:" \
+    "$TELEGRAM_READY|systemd invocation id is required"; do
+    script="${entry%%|*}"
+    marker="${entry#*|}"
+
+    set +e
+    output="$(RESTART_IDLE_TIMEOUT=0 RESTART_IDLE_INTERVAL=0 \
+              READY_TIMEOUT=0 READY_INTERVAL=0 \
+              TELEGRAM_READY_TIMEOUT=0 TELEGRAM_READY_INTERVAL=0 \
+              bash "$script" 2>&1)"
+    status=$?
+    set -e
+
     [[ "$output" != *"unbound variable"* ]] \
       || fail "$script must not dereference an unset \$1"
     [[ "$output" != *"--version"* ]] \
       || fail "$script must not print version output with no arguments"
+
+    if [[ -n "$marker" ]]; then
+      [[ "$output" == *"$marker"* ]] \
+        || fail "$script must reach main with no arguments; expected '$marker', got: $output"
+    else
+      assert_equal "$status" "0" "$script must reach main and complete its no-work path"
+    fi
   done
 }
 

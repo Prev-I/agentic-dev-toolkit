@@ -69,6 +69,8 @@ agentic-dev-toolkit/
     windows/
       .wslconfig                                   # Template: WSL2 VM settings, applied by hand
       README.md                                    # wsl.conf vs .wslconfig, and the restart step
+  catalog/
+    software-catalog.env                           # Version pins install.sh loads; ships with it
   instructions/
     AGENTS.md                                      # Template: canonical agent instructions
     adapters/

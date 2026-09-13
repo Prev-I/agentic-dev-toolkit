@@ -482,7 +482,7 @@ test_service_helpers_survive_no_arguments_under_set_u() {
     output="$(RESTART_IDLE_TIMEOUT=0 RESTART_IDLE_INTERVAL=0 \
               READY_TIMEOUT=0 READY_INTERVAL=0 \
               TELEGRAM_READY_TIMEOUT=0 TELEGRAM_READY_INTERVAL=0 \
-              bash "$script" 2>&1)"
+              env -u INVOCATION_ID bash "$script" 2>&1)"
     status=$?
     set -e
 

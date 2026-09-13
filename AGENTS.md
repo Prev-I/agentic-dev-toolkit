@@ -18,6 +18,7 @@ executed.
 ```
 environments/linux/install.sh   The workstation installer — the main deliverable
 environments/windows/           Windows-side WSL2 VM settings; a template, never installed
+catalog/software-catalog.env    The version pins install.sh loads; ships with it as one bundle
 instructions/                   AGENTS.md pattern shipped to other projects
   AGENTS.md                     A TEMPLATE for consumers, not this repo's own
   adapters/{claude-code,codex,opencode}/
@@ -72,7 +73,11 @@ documents under `models/routing/opencode/docs/` transcribe them that way.
 
 `tests/install.sh` sources the installer's functions by stripping its final
 `main "$@"` line, so **that line must remain last in the file** — the suite
-asserts it and fails loudly if it moves.
+asserts it and fails loudly if it moves. Its `load_installer_functions` helper
+exports `ADT_CATALOG_FILE`, pointing at this repository's
+`catalog/software-catalog.env`, before sourcing the installer body — the
+installer's own default resolves relative to the sourced copy's temporary
+location and would die on every test otherwise.
 
 Never run the installer itself to test a change; it mutates the machine. Use
 `--dry-run`, which prints every action without performing it.
@@ -86,22 +91,32 @@ Key flags: `--dry-run`, `--upgrade`, `--verify-only`, `--project PATH`,
 (`runtimes`, `opencode`, `claude`, `codex`, `openspec`, `superpowers`,
 `karpathy`, `quality-tools`, `git-credential`).
 
-Pinned defaults, each overridable by a CLI flag or an `ADT_*` environment
-variable of the same name:
+Pinned defaults live in `catalog/software-catalog.env`, not in this file —
+read it for the current values. `install.sh` and that catalog ship together as
+one bundle; a copy of the script without its catalog does not run.
 
-| Component | Default |
+| Component | Pinned or `latest` |
 |---|---|
-| Java | `temurin-17` (default), `temurin-21` |
-| .NET | `10`, `8` |
-| Python | `3.12` |
-| Node.js | `24` |
-| Bun | `1` |
-| Maven | `3.9.16` |
+| Java | pinned, two versions (`java-17` default, `java-21`) |
+| .NET | pinned, two versions (`dotnet-10` default, `dotnet-8`) |
+| Python | pinned |
+| Node.js | pinned |
+| Bun | pinned |
+| Maven | pinned |
 | dotnet-ef (EF Core CLI, `dotnet:` backend) | `latest` |
 | uv, shellcheck, gitleaks, PyYAML | `latest` |
-| OpenSpec | `1.9.0` |
-| Superpowers | `v6.3.0` |
+| OpenSpec | pinned |
+| Superpowers | pinned |
 | Karpathy guidelines skill | `multica-ai/andrej-karpathy-skills` at a pinned commit |
+
+Every pin has an `ADT_*` environment variable of the same name. **Not every
+pin has a CLI flag** — `maven` and `dotnet-ef` have none. Where a flag exists,
+the effective value's precedence is: the CLI flag, then a set-and-non-empty
+`ADT_*` variable, then the catalog's value.
+
+Bump a script's `SCRIPT_VERSION` in the same commit that changes its
+behaviour: patch for a fix, minor for a new flag or output field, major for a
+removal or a breaking output change.
 
 `install_karpathy_skill` downloads one `SKILL.md` and verifies it against a
 SHA-256 digest before writing. Two destinations cover three harnesses:

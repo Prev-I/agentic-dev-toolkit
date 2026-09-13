@@ -55,6 +55,20 @@ TOOLKIT_MISE_DOMAIN=(
   shellcheck gitleaks
 )
 
+# CATALOG_REQUIRED is the full seventeen-key catalog contract -- the same
+# required set install.sh's CATALOG_REQUIRED declares, in catalog declaration
+# order -- not to be confused with TOOLKIT_MISE_DOMAIN above, which is
+# comparison A's narrower twelve-key mise domain. load_catalog below passes
+# this to validate_kv so a syntactically valid but incomplete catalog is
+# rejected the same way install.sh rejects one, instead of being accepted and
+# blamed on the receipt later.
+# shellcheck disable=SC2034 # read by validate_kv through its nameref
+CATALOG_REQUIRED=(
+  java-17 java-21 dotnet-10 dotnet-8 python node bun maven
+  dotnet-ef uv shellcheck gitleaks pyyaml openspec superpowers
+  karpathy-ref karpathy-sha256
+)
+
 declare -A RECEIPT_VALUES=() RECEIPT_LINES=()
 declare -a RECEIPT_ORDER=()
 RECEIPT_ERROR=""
@@ -889,10 +903,15 @@ audit_mise() {
 
 # load_catalog resets CATALOG_VALUES/CATALOG_LINES/CATALOG_ORDER and loads
 # WTD_CATALOG_FILE through load_kv_file, called directly (never inside a
-# subshell) so its nameref-populated arrays survive. On failure it clears the
-# three arrays back to empty rather than leaving a partial load in place:
-# validate_kv's membership check treats a non-empty MEMBERS array as "a
-# catalog is available", so a half-loaded catalog must not linger as one.
+# subshell) so its nameref-populated arrays survive, then runs the loaded
+# catalog through validate_kv against CATALOG_REQUIRED -- the same
+# seventeen-key contract install.sh enforces -- with an empty list-keys map
+# and an empty members map, since the catalog itself has no list-valued keys
+# and no membership set of its own. On either failure it clears the three
+# arrays back to empty rather than leaving a partial load in place:
+# validate_kv's own membership check (used by load_receipt) treats a
+# non-empty MEMBERS array as "a catalog is available", so a half-loaded or
+# incomplete catalog must not linger as one.
 load_catalog() {
   CATALOG_VALUES=()
   # shellcheck disable=SC2034 # populated by name through load_kv_file's nameref
@@ -900,6 +919,20 @@ load_catalog() {
   CATALOG_ORDER=()
   CATALOG_ERROR=""
   if ! load_kv_file "$WTD_CATALOG_FILE" CATALOG_VALUES CATALOG_LINES CATALOG_ORDER CATALOG_ERROR; then
+    CATALOG_VALUES=()
+    # shellcheck disable=SC2034 # populated by name through load_kv_file's nameref
+    CATALOG_LINES=()
+    CATALOG_ORDER=()
+    return 1
+  fi
+
+  # shellcheck disable=SC2034 # read by validate_kv through its nameref
+  local -A no_lists=()
+  # shellcheck disable=SC2034 # read by validate_kv through its nameref
+  local -A no_members=()
+  local problem
+  if ! problem="$(validate_kv "$WTD_CATALOG_FILE" CATALOG_VALUES CATALOG_LINES CATALOG_ORDER CATALOG_REQUIRED no_lists no_members 2>&1)"; then
+    CATALOG_ERROR="$problem"
     CATALOG_VALUES=()
     # shellcheck disable=SC2034 # populated by name through load_kv_file's nameref
     CATALOG_LINES=()

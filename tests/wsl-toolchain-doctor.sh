@@ -1588,6 +1588,21 @@ assert_not_contains "C does not run without a catalog" "$LAST_OUT" "TOOLKIT_PINS
 assert_not_contains "no catalog is not a receipt validation failure" "$LAST_OUT" "TOOLKIT_RECEIPT_UNREADABLE"
 teardown_fixture
 
+# A catalog that EXISTS and parses, but is missing a required key (node),
+# must be treated as unavailable via validate_kv -- not silently accepted.
+# Before this was wired up, load_catalog returned success on this file,
+# comparison C dropped node with no diagnostic, and the receipt's own
+# requested.node -- which every real receipt carries -- was rejected as "not
+# a catalog key", blaming the receipt for a defect that was the catalog's.
+setup_fixture
+setup_toolkit_baseline
+sed -i '/^node=24$/d' "$TMP_ROOT/catalog.env"
+run_doctor audit
+assert_contains "a catalog missing a required key is unavailable" "$LAST_OUT" "TOOLKIT_CATALOG_UNAVAILABLE"
+assert_contains "the message names the missing key" "$LAST_OUT" "missing required key: node"
+assert_not_contains "the receipt is not blamed for the catalog's defect" "$LAST_OUT" "TOOLKIT_RECEIPT_UNREADABLE"
+teardown_fixture
+
 setup_fixture
 setup_toolkit_baseline
 run_doctor audit

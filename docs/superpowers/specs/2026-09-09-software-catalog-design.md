@@ -1630,10 +1630,12 @@ line in the file.
 **Phase 2 — structural predicates**, numbered here for reference:
 
 1. at least one key matches `requested.*`;
-2. every `requested.*` suffix is a catalog key — walked in **source order**,
-   reporting the earliest offender;
+2. every `requested.*` suffix is a catalog key — walked in **source order**.
+   A suffix the catalog does not pin is **collected, not rejected**; see
+   below;
 3. `requested.karpathy-sha256` is **absent**; its presence is an error;
-4. every `installed.*` suffix is a catalog key — walked in source order.
+4. every `installed.*` suffix is a catalog key — walked in source order, with
+   the same collect-don't-reject rule as predicate 2.
    `installed.karpathy-sha256` satisfies this like any other: **`karpathy-sha256`
    is a catalog key**, so it needs no exception and none is granted;
 5. every element of `skipped` and of `overridden` is a catalog key. This is
@@ -1641,6 +1643,46 @@ line in the file.
 
 Predicates 2, 4 and 5 need a catalog. A doctor with none reports
 `TOOLKIT_CATALOG_UNAVAILABLE` and evaluates only 1 and 3.
+
+#### An unknown suffix is reported, never fatal
+
+Predicates 2 and 4 originally **rejected** a receipt whose `requested.*` or
+`installed.*` suffix the current catalog did not pin. That made retiring a
+single catalog pin a fleet-wide outage: every existing receipt names the
+retired component, so every receipt became unreadable at once, and because an
+unreadable receipt skips **all three comparisons**, the entire `TOOLKIT_`
+domain went dark on every provisioned machine — for every component, not just
+the retired one — until each machine was reprovisioned. Deleting one line from
+a data file should not do that.
+
+It also contradicted this design's own `adt-kv` rule that unknown keys are
+accepted and retained precisely so an older reader survives a newer file.
+
+So an unknown suffix is **collected and reported**: one `INFO`
+`TOOLKIT_RECEIPT_UNKNOWN_KEY` per key, subject the key itself, and the receipt
+stays readable so every still-pinned component is still compared.
+
+The code is named for what it **observes**, not for a cause it cannot
+determine. An unknown suffix means either the pin was retired or the receipt
+was hand-edited, and the doctor has no way to tell them apart — a retirement
+produces a perfectly well-formed receipt. The message names both
+possibilities rather than asserting one.
+
+`INFO`, not `WARN`: retirement is the expected common case, and a `WARN` on
+every machine after every retirement is how a finding gets muted.
+
+Everything else still rejects. Grammar violations, duplicate keys, missing
+required keys and a present `requested.karpathy-sha256` all make the receipt
+unreadable as before. This removes one specific rejection; it does not weaken
+validation.
+
+Note what the comparisons already do, unchanged: C iterates `CATALOG_ORDER`,
+so a retired key is never visited. A iterates its fixed twelve-key domain and
+B is hardcoded per component, so both keep comparing a retired component that
+is still on the machine. That is the intended split — retirement means the
+toolkit no longer has an opinion about **which version** you should run, while
+**what you have and whether it changed** remains observable and worth
+reporting.
 
 **The numbering above is conceptual, and does not match execution order.**
 Predicate 5 does not run where the list above places it. `load_receipt` makes
@@ -2064,13 +2106,9 @@ iteration is what makes the comparison forward-compatible:
   not stale on a pin it was never offered; that is a case for reprovisioning,
   not a warning, and the receipt has nothing to compare against.
 - a `requested.*` key no longer in the catalog — a component since removed —
-  is likewise outside C in principle, since it falls outside the intersection.
-  **In practice this case is unreachable**: receipt validation's phase-2
-  predicate 2 already rejects any receipt carrying a `requested.*` suffix that
-  is not a catalog key, so such a receipt never survives `load_receipt` and C
-  never runs against it at all. The bullet above records the intended
-  direction of forward-compatibility should predicate 2 ever be relaxed; it is
-  not describing a case C has to handle today.
+  is likewise **outside C and produces no finding**, because it falls outside
+  the intersection. This case is **reachable**, and it is the one that makes
+  retiring a pin survivable; see the predicate change below.
 
 `TOOLKIT_STALE_PIN` is emitted for a component in that intersection **only when
 all four hold**:

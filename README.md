@@ -95,7 +95,10 @@ agentic-dev-toolkit/
             expert.md                              # Escalation-only expert subagent
   azure-artifacts/
     README.md                                      # Opt-in Gewiss Azure Artifacts adapter
-    configure.sh                                   # Host mise credential configuration
+    configure.sh                                   # WSL mise credential configuration
+    configure-windows.ps1                          # Optional Windows-native Maven setup
+    windows/                                       # Credential Manager module and Maven wrapper
+    docs/evidence/                                 # Sanitized host validation records
   repository-policy/
     README.md                                      # Format, usage and agent guidance
     validate.sh                                    # Policy validator
@@ -187,7 +190,7 @@ has **Packaging Read** scope:
 ~/.local/bin/mise exec -- dotnet --info
 ```
 
-The configurator keeps the PAT only in
+The WSL configurator keeps the PAT only in
 `~/.config/mise/secrets/azure-artifacts.env` (mode `0600`) and creates the mise fragment at
 `~/.config/mise/conf.d/azure-artifacts.toml`. mise derives `AZDO_MAVEN_PAT` and the NuGet
 variables `NuGetPackageSourceCredentials_JoinOn` and
@@ -196,6 +199,12 @@ reference `${env.AZDO_MAVEN_PAT}`. Real PATs never belong in Git, issue descript
 support transcripts.
 Normal setup and rotation use the hidden `/dev/tty` prompt. `--pat-stdin` is for migration or
 controlled automation only.
+
+Windows-native Maven uses the separate PowerShell adapter documented in the component runbook. When
+enabled, it stores a second protected PAT copy in Windows Credential Manager and invokes Maven through
+`%USERPROFILE%\.local\bin\mvn-azure.ps1`; it does not persist the PAT in the Windows user
+environment. Run `azure-artifacts\configure-windows.ps1` from Windows PowerShell only when native
+Windows Maven support is required.
 
 To rotate the credential, rerun `./azure-artifacts/configure.sh` with a new Packaging Read PAT,
 then run `--verify-only` and the cold-cache work test. Revoke the old PAT only after the new PAT

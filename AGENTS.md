@@ -28,8 +28,11 @@ wsl-toolchain-doctor/           Linux-first PATH and toolchain auditor for WSL
 opencode-service/               Readiness probes for OpenCode and its Telegram
                                 sidecar, plus an optional plugin restart consumer
 headroom-runtime/               Opt-in standalone Headroom install, audit, and removal CLI
-azure-artifacts/                Host Azure Artifacts credential configuration through mise
+azure-artifacts/                WSL mise and optional Windows Maven Azure Artifacts adapters
 azure-artifacts/README.md       Opt-in Gewiss adapter contract and operations
+azure-artifacts/configure-windows.ps1  Optional Windows-native Maven setup
+azure-artifacts/windows/        Credential Manager module and Maven wrapper
+azure-artifacts/docs/evidence/  Sanitized host validation records
 docs/multi-agent-workspace-guide.md
 docs/wsl-toolchain-doctor.md    Operational documentation for the doctor
 docs/opencode-service.md        Running OpenCode as a persistent service, and
@@ -41,6 +44,7 @@ tests/wsl-toolchain-doctor.sh   Test suite for the doctor
 tests/opencode-service.sh       Test suite for the service scripts
 tests/headroom-runtime.sh       Test suite for the Headroom runtime
 tests/azure-artifacts.sh        Test suite for Azure Artifacts configuration
+tests/azure-artifacts-windows.ps1  Windows adapter behavior invoked by the Azure suite
 ```
 
 **`instructions/AGENTS.md` is a deliverable, not this file.** It is the template
@@ -65,6 +69,8 @@ bash -n headroom-runtime/headroom-runtime.sh
 bash -n tests/headroom-runtime.sh
 bash -n azure-artifacts/configure.sh
 bash -n tests/azure-artifacts.sh
+# On Windows or WSL with Windows PowerShell available:
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/azure-artifacts-windows.ps1
 shellcheck azure-artifacts/configure.sh tests/azure-artifacts.sh \
   environments/linux/install.sh tests/install.sh \
   tests/repository-policy.sh repository-policy/validate.sh \
@@ -91,7 +97,7 @@ Never run the installer itself to test a change; it mutates the machine. Use
 
 ## Azure Artifacts authentication
 
-`azure-artifacts/configure.sh` makes mise the sole owner of host credential injection. It stores
+`azure-artifacts/configure.sh` makes mise the sole owner of WSL host credential injection. It stores
 a Packaging Read PAT at `~/.config/mise/secrets/azure-artifacts.env` and configures
 `~/.config/mise/conf.d/azure-artifacts.toml`; Maven's `~/.m2/settings.xml` contains only
 `${env.AZDO_MAVEN_PAT}`, while NuGet receives
@@ -107,6 +113,14 @@ configurator with a new Packaging Read PAT, then require the new PAT passes veri
 cold-cache work test. Revoke the old PAT only once rollback no longer needs the old credential.
 Normal setup and rotation use the hidden `/dev/tty` prompt. `--pat-stdin` is for migration or
 controlled automation only.
+
+Optional Windows-native Maven support uses `azure-artifacts/configure-windows.ps1`. It installs a
+Credential Manager helper and `mvn-azure.ps1` under `%USERPROFILE%\.local\bin`, stores a second
+protected PAT copy as the Generic Credential `agentic-dev-toolkit/AzureArtifacts`, and rewrites only
+the Windows `Foundation` Maven password to `${env.AZDO_MAVEN_PAT}`. Windows Maven must then run
+through the wrapper; a dedicated child PowerShell process receives the PAT and invokes Maven, while
+the caller and persistent user environment remain unchanged. Normal Windows setup uses the hidden
+PowerShell prompt. `-PatStdin` is for controlled migration or tests only.
 
 When initial migration reused an exposed current PAT, keep the rollback window as short as
 practical. Until a replacement PAT passes verification and cold-cache smoke tests, either complete
@@ -320,8 +334,9 @@ script under `set -e` instead of capturing the status.
 
 ## Conventions
 
-- **Bash only.** `set -Eeuo pipefail` and `IFS=$'\n\t'` at the top of every
-  script.
+- **Bash by default.** Bash scripts use `set -Eeuo pipefail` and `IFS=$'\n\t'`.
+  The Windows Azure Artifacts adapter is the explicit PowerShell exception and uses
+  `$ErrorActionPreference = 'Stop'`.
 - **Every mutating action goes through `run` or `run_sudo`**, which echo the
   command and skip execution under `--dry-run`. Calling a mutating command
   directly silently breaks dry-run mode.
@@ -333,6 +348,8 @@ script under `set -e` instead of capturing the status.
   silently stops analysis of the enclosing function.
 - **`*.sh` is pinned to `eol=lf`** in `.gitattributes`. A CRLF shebang makes bash
   refuse the script outright.
+- PowerShell files are also pinned to LF so one checkout has deterministic bytes when the same
+  scripts run through Windows PowerShell from WSL or are copied to the Windows profile.
 - Shell scripts are tracked executable (`100755`); the tests invoke several
   directly. Suite entry points under `tests/` are the exception at `100644`,
   because they are always run as `bash tests/<name>.sh`.

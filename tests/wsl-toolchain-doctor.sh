@@ -758,7 +758,7 @@ setup_fixture
 WTD_TEST_SCAN_PATH="$TMP_ROOT/linux/bin" run_doctor audit --json
 assert_eq "clean JSON audit exits zero" "$LAST_RC" "0"
 assert_contains "JSON audit exposes schema version" "$LAST_OUT" '"schemaVersion":1'
-assert_contains "JSON audit exposes v0.4.0 tool version" "$LAST_OUT" '"toolVersion":"0.4.0"'
+assert_contains "JSON audit exposes v0.5.0 tool version" "$LAST_OUT" '"toolVersion":"0.5.0"'
 assert_contains "JSON audit exposes action" "$LAST_OUT" '"action":"audit"'
 assert_contains "JSON audit exposes PASS status" "$LAST_OUT" '"status":"PASS"'
 assert_contains "JSON audit contains finding code" "$LAST_OUT" '"code":"WSL_INTEROP_ENABLED"'
@@ -852,8 +852,8 @@ teardown_fixture
 # v0.3.0 regression: package version and PATH hygiene/remediation
 setup_fixture
 run_doctor --version
-assert_eq "tool reports v0.4.0" "$LAST_RC" "0"
-assert_eq "version string is exactly 0.4.0" "$LAST_OUT" "0.4.0"
+assert_eq "tool reports v0.5.0" "$LAST_RC" "0"
+assert_eq "version string is exactly 0.5.0" "$LAST_OUT" "0.5.0"
 teardown_fixture
 
 setup_fixture
@@ -1572,7 +1572,35 @@ overridden=
 requested.not-a-catalog-key=1
 RECEIPT
 run_doctor audit
-assert_contains "an unknown requested.* suffix is rejected (catalog available)" "$LAST_OUT" "TOOLKIT_RECEIPT_UNREADABLE"
+assert_contains "an unknown requested.* suffix is reported" "$LAST_OUT" "TOOLKIT_RECEIPT_UNKNOWN_KEY"
+assert_contains "the finding names the key" "$LAST_OUT" "requested.not-a-catalog-key"
+assert_not_contains "an unknown suffix does not make the receipt unreadable" "$LAST_OUT" "TOOLKIT_RECEIPT_UNREADABLE"
+teardown_fixture
+
+# Retiring a catalog pin must not take the whole TOOLKIT_ domain dark. A
+# receipt naming a component the catalog no longer pins stays READABLE, so
+# every still-pinned component is still compared. Before this, predicate 2
+# returned 1, the receipt was unreadable, and A, B and C were all skipped on
+# every provisioned machine at once -- a fleet-wide outage caused by deleting
+# one line from the catalog.
+setup_fixture
+setup_toolkit_baseline
+printf 'requested.retired-component=1\n' >> "$TMP_ROOT/receipt.env"
+run_doctor audit
+assert_contains "a retired pin is reported" "$LAST_OUT" "TOOLKIT_RECEIPT_UNKNOWN_KEY"
+assert_not_contains "a retired pin does not make the receipt unreadable" "$LAST_OUT" "TOOLKIT_RECEIPT_UNREADABLE"
+assert_contains "comparison A still runs" "$LAST_OUT" "TOOLKIT_CONFIG_OK"
+assert_contains "comparison C still runs" "$LAST_OUT" "TOOLKIT_PINS_CURRENT"
+teardown_fixture
+
+# The fix must not trade correctness for availability: a receipt that is
+# genuinely malformed is still rejected outright.
+setup_fixture
+setup_toolkit_baseline
+sed -i '/^installed-at=/d' "$TMP_ROOT/receipt.env"
+run_doctor audit
+assert_contains "a receipt missing a required key is still unreadable" "$LAST_OUT" "TOOLKIT_RECEIPT_UNREADABLE"
+assert_contains "the message names the missing key" "$LAST_OUT" "missing required key: installed-at"
 teardown_fixture
 
 # No catalog: C is skipped, A still runs (it needs the mise config, not the

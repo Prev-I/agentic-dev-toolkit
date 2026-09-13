@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-SCRIPT_VERSION="0.4.0"
+SCRIPT_VERSION="0.5.0"
 SCHEMA_VERSION=1
 WSL_CONF="${WTD_WSL_CONF:-/etc/wsl.conf}"
 MOUNTS_FILE="${WTD_MOUNTS_FILE:-/proc/self/mounts}"
@@ -72,6 +72,11 @@ CATALOG_REQUIRED=(
 declare -A RECEIPT_VALUES=() RECEIPT_LINES=()
 declare -a RECEIPT_ORDER=()
 RECEIPT_ERROR=""
+# Receipt keys whose suffix the CURRENT catalog does not pin. Either the pin
+# was retired, or the receipt was hand-edited -- the doctor cannot tell which,
+# so it reports rather than rejects. Rejecting would make retiring one pin
+# take the whole TOOLKIT_ domain dark on every provisioned machine at once.
+declare -a RECEIPT_UNKNOWN_KEYS=()
 
 declare -A CATALOG_VALUES=() CATALOG_LINES=()
 declare -a CATALOG_ORDER=()
@@ -963,6 +968,7 @@ load_receipt() {
   RECEIPT_LINES=()
   RECEIPT_ORDER=()
   RECEIPT_ERROR=""
+  RECEIPT_UNKNOWN_KEYS=()
 
   if ! load_kv_file "$WTD_RECEIPT_FILE" RECEIPT_VALUES RECEIPT_LINES RECEIPT_ORDER RECEIPT_ERROR; then
     return 1
@@ -995,8 +1001,7 @@ load_receipt() {
       [[ "$key" == requested.* ]] || continue
       suffix="${key#requested.}"
       if [[ -z "${CATALOG_VALUES[$suffix]+set}" ]]; then
-        RECEIPT_ERROR="$WTD_RECEIPT_FILE: $key is not a catalog key"
-        return 1
+        RECEIPT_UNKNOWN_KEYS+=("$key")
       fi
     done
   fi
@@ -1011,8 +1016,7 @@ load_receipt() {
       [[ "$key" == installed.* ]] || continue
       suffix="${key#installed.}"
       if [[ -z "${CATALOG_VALUES[$suffix]+set}" ]]; then
-        RECEIPT_ERROR="$WTD_RECEIPT_FILE: $key is not a catalog key"
-        return 1
+        RECEIPT_UNKNOWN_KEYS+=("$key")
       fi
     done
   fi
@@ -1401,6 +1405,11 @@ audit_toolkit() {
     add_finding INFO TOOLKIT_RECEIPT_UNREADABLE "$WTD_RECEIPT_FILE" "$RECEIPT_ERROR"
     return 0
   fi
+
+  local unknown_key
+  for unknown_key in ${RECEIPT_UNKNOWN_KEYS[@]+"${RECEIPT_UNKNOWN_KEYS[@]}"}; do
+    add_finding INFO TOOLKIT_RECEIPT_UNKNOWN_KEY "$unknown_key" "This receipt names a component the catalog no longer pins; it is excluded from staleness checking. Either the pin was retired, or this receipt was edited by hand."
+  done
 
   if (( PROBE_MODE == 0 )); then
     add_finding INFO TOOLKIT_INSTALLED_NOT_PROBED "$WTD_RECEIPT_FILE" "Run 'audit --probe' to compare installed versions against a fresh probe."

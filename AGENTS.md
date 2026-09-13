@@ -96,8 +96,10 @@ a Packaging Read PAT at `~/.config/mise/secrets/azure-artifacts.env` and configu
 `~/.config/mise/conf.d/azure-artifacts.toml`; Maven's `~/.m2/settings.xml` contains only
 `${env.AZDO_MAVEN_PAT}`, while NuGet receives
 `NuGetPackageSourceCredentials_JoinOn` and `NuGetPackageSourceCredentials_Foundation` through
-mise. Maven and NuGet files contain references only. Real PATs never belong in Git, test output,
-logs, or support transcripts; no test may print a real or synthetic PAT.
+mise. Active Maven and NuGet files contain references only. The temporary Maven rollback copy or
+symlink can still expose the superseded PAT and remains credential-bearing until retired. Real PATs
+never belong in Git, test output, logs, or support transcripts; no test may print a real or
+synthetic PAT.
 
 Run `./azure-artifacts/configure.sh` to configure, or
 `./azure-artifacts/configure.sh --verify-only` to verify its structure. Rotate by rerunning the
@@ -106,9 +108,11 @@ cold-cache work test. Revoke the old PAT only once rollback no longer needs the 
 Normal setup and rotation use the hidden `/dev/tty` prompt. `--pat-stdin` is for migration or
 controlled automation only.
 
-When initial migration reused the exposed current PAT, its rollback exposure has a hard deadline:
-By 2026-09-14, either complete replacement-PAT rotation, smoke testing, and revocation, or roll back or stop using the exposed credential.
-This is an operational deadline, not automatic enforcement.
+When initial migration reused an exposed current PAT, keep the rollback window as short as
+practical. Until a replacement PAT passes verification and cold-cache smoke tests, either complete
+that rotation promptly or roll back or stop using the exposed credential. After the replacement is
+proven, revoke the superseded PAT, remove or sanitize the plaintext Windows Maven settings target,
+and delete the rollback copy or symlink.
 
 To roll back, first disable the exact mise fragment and move or remove generated settings. The
 secret file remains dormant and unloaded once the fragment is disabled; remove it after rollback if
@@ -122,6 +126,9 @@ mv ~/.m2/settings.xml ~/.m2/settings.xml.mise-azure-artifacts-disabled
 mv ~/.config/mise/conf.d/azure-artifacts.toml ~/.config/mise/conf.d/azure-artifacts.toml.disabled
 mv ~/.m2/settings.xml.pre-mise-azure-artifacts ~/.m2/settings.xml
 ```
+
+Treat that rollback object as credential-bearing until inspected and retired. The configurator
+enforces mode `0700` on `~/.m2`; rollback does not restore a former directory mode.
 
 If `~/.m2/settings.xml.pre-mise-azure-artifacts` does not exist, this was a fresh host: move or
 remove the generated settings and exact TOML fragment, then leave `~/.m2/settings.xml` absent.

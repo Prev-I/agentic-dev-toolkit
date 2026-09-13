@@ -50,6 +50,12 @@ load_installer_functions() {
   unset 'installer_lines[-1]'
   printf '%s\n' "${installer_lines[@]}" > "$TEMP_DIR/install-functions.sh"
 
+  # The installer resolves its catalog relative to its own location. The copied
+  # body sits in the temporary directory, so ../.. lands in the system temporary
+  # tree rather than the repository; the seam names the repository's catalog.
+  ADT_CATALOG_FILE="${ADT_CATALOG_FILE:-$REPOSITORY_ROOT/catalog/software-catalog.env}"
+  export ADT_CATALOG_FILE
+
   # The production script performs work through main; tests load only its functions.
   # shellcheck disable=SC1091
   source "$TEMP_DIR/install-functions.sh"
@@ -243,11 +249,12 @@ test_mise_configuration_pins_bun() {
   # as a runtime, so the major it resolves to changes how a project builds and
   # what its lockfile means.
   #
-  # The default is asserted against the installer SOURCE, for the same reason
-  # the Python default is: BUN_VERSION is a global that other tests here assign
-  # to, so a rendered-output check could pass on an inherited value.
-  grep -qE '^BUN_VERSION="\$\{ADT_BUN_VERSION:-1\}"$' "$INSTALLER" \
-    || fail "installer must default BUN_VERSION to the 1 major"
+  # The default is asserted against the CATALOG, for the same reason the Python
+  # default is: BUN_VERSION is a global that other tests here assign to, so a
+  # rendered-output check could pass on an inherited value. The catalog is now
+  # where the default is declared, so that is where the assertion points.
+  grep -qxE 'bun=1' "$CATALOG_FILE" \
+    || fail "the catalog must default bun to the 1 major"
 
   # The dynamically sourced installer reads these globals.
   # shellcheck disable=SC2034
@@ -333,15 +340,15 @@ test_installer_defaults_python_to_312() {
   # Python was moved 3.14 -> 3.12 to match what the reference workstation
   # actually runs; the previous default was declared but never effective.
   #
-  # This asserts against the installer SOURCE rather than calling
+  # This asserts against the CATALOG rather than calling
   # render_mise_configuration, deliberately: PYTHON_VERSION is a global that
   # earlier tests in this file assign to, so a rendered-output check would
   # pass on a value inherited from whichever test ran before it rather than
-  # on the declared default.
-  grep -qE '^PYTHON_VERSION="\$\{ADT_PYTHON_VERSION:-3\.12\}"$' "$INSTALLER" \
-    || fail "installer must default PYTHON_VERSION to 3.12"
-  grep -qE '^DOTNET_EF_VERSION="\$\{ADT_DOTNET_EF_VERSION:-latest\}"$' "$INSTALLER" \
-    || fail "installer must default DOTNET_EF_VERSION to latest"
+  # on the declared default. The catalog is now where that default is declared.
+  grep -qxE 'python=3\.12' "$CATALOG_FILE" \
+    || fail "the catalog must default python to 3.12"
+  grep -qxE 'dotnet-ef=latest' "$CATALOG_FILE" \
+    || fail "the catalog must default dotnet-ef to latest"
 }
 
 test_mise_configuration_omits_maven_when_runtimes_skipped() {
@@ -1009,9 +1016,791 @@ test_git_credential_wrapper_is_valid_shell_and_rewritten_on_change() {
   teardown_credential_sandbox "$original_home"
 }
 
+readonly CATALOG_FILE="$REPOSITORY_ROOT/catalog/software-catalog.env"
+
+kv_fixture() {
+  # kv_fixture NAME CONTENT  -> prints the fixture path
+  local path="$TEMP_DIR/kv-$1.env"
+  printf '%s' "$2" > "$path"
+  printf '%s' "$path"
+}
+
+test_reader_loads_a_valid_file_in_source_order() {
+  local -A values=() lines=()
+  local -a order=()
+  local err="sentinel"
+
+  local path
+  path="$(kv_fixture valid '# comment
+alpha=1
+
+beta=two
+')"
+
+  load_kv_file "$path" values lines order err \
+    || fail "a valid file must load: $err"
+
+  assert_equal "$err" "" "success must clear the caller error scalar"
+  assert_equal "${values[alpha]}" "1" "alpha must load"
+  assert_equal "${values[beta]}" "two" "beta must load"
+  assert_equal "${lines[beta]}" "4" "beta must record its source line"
+  assert_equal "${order[0]}" "alpha" "order must follow the source"
+  assert_equal "${order[1]}" "beta" "order must follow the source"
+}
+
+test_reader_keeps_a_final_line_with_no_newline() {
+  local -A values=() lines=()
+  local -a order=()
+  local err=""
+  local path
+  path="$(kv_fixture nonewline 'alpha=1')"
+
+  load_kv_file "$path" values lines order err || fail "must load: $err"
+  assert_equal "${values[alpha]}" "1" "an unterminated final line must survive"
+}
+
+test_reader_normalizes_crlf() {
+  local -A values=() lines=()
+  local -a order=()
+  local err=""
+  local path
+  path="$(kv_fixture crlf $'alpha=1\r\nbeta=2\r\n')"
+
+  load_kv_file "$path" values lines order err || fail "must load: $err"
+  assert_equal "${values[alpha]}" "1" "CRLF must parse as LF"
+  assert_equal "${values[beta]}" "2" "CRLF must parse as LF"
+}
+
+test_reader_reports_a_missing_separator_with_a_line_number() {
+  local -A values=() lines=()
+  local -a order=()
+  local err=""
+  local path
+  path="$(kv_fixture nosep 'alpha=1
+garbage
+')"
+
+  ! load_kv_file "$path" values lines order err \
+    || fail "a line with no '=' must be rejected"
+  [[ "$err" == *":2: missing '=' separator" ]] \
+    || fail "the diagnostic must name file and line, got: $err"
+}
+
+test_reader_reports_a_duplicate_key_with_both_lines() {
+  local -A values=() lines=()
+  local -a order=()
+  local err=""
+  local path
+  path="$(kv_fixture dup 'alpha=1
+alpha=2
+')"
+
+  ! load_kv_file "$path" values lines order err \
+    || fail "a duplicate key must be rejected"
+  [[ "$err" == *":2: duplicate key: alpha (first seen at line 1)" ]] \
+    || fail "the diagnostic must name both lines, got: $err"
+}
+
+test_reader_reports_an_unreadable_file() {
+  local -A values=() lines=()
+  local -a order=()
+  local err=""
+
+  ! load_kv_file "$TEMP_DIR/does-not-exist.env" values lines order err \
+    || fail "a missing file must be rejected"
+  [[ "$err" == "cannot read "* ]] || fail "unexpected diagnostic: $err"
+}
+
+test_shipped_catalog_satisfies_the_complete_schema() {
+  # The fixtures could all pass while the file the installer actually loads
+  # is broken. This is the case that notices.
+  local -A values=() lines=()
+  local -a order=()
+  local err=""
+  local -A no_lists=() no_members=()
+  local -a required=(
+    java-17 java-21 dotnet-10 dotnet-8 python node bun maven
+    dotnet-ef uv shellcheck gitleaks pyyaml openspec superpowers
+    karpathy-ref karpathy-sha256
+  )
+
+  load_kv_file "$CATALOG_FILE" values lines order err \
+    || fail "the shipped catalog must load: $err"
+  assert_equal "${#values[@]}" "17" "the catalog must carry seventeen keys"
+  validate_kv "$CATALOG_FILE" values lines order required no_lists no_members
+}
+
+test_validator_rejects_a_missing_required_key_without_a_line_number() {
+  local -A values=([alpha]=1) lines=([alpha]=1)
+  local -a order=(alpha)
+  local -a required=(alpha beta gamma)
+  local -A no_lists=() no_members=()
+  local output
+
+  output="$( ( validate_kv f values lines order required no_lists no_members ) 2>&1 || true )"
+  [[ "$output" == *"f: missing required key: beta"* ]] \
+    || fail "must report the FIRST missing key, with no line: $output"
+  [[ "$output" != *"gamma"* ]] || fail "must stop at the first missing key"
+}
+
+test_validator_rejects_an_empty_and_a_malformed_scalar_with_line_numbers() {
+  local -A values=([alpha]="") lines=([alpha]=7)
+  local -a order=(alpha)
+  local -a required=()
+  local -A no_lists=() no_members=()
+  local output
+
+  output="$( ( validate_kv f values lines order required no_lists no_members ) 2>&1 || true )"
+  [[ "$output" == *"f:7: empty value for key: alpha"* ]] \
+    || fail "unexpected empty-value diagnostic: $output"
+
+  values[alpha]="has space"
+  output="$( ( validate_kv f values lines order required no_lists no_members ) 2>&1 || true )"
+  [[ "$output" == *"f:7: malformed value for key: alpha"* ]] \
+    || fail "unexpected malformed-value diagnostic: $output"
+}
+
+test_validator_enforces_list_syntax_duplicates_and_membership() {
+  local -A values=() lines=([skipped]=3)
+  local -a order=(skipped)
+  local -a required=()
+  # validate_kv reads these by name through its namerefs.
+  # shellcheck disable=SC2034
+  local -A lists=([skipped]=1)
+  # shellcheck disable=SC2034
+  local -A members=([node]=1 [python]=1)
+  # shellcheck disable=SC2034
+  local -A empty_members=()
+  local output
+
+  values[skipped]=""
+  validate_kv f values lines order required lists members \
+    || fail "an empty list must be valid"
+
+  values[skipped]="node,python"
+  validate_kv f values lines order required lists members \
+    || fail "a valid list must pass"
+
+  local bad
+  for bad in ",node" "node," "node,,python"; do
+    values[skipped]="$bad"
+    output="$( ( validate_kv f values lines order required lists members ) 2>&1 || true )"
+    [[ "$output" == *"f:3: malformed list for key: skipped"* ]] \
+      || fail "'$bad' must be rejected as malformed: $output"
+  done
+
+  values[skipped]="node,node"
+  output="$( ( validate_kv f values lines order required lists members ) 2>&1 || true )"
+  [[ "$output" == *"f:3: duplicate element in skipped: node"* ]] \
+    || fail "a duplicate element must be rejected: $output"
+
+  values[skipped]="node,nonsense"
+  output="$( ( validate_kv f values lines order required lists members ) 2>&1 || true )"
+  [[ "$output" == *"f:3: unknown catalog key in skipped: nonsense"* ]] \
+    || fail "an unknown member must be rejected: $output"
+
+  # With no catalog in hand, syntax and duplicates still apply, membership
+  # does not. This is the doctor's standalone case.
+  values[skipped]="node,nonsense"
+  validate_kv f values lines order required lists empty_members \
+    || fail "membership must be skipped when the member set is empty"
+
+  values[skipped]="node,node"
+  output="$( ( validate_kv f values lines order required lists empty_members ) 2>&1 || true )"
+  [[ "$output" == *"duplicate element"* ]] \
+    || fail "duplicates must still be caught without a member set: $output"
+}
+
+test_validator_reports_the_first_defect_in_source_order() {
+  # Two defects, and the answer must not move between runs.
+  local -A values=([alpha]="bad value" [beta]="also bad") lines=([alpha]=2 [beta]=9)
+  local -a order=(alpha beta)
+  # validate_kv reads these by name through its namerefs.
+  # shellcheck disable=SC2034
+  local -a required=()
+  # shellcheck disable=SC2034
+  local -A no_lists=() no_members=()
+  local first run
+
+  for run in 1 2 3; do
+    first="$( ( validate_kv f values lines order required no_lists no_members ) 2>&1 || true )"
+    [[ "$first" == *"f:2: malformed value for key: alpha"* ]] \
+      || fail "run $run must report the earliest line, got: $first"
+  done
+}
+
+test_every_pin_is_wired_to_its_own_catalog_key() {
+  # The default assertions above point at the catalog file, which proves only
+  # what the catalog CONTAINS. This is what proves the WIRING: that
+  # PYTHON_VERSION reads the python key rather than the node one. A swapped key
+  # in any of the assignments passes every other test in this file, because
+  # they all assign the pin globals themselves before rendering.
+  #
+  # Expectations are read from the catalog file, never hardcoded: a literal
+  # here would merely duplicate the catalog and would still match a swap
+  # between two keys that happen to be edited together.
+  local -A values=() lines=()
+  local -a order=()
+  local err=""
+  local entry key variable override expected
+
+  load_kv_file "$CATALOG_FILE" values lines order err \
+    || fail "the shipped catalog must load: $err"
+
+  # key | installer global | the environment variable that overrides it
+  local -a wiring=(
+    'java-17|JAVA_17_VERSION|ADT_JAVA_17_VERSION'
+    'java-21|JAVA_21_VERSION|ADT_JAVA_21_VERSION'
+    'dotnet-10|DOTNET_10_VERSION|ADT_DOTNET_10_VERSION'
+    'dotnet-8|DOTNET_8_VERSION|ADT_DOTNET_8_VERSION'
+    'python|PYTHON_VERSION|ADT_PYTHON_VERSION'
+    'node|NODE_VERSION|ADT_NODE_VERSION'
+    'bun|BUN_VERSION|ADT_BUN_VERSION'
+    'maven|MAVEN_VERSION|ADT_MAVEN_VERSION'
+    'dotnet-ef|DOTNET_EF_VERSION|ADT_DOTNET_EF_VERSION'
+    'uv|UV_VERSION|ADT_UV_VERSION'
+    'shellcheck|SHELLCHECK_VERSION|ADT_SHELLCHECK_VERSION'
+    'gitleaks|GITLEAKS_VERSION|ADT_GITLEAKS_VERSION'
+    'pyyaml|PYYAML_VERSION|ADT_PYYAML_VERSION'
+    'openspec|OPENSPEC_VERSION|ADT_OPENSPEC_VERSION'
+    'superpowers|SUPERPOWERS_REF|ADT_SUPERPOWERS_REF'
+    'karpathy-ref|KARPATHY_DEFAULT_REF|'
+    'karpathy-sha256|KARPATHY_DEFAULT_SHA256|'
+  )
+
+  for entry in "${wiring[@]}"; do
+    IFS='|' read -r key variable override <<<"$entry"
+
+    # An override in the environment legitimately wins over the catalog, which
+    # would make the comparison below prove nothing. Refuse loudly rather than
+    # weaken the assertion or skip in silence.
+    if [[ -n "$override" && -n "${!override:-}" ]]; then
+      fail "$override is set in this environment and overrides the catalog; unset it to run this suite"
+    fi
+
+    expected="${values[$key]:-}"
+    [[ -n "$expected" ]] || fail "the catalog has no $key key to wire $variable to"
+    assert_equal "${!variable}" "$expected" \
+      "$variable must hold the catalog's $key value"
+  done
+}
+
+run_installer_with_catalog() {
+  # run_installer_with_catalog CONTENT -> prints combined output, never fails
+  local path="$TEMP_DIR/bad-catalog.env"
+  printf '%s' "$1" > "$path"
+  ADT_CATALOG_FILE="$path" bash "$INSTALLER" --dry-run 2>&1 || true
+}
+
+# These three run the installer as a PROGRAM rather than sourcing it: the
+# refusal happens at load, before main, and sourcing a body that dies would
+# take the suite with it.
+test_installer_dies_on_a_missing_catalog() {
+  local output
+  output="$(ADT_CATALOG_FILE="$TEMP_DIR/absent.env" bash "$INSTALLER" --dry-run 2>&1 || true)"
+  [[ "$output" == *"cannot read "* ]] || fail "unexpected output: $output"
+}
+
+test_installer_dies_on_a_malformed_catalog_key() {
+  local output
+  output="$(run_installer_with_catalog 'Bad Key=1
+')"
+  [[ "$output" == *":1: malformed key: Bad Key"* ]] || fail "unexpected: $output"
+}
+
+test_installer_dies_on_a_missing_required_catalog_key() {
+  local output
+  output="$(run_installer_with_catalog 'java-17=temurin-17
+')"
+  [[ "$output" == *"missing required key: java-21"* ]] || fail "unexpected: $output"
+}
+
+test_installer_version_flag() {
+  local output status
+  set +e
+  output="$(bash "$INSTALLER" --version 2>&1)"
+  status=$?
+  set -e
+  assert_equal "$status" "0" "--version must exit 0"
+  assert_equal "$output" "0.1.0" "--version must print exactly the version"
+  [[ "$output" != *"Unknown option"* ]] \
+    || fail "--version must be parsed before the generic unknown-option arm"
+}
+
+test_installer_version_flag_performs_no_installation() {
+  local output
+  output="$(bash "$INSTALLER" --version 2>&1)"
+  [[ "$output" != *"=="* ]] || fail "--version must print no installation log"
+}
+
+test_installer_rejects_an_ungrammatical_override() {
+  local output bad
+  for bad in "24,25" "24 25" "24[0]" ; do
+    output="$(bash "$INSTALLER" --node-version="$bad" --dry-run 2>&1 || true)"
+    [[ "$output" == *"invalid value for 'node' from --node-version"* ]] \
+      || fail "'$bad' must be rejected naming key and source, got: $output"
+  done
+}
+
+test_installer_rejects_an_empty_inline_override() {
+  local output
+  output="$(bash "$INSTALLER" --node-version= --dry-run 2>&1 || true)"
+  [[ "$output" == *"requires a value"* ]] \
+    || fail "an empty inline value must be refused, got: $output"
+}
+
+test_installer_rejects_an_ungrammatical_environment_override() {
+  local output
+  output="$(ADT_MAVEN_VERSION='3.9.16 (rc)' bash "$INSTALLER" --dry-run 2>&1 || true)"
+  [[ "$output" == *"invalid value for 'maven' from ADT_MAVEN_VERSION"* ]] \
+    || fail "unexpected: $output"
+}
+
+test_an_invalid_override_installs_nothing() {
+  local output
+  output="$(bash "$INSTALLER" --node-version="24,25" --dry-run 2>&1 || true)"
+  [[ "$output" != *"Configuring mise runtimes"* ]] \
+    || fail "installation must not begin when an input is invalid"
+}
+
+# --- The install receipt -----------------------------------------------
+#
+# Content is tested by calling write_receipt_body (and its helpers) directly
+# on the sourced installer body, exactly how this suite already tests
+# render_mise_configuration -- never through --dry-run, because
+# write_install_receipt deliberately writes nothing on a dry run. Every test
+# below sets SKIP_RUNTIMES, SKIP_QUALITY_TOOLS, SKIP_OPENSPEC, SKIP_SUPERPOWERS
+# and SKIP_KARPATHY itself, so none of them depends on a probeable tool being
+# on this machine's PATH.
+
+test_overridden_is_a_set_not_an_append_log() {
+  # Both layers name node. One member, never node,node.
+  OVERRIDDEN_SET=()
+  INSTALLED_KARPATHY_SHA256=""
+  SKIP_RUNTIMES=1; SKIP_QUALITY_TOOLS=1; SKIP_OPENSPEC=1
+  SKIP_SUPERPOWERS=1; SKIP_KARPATHY=1
+
+  resolve_pin NODE_VERSION node ADT_NODE_VERSION 22
+  parse_args --node-version 23
+
+  local receipt
+  receipt="$(write_receipt_body)"
+  [[ "$receipt" == *$'\noverridden=node\n'* ]] \
+    || fail "both layers naming node must yield one member: $receipt"
+  [[ "$receipt" != *"node,node"* ]] || fail "a duplicate member must never be written"
+  [[ "$receipt" == *$'\nrequested.node=23\n'* ]] \
+    || fail "the CLI must win for the effective value"
+}
+
+test_overridden_serializes_in_catalog_order() {
+  OVERRIDDEN_SET=()
+  INSTALLED_KARPATHY_SHA256=""
+  SKIP_RUNTIMES=1; SKIP_QUALITY_TOOLS=1; SKIP_OPENSPEC=1
+  SKIP_SUPERPOWERS=1; SKIP_KARPATHY=1
+
+  parse_args --node-version 22 --python-version 3.11
+
+  local receipt
+  receipt="$(write_receipt_body)"
+  [[ "$receipt" == *$'\noverridden=python,node\n'* ]] \
+    || fail "members must serialize in catalog order: $receipt"
+}
+
+test_an_empty_environment_override_is_not_an_override() {
+  OVERRIDDEN_SET=()
+  INSTALLED_KARPATHY_SHA256=""
+  SKIP_RUNTIMES=1; SKIP_QUALITY_TOOLS=1; SKIP_OPENSPEC=1
+  SKIP_SUPERPOWERS=1; SKIP_KARPATHY=1
+
+  resolve_pin NODE_VERSION node ADT_NODE_VERSION ""
+
+  local receipt
+  receipt="$(write_receipt_body)"
+  [[ "$receipt" == *$'\noverridden=\n'* ]] \
+    || fail "an empty ADT_* must not be recorded: $receipt"
+  [[ "$receipt" == *$'\nrequested.node=24\n'* ]] \
+    || fail "an empty ADT_* must fall through to the catalog"
+}
+
+test_excluded_interfaces_never_enter_overridden() {
+  OVERRIDDEN_SET=()
+  INSTALLED_KARPATHY_SHA256=""
+  SKIP_RUNTIMES=1; SKIP_QUALITY_TOOLS=1; SKIP_OPENSPEC=1
+  SKIP_SUPERPOWERS=1; SKIP_KARPATHY=1
+
+  # --gcm-path is a filesystem path and --karpathy-sha256 is integrity
+  # evidence for a custom ref, neither a catalog-derived value. --skip-claude
+  # and --upgrade are operational and name no catalog key.
+  parse_args --gcm-path /tmp/x \
+    --karpathy-sha256 deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef \
+    --skip-claude --upgrade
+
+  local receipt
+  receipt="$(write_receipt_body)"
+  [[ "$receipt" == *$'\noverridden=\n'* ]] \
+    || fail "non-catalog interfaces must not be recorded: $receipt"
+}
+
+test_skip_runtimes_expands_to_the_quality_tools() {
+  SKIP_RUNTIMES=1; SKIP_QUALITY_TOOLS=0; SKIP_OPENSPEC=0
+  SKIP_SUPERPOWERS=0; SKIP_KARPATHY=0
+
+  assert_equal "$(skipped_keys)" \
+    "java-17,java-21,dotnet-10,dotnet-8,python,node,bun,maven,dotnet-ef,uv,shellcheck,gitleaks,pyyaml" \
+    "--skip-runtimes must expand to the runtimes and the three quality tools, in catalog order"
+}
+
+test_skip_claude_alone_leaves_skipped_empty() {
+  SKIP_RUNTIMES=0; SKIP_QUALITY_TOOLS=0; SKIP_OPENSPEC=0
+  SKIP_SUPERPOWERS=0; SKIP_KARPATHY=0
+  # SKIP_CLAUDE has no catalog key, so skipped_keys never reads it; that
+  # absence of a read is exactly what this test asserts.
+  # shellcheck disable=SC2034
+  SKIP_CLAUDE=1
+
+  assert_equal "$(skipped_keys)" "" \
+    "--skip-claude has no catalog key and must not appear in skipped="
+}
+
+test_selective_skip_still_writes_all_sixteen_requested_keys() {
+  OVERRIDDEN_SET=()
+  INSTALLED_KARPATHY_SHA256=""
+  SKIP_RUNTIMES=1; SKIP_QUALITY_TOOLS=0; SKIP_OPENSPEC=1
+  SKIP_SUPERPOWERS=0; SKIP_KARPATHY=1
+
+  local receipt
+  receipt="$(write_receipt_body)"
+
+  assert_equal "$(grep -c '^requested\.' <<<"$receipt")" "16" \
+    "every catalog key except karpathy-sha256 must be requested regardless of skipping"
+  [[ "$receipt" != *$'\nrequested.karpathy-sha256='* ]] \
+    || fail "karpathy-sha256 must never be a requested value"
+  [[ "$receipt" == *$'\nskipped=java-17,java-21,dotnet-10,dotnet-8,python,node,bun,maven,dotnet-ef,uv,shellcheck,gitleaks,pyyaml,openspec,karpathy-ref\n'* ]] \
+    || fail "skipped= must hold the expanded set in catalog order: $receipt"
+}
+
+test_skipped_component_produces_no_probe_and_no_warning() {
+  # Every catalog-derived component is skipped here, so if even one were
+  # probed it would either succeed (this machine has a working mise and
+  # openspec) and print an installed.* line, or fail and warn -- either way
+  # producing output. Empty output is exactly "no probe, no key, no warning".
+  INSTALLED_KARPATHY_SHA256=""
+  SKIP_RUNTIMES=1; SKIP_QUALITY_TOOLS=1; SKIP_OPENSPEC=1
+  SKIP_SUPERPOWERS=1; SKIP_KARPATHY=1
+
+  local output
+  output="$(write_installed_versions 2>&1)"
+
+  [[ -z "$output" ]] \
+    || fail "a skipped component must produce no probe and no warning: $output"
+}
+
+test_failing_probe_does_not_trip_err() {
+  SKIP_RUNTIMES=0; SKIP_QUALITY_TOOLS=1; SKIP_OPENSPEC=1
+  SKIP_SUPERPOWERS=1; SKIP_KARPATHY=1
+
+  local original_mise_bin="$MISE_BIN"
+  local fake_mise="$TEMP_DIR/fake-mise-fails"
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$fake_mise"
+  chmod +x "$fake_mise"
+
+  local output status=0
+  output="$(MISE_BIN="$fake_mise" write_installed_versions 2>&1)" || status=$?
+  MISE_BIN="$original_mise_bin"
+
+  (( status == 0 )) || fail "a failing probe must not trip errexit or the ERR trap (status $status)"
+  [[ "$output" == *"Could not record installed version for node."* ]] \
+    || fail "a failing probe must warn rather than silently drop the key: $output"
+  [[ "$output" != *"installed.node="* ]] \
+    || fail "a failing probe must not write a value: $output"
+}
+
+test_unresolvable_timeout_keeps_karpathy_sha256_and_drops_probe_derived_keys() {
+  SKIP_RUNTIMES=0; SKIP_QUALITY_TOOLS=0; SKIP_OPENSPEC=0
+  SKIP_SUPERPOWERS=0; SKIP_KARPATHY=0
+
+  local original_installed_karpathy_sha256="$INSTALLED_KARPATHY_SHA256"
+  INSTALLED_KARPATHY_SHA256="deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+
+  local output
+  output="$(PATH=/nonexistent write_installed_versions 2>&1)"
+  INSTALLED_KARPATHY_SHA256="$original_installed_karpathy_sha256"
+
+  [[ "$output" == *"timeout is unavailable"* ]] \
+    || fail "an unresolvable timeout must emit one aggregate warning: $output"
+  [[ "$output" == *"installed.karpathy-sha256=deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"* ]] \
+    || fail "karpathy-sha256 is zero-invocation provenance and must survive a missing timeout: $output"
+  [[ "$output" != *"installed.node="* ]] \
+    || fail "no probe-derived key may be written without a resolvable timeout: $output"
+}
+
+test_probe_extraction_matches_the_design_table() {
+  # Exercises every extraction rule in the design's probe table against a
+  # fake mise that speaks each real tool's actual output shape (banners,
+  # (parenthesised) build metadata, [bracketed] SDK paths and all), so the
+  # awk/parameter-expansion pipelines are proven against realistic text, not
+  # just against guarded-failure paths.
+  INSTALLED_KARPATHY_SHA256=""
+  SKIP_RUNTIMES=0; SKIP_QUALITY_TOOLS=0; SKIP_OPENSPEC=0
+  SKIP_SUPERPOWERS=0; SKIP_KARPATHY=1
+  # The dynamically sourced installer reads these globals.
+  # shellcheck disable=SC2034
+  { JAVA_17_VERSION="temurin-17"; JAVA_21_VERSION="temurin-21"; }
+
+  local fake_mise="$TEMP_DIR/fake-mise-probe"
+  cat > "$fake_mise" <<'EOF_FAKE_MISE'
+#!/usr/bin/env bash
+shift
+if [[ "$1" == java@* ]]; then
+  shift
+fi
+if [[ "$1" == "--" ]]; then
+  shift
+fi
+cmd="$1"; shift
+arg1="${1:-}"
+case "$cmd" in
+  node) printf 'v24.3.1\n' ;;
+  bun) printf '1.2.3\n' ;;
+  python)
+    if [[ "$arg1" == "--version" ]]; then
+      printf 'Python 3.12.4\n'
+    else
+      printf '6.0.1\n'
+    fi
+    ;;
+  java)
+    printf 'openjdk version "17.0.9" 2023-10-17\nOpenJDK Runtime Environment Temurin-17.0.9+9\n' >&2
+    ;;
+  mvn) printf 'Apache Maven 3.9.16 (abc123def; 2024-01-01T00:00:00Z)\nMaven home: /opt/maven\n' ;;
+  dotnet) printf '8.0.100 [/usr/share/dotnet/sdk]\n10.0.100 [/usr/share/dotnet/sdk]\n' ;;
+  dotnet-ef) printf 'Entity Framework Core .NET Command-line Tools\n9.0.0\n' ;;
+  uv) printf 'uv 0.4.18\n' ;;
+  shellcheck) printf 'ShellCheck - shell script analysis tool\nversion: 0.9.0\n' ;;
+  gitleaks) printf 'v8.18.2\n' ;;
+esac
+EOF_FAKE_MISE
+  chmod +x "$fake_mise"
+
+  local fake_bin="$TEMP_DIR/fake-bin-probe"
+  mkdir -p "$fake_bin"
+  printf '#!/usr/bin/env bash\nprintf "OpenSpec CLI v1.9.0\\n"\n' > "$fake_bin/openspec"
+  chmod +x "$fake_bin/openspec"
+
+  local output
+  output="$(MISE_BIN="$fake_mise" PATH="$fake_bin:$PATH" write_installed_versions 2>&1)"
+  # Synthetic leading and trailing newlines let every assertion below use the
+  # same "\nkey=value\n" shape: the first key has no newline before it, and
+  # "$(...)" strips the trailing newline off the last one.
+  output=$'\n'"$output"$'\n'
+
+  [[ "$output" == *$'\ninstalled.node=24.3.1\n'* ]] \
+    || fail "node: first line, first field, leading v stripped: $output"
+  [[ "$output" == *$'\ninstalled.bun=1.2.3\n'* ]] \
+    || fail "bun: first line, first field: $output"
+  [[ "$output" == *$'\ninstalled.python=3.12.4\n'* ]] \
+    || fail "python: first line, second field: $output"
+  [[ "$output" == *$'\ninstalled.java-17=17.0.9\n'* ]] \
+    || fail "java-17: first double-quoted token on stderr: $output"
+  [[ "$output" == *$'\ninstalled.java-21=17.0.9\n'* ]] \
+    || fail "java-21: first double-quoted token on stderr: $output"
+  [[ "$output" == *$'\ninstalled.maven=3.9.16\n'* ]] \
+    || fail "maven: first line, third field, trailing (...) discarded: $output"
+  [[ "$output" == *$'\ninstalled.dotnet-10=10.0.100\n'* ]] \
+    || fail "dotnet-10: first field of the line whose major is 10: $output"
+  [[ "$output" == *$'\ninstalled.dotnet-8=8.0.100\n'* ]] \
+    || fail "dotnet-8: first field of the line whose major is 8: $output"
+  [[ "$output" == *$'\ninstalled.dotnet-ef=9.0.0\n'* ]] \
+    || fail "dotnet-ef: last non-empty line, first field, banner discarded: $output"
+  [[ "$output" == *$'\ninstalled.uv=0.4.18\n'* ]] \
+    || fail "uv: first line, second field: $output"
+  [[ "$output" == *$'\ninstalled.shellcheck=0.9.0\n'* ]] \
+    || fail "shellcheck: the field after 'version:': $output"
+  [[ "$output" == *$'\ninstalled.gitleaks=8.18.2\n'* ]] \
+    || fail "gitleaks: first line, first field, leading v stripped: $output"
+  [[ "$output" == *$'\ninstalled.pyyaml=6.0.1\n'* ]] \
+    || fail "pyyaml: first line, first field: $output"
+  [[ "$output" == *$'\ninstalled.openspec=1.9.0\n'* ]] \
+    || fail "openspec: first X.Y.Z match: $output"
+}
+
+test_receipt_is_written_on_success_at_documented_path() {
+  local state_home="$TEMP_DIR/receipt-success"
+  local receipt="$state_home/agentic-dev-toolkit/install-receipt.env"
+
+  # The dynamically sourced installer reads these globals.
+  # shellcheck disable=SC2034
+  { DRY_RUN=0; SKIP_RUNTIMES=1; SKIP_QUALITY_TOOLS=1; SKIP_OPENSPEC=1
+    SKIP_SUPERPOWERS=1; SKIP_KARPATHY=1; }
+  OVERRIDDEN_SET=()
+  INSTALLED_KARPATHY_SHA256=""
+
+  XDG_STATE_HOME="$state_home" write_install_receipt
+
+  [[ -f "$receipt" ]] || fail "the receipt must be written at the documented path"
+
+  local -a leftover=("$state_home"/agentic-dev-toolkit/.install-receipt.*)
+  [[ ! -e "${leftover[0]}" ]] \
+    || fail "no temporary receipt file may survive a successful write: ${leftover[*]}"
+
+  assert_equal "$(stat -c '%a' "$state_home/agentic-dev-toolkit")" "755" \
+    "the state directory must be 0755"
+  assert_equal "$(stat -c '%a' "$receipt")" "644" "the receipt file must be 0644"
+
+  # r_values, r_lines and r_order are populated by name through load_kv_file's
+  # namerefs; required and listkeys are read the same way by validate_kv.
+  # shellcheck disable=SC2034
+  local -A r_values=() r_lines=()
+  # shellcheck disable=SC2034
+  local -a r_order=()
+  local r_err=""
+  load_kv_file "$receipt" r_values r_lines r_order r_err \
+    || fail "the written receipt must load as valid kv: $r_err"
+
+  # shellcheck disable=SC2034
+  local -a required=(script-version installed-at source-commit catalog-sha256 skipped overridden)
+  # shellcheck disable=SC2034
+  local -A listkeys=([skipped]=1 [overridden]=1)
+  validate_kv "$receipt" r_values r_lines r_order required listkeys CATALOG
+}
+
+test_receipt_modes_are_deterministic_under_a_strict_umask() {
+  local state_home="$TEMP_DIR/receipt-umask"
+  local receipt="$state_home/agentic-dev-toolkit/install-receipt.env"
+
+  # The dynamically sourced installer reads these globals.
+  # shellcheck disable=SC2034
+  { DRY_RUN=0; SKIP_RUNTIMES=1; SKIP_QUALITY_TOOLS=1; SKIP_OPENSPEC=1
+    SKIP_SUPERPOWERS=1; SKIP_KARPATHY=1; }
+  OVERRIDDEN_SET=()
+  INSTALLED_KARPATHY_SHA256=""
+
+  ( umask 077; XDG_STATE_HOME="$state_home" write_install_receipt )
+
+  assert_equal "$(stat -c '%a' "$state_home/agentic-dev-toolkit")" "755" \
+    "the state directory must be 0755 even under umask 077"
+  assert_equal "$(stat -c '%a' "$receipt")" "644" \
+    "the receipt file must be 0644 even under umask 077"
+}
+
+test_receipt_is_not_written_on_dry_run() {
+  local state_home="$TEMP_DIR/receipt-dry-run"
+  XDG_STATE_HOME="$state_home" bash "$INSTALLER" --dry-run >/dev/null 2>&1 || true
+  [[ ! -e "$state_home/agentic-dev-toolkit/install-receipt.env" ]] \
+    || fail "a dry run must never write the install receipt"
+}
+
+test_receipt_is_not_written_on_verify_only() {
+  local state_home="$TEMP_DIR/receipt-verify-only"
+  XDG_STATE_HOME="$state_home" bash "$INSTALLER" --dry-run --verify-only >/dev/null 2>&1 || true
+  [[ ! -e "$state_home/agentic-dev-toolkit/install-receipt.env" ]] \
+    || fail "--verify-only must never write the install receipt"
+}
+
+test_receipt_is_not_written_after_a_failure() {
+  # A late-stage failure (mid-install, after verification) cannot be exercised
+  # here without running the real installer, which this suite never does. An
+  # early failure -- an ungrammatical override, caught before the install
+  # sequence starts -- exercises the same invariant safely: main() never
+  # reaches write_install_receipt once any earlier step has died.
+  local state_home="$TEMP_DIR/receipt-after-failure"
+  XDG_STATE_HOME="$state_home" bash "$INSTALLER" --node-version="24,25" --dry-run \
+    >/dev/null 2>&1 || true
+  [[ ! -e "$state_home/agentic-dev-toolkit/install-receipt.env" ]] \
+    || fail "a failed run must never write the install receipt"
+}
+
 TEMP_DIR="$(mktemp -d)"
 test_claude_template_resolves_after_copying_to_project_root
+
+# The load-integrity gate. Every check here reports with printf and exit rather
+# than through fail or assert_equal: fail is the thing being verified, and a
+# replacement that returns success would make every assertion about it succeed
+# too. The before snapshots must precede the loader's single call, because the
+# catalog load happens during that source.
+fail_body_before="$(declare -f fail)"
+functions_before="$(declare -F | awk '{ print $3 }' | sort)"
+
 load_installer_functions
+
+fail_body_after="$(declare -f fail)"
+functions_after="$(declare -F | awk '{ print $3 }' | sort)"
+
+if [[ "$fail_body_after" != "$fail_body_before" ]]; then
+  printf 'FAIL: installer loading replaced the test harness fail helper\n' >&2
+  exit 1
+fi
+
+marker="$TEMP_DIR/fail-fell-through"
+# Sourcing the installer body armed its ERR trap in this shell. The deliberate
+# failure below would fire it -- once inside the command substitution, whose
+# handler writes to the real stderr and exits non-zero, and once again on the
+# assignment that inherits that status -- aborting the suite before a single
+# test runs. Disarm ERR for the check and restore exactly what was there.
+err_trap="$(trap -p ERR)"
+trap - ERR
+set +e
+output="$(
+  (
+    fail "sentinel failure"
+    # Unreachable while fail behaves; reaching it is the regression the marker
+    # exists to catch, which is why shellcheck's observation is expected here.
+    # shellcheck disable=SC2317
+    : > "$marker"
+  ) 2>&1
+)"
+status=$?
+set -e
+eval "$err_trap"
+
+if (( status == 0 )); then
+  printf 'FAIL: test harness fail helper returned success\n' >&2
+  exit 1
+fi
+if [[ "$output" != FAIL:\ sentinel\ failure* ]]; then
+  printf 'FAIL: test harness fail helper lost its diagnostic contract\n' >&2
+  exit 1
+fi
+if [[ -e "$marker" ]]; then
+  printf 'FAIL: execution continued after test harness fail helper\n' >&2
+  exit 1
+fi
+
+if (( ${#CATALOG[@]} == 0 )); then
+  printf 'FAIL: catalog values did not survive installer loading\n' >&2
+  exit 1
+fi
+if (( ${#CATALOG_ORDER[@]} == 0 )); then
+  printf 'FAIL: catalog order did not survive installer loading\n' >&2
+  exit 1
+fi
+
+# OVERRIDDEN_SET must exist as an associative array, tested for EXISTENCE, not
+# size: an empty override set is the normal state on a run with no overrides,
+# so a size check would fail the common case rather than a regression.
+if ! declare -p OVERRIDDEN_SET >/dev/null 2>&1; then
+  printf 'FAIL: OVERRIDDEN_SET did not survive installer loading\n' >&2
+  exit 1
+fi
+
+expected_new="$(grep -oE '^[a-zA-Z_][a-zA-Z0-9_]*\(\)' "$INSTALLER" |
+  tr -d '()' | sort -u)"
+actual_new="$(comm -13 \
+  <(printf '%s\n' "$functions_before") \
+  <(printf '%s\n' "$functions_after"))"
+unexpected="$(comm -23 \
+  <(printf '%s\n' "$actual_new") \
+  <(printf '%s\n' "$expected_new"))"
+if [[ -n "$unexpected" ]]; then
+  printf 'FAIL: installer loading leaked unexpected function(s): %s\n' \
+    "$unexpected" >&2
+  exit 1
+fi
+
+# Runs here, not down in the list below, because the many tests that follow
+# reassign the pin globals; by then the loaded values would be gone.
+test_every_pin_is_wired_to_its_own_catalog_key
+
 test_lttng_selector_prefers_time64_package_when_available
 test_lttng_selector_falls_back_to_legacy_package
 test_dry_run_does_not_probe_apt_package_metadata
@@ -1059,5 +1848,42 @@ test_git_credential_wrapper_is_not_installed_off_wsl
 test_git_credential_wrapper_is_skipped_when_requested
 test_git_credential_wrapper_dry_run_previews_without_writing
 test_git_credential_wrapper_is_valid_shell_and_rewritten_on_change
+test_reader_loads_a_valid_file_in_source_order
+test_reader_keeps_a_final_line_with_no_newline
+test_reader_normalizes_crlf
+test_reader_reports_a_missing_separator_with_a_line_number
+test_reader_reports_a_duplicate_key_with_both_lines
+test_reader_reports_an_unreadable_file
+test_shipped_catalog_satisfies_the_complete_schema
+test_validator_rejects_a_missing_required_key_without_a_line_number
+test_validator_rejects_an_empty_and_a_malformed_scalar_with_line_numbers
+test_validator_enforces_list_syntax_duplicates_and_membership
+test_validator_reports_the_first_defect_in_source_order
+test_installer_dies_on_a_missing_catalog
+test_installer_dies_on_a_malformed_catalog_key
+test_installer_dies_on_a_missing_required_catalog_key
+test_installer_version_flag
+test_installer_version_flag_performs_no_installation
+test_installer_rejects_an_ungrammatical_override
+test_installer_rejects_an_empty_inline_override
+test_installer_rejects_an_ungrammatical_environment_override
+test_an_invalid_override_installs_nothing
+
+test_overridden_is_a_set_not_an_append_log
+test_overridden_serializes_in_catalog_order
+test_an_empty_environment_override_is_not_an_override
+test_excluded_interfaces_never_enter_overridden
+test_skip_runtimes_expands_to_the_quality_tools
+test_skip_claude_alone_leaves_skipped_empty
+test_selective_skip_still_writes_all_sixteen_requested_keys
+test_skipped_component_produces_no_probe_and_no_warning
+test_failing_probe_does_not_trip_err
+test_unresolvable_timeout_keeps_karpathy_sha256_and_drops_probe_derived_keys
+test_probe_extraction_matches_the_design_table
+test_receipt_is_written_on_success_at_documented_path
+test_receipt_modes_are_deterministic_under_a_strict_umask
+test_receipt_is_not_written_on_dry_run
+test_receipt_is_not_written_on_verify_only
+test_receipt_is_not_written_after_a_failure
 
 printf 'PASS: installer compatibility tests\n'

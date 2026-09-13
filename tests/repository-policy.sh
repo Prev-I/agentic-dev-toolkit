@@ -340,6 +340,42 @@ print(schema["properties"]["version"]["const"])
   assert_equal "$version" "1" "the schema must describe version 1"
 }
 
+test_validator_declares_and_prints_its_version() {
+  grep -qE '^readonly SCRIPT_VERSION="[0-9]+\.[0-9]+\.[0-9]+"$' "$VALIDATOR" \
+    || fail "validate.sh must declare a semantic SCRIPT_VERSION"
+
+  local output status
+  set +e
+  output="$("$VALIDATOR" --version 2>&1)"
+  status=$?
+  set -e
+
+  assert_equal "$status" "0" "--version must exit 0"
+  assert_equal "$output" "0.1.0" "--version must print exactly the version"
+}
+
+test_validator_version_is_not_swallowed_by_the_unknown_option_arm() {
+  local output
+  output="$("$VALIDATOR" --version 2>&1)"
+  [[ "$output" != *"unknown option"* ]] \
+    || fail "--version must be matched before the generic -* arm"
+}
+
+test_validator_help_and_unknown_options_still_exit_2() {
+  local status
+  set +e
+  "$VALIDATOR" --help >/dev/null 2>&1
+  status=$?
+  set -e
+  assert_equal "$status" "2" "--help must keep exiting 2"
+
+  set +e
+  "$VALIDATOR" --nonsense >/dev/null 2>&1
+  status=$?
+  set -e
+  assert_equal "$status" "2" "an unknown option must keep exiting 2"
+}
+
 TEMP_DIR="$(mktemp -d)"
 test_github_flow_with_pull_requests_is_valid
 test_git_flow_with_pull_requests_is_valid
@@ -359,5 +395,8 @@ test_missing_file_is_rejected
 test_usage_error_exits_two
 test_every_committed_example_is_valid
 test_schema_declares_the_documented_vocabulary
+test_validator_declares_and_prints_its_version
+test_validator_version_is_not_swallowed_by_the_unknown_option_arm
+test_validator_help_and_unknown_options_still_exit_2
 
 printf 'PASS: repository policy tests\n'

@@ -37,7 +37,9 @@ A collection of reusable components for teams using AI coding agents:
 ## What this is NOT
 
 - Not a workflow engine or framework — it does not prescribe how you run your development process.
-- Not company-specific — there are no proprietary references, org names, or internal tooling.
+- Not company-specific — the core toolkit has no proprietary references, org names, or internal
+  tooling. `azure-artifacts/` is a separately documented, opt-in organization-specific Gewiss
+  adapter and is not part of the portable core.
 - Not an OpenSpec or SpecRivet distribution — it can install OpenSpec as a tool, but does not ship
   a workflow schema.
 
@@ -91,6 +93,9 @@ agentic-dev-toolkit/
           agents/
             reviewer.md                            # Independent review subagent
             expert.md                              # Escalation-only expert subagent
+  azure-artifacts/
+    README.md                                      # Opt-in Gewiss Azure Artifacts adapter
+    configure.sh                                   # Host mise credential configuration
   repository-policy/
     README.md                                      # Format, usage and agent guidance
     validate.sh                                    # Policy validator
@@ -166,6 +171,71 @@ Review the generated file and explicitly authorize it with `direnv allow` from t
 Place machine-specific variables and secrets in a gitignored `.env.local`; commit `.envrc` only
 when its contents are safe for collaborators. direnv loads these values while the shell is in the
 project and removes them after leaving it. Existing `.envrc` files are preserved unchanged.
+
+### Azure Artifacts through mise
+
+See the [Azure Artifacts adapter](azure-artifacts/README.md) for its Gewiss-specific feed and
+source contracts.
+
+For host development, configure Azure Artifacts once with a newly created Azure DevOps PAT that
+has **Packaging Read** scope:
+
+```bash
+./azure-artifacts/configure.sh
+./azure-artifacts/configure.sh --verify-only
+~/.local/bin/mise exec -- mvn -version
+~/.local/bin/mise exec -- dotnet --info
+```
+
+The configurator keeps the PAT only in
+`~/.config/mise/secrets/azure-artifacts.env` (mode `0600`) and creates the mise fragment at
+`~/.config/mise/conf.d/azure-artifacts.toml`. mise derives `AZDO_MAVEN_PAT` and the NuGet
+variables `NuGetPackageSourceCredentials_JoinOn` and
+`NuGetPackageSourceCredentials_Foundation`; Maven's `~/.m2/settings.xml` contains only the
+reference `${env.AZDO_MAVEN_PAT}`. Real PATs never belong in Git, issue descriptions, logs, or
+support transcripts.
+Normal setup and rotation use the hidden `/dev/tty` prompt. `--pat-stdin` is for migration or
+controlled automation only.
+
+To rotate the credential, rerun `./azure-artifacts/configure.sh` with a new Packaging Read PAT,
+then run `--verify-only` and the cold-cache work test. Revoke the old PAT only after the new PAT
+passes verification and the work test, and the rollback window no longer needs the old credential.
+
+When initial migration reused an exposed current PAT, keep the rollback window as short as
+practical. Until a replacement PAT passes verification and cold-cache smoke tests, either complete
+that rotation promptly or roll back or stop using the exposed credential. After the replacement is
+proven, revoke the superseded PAT, remove or sanitize the plaintext Windows Maven settings target,
+and delete the rollback copy or symlink.
+
+To roll back, first disable the exact mise fragment and move or remove generated settings. The
+secret file remains dormant and unloaded once the fragment is disabled; remove it after rollback if
+it is no longer needed.
+
+If `~/.m2/settings.xml.pre-mise-azure-artifacts` exists, it is the recorded settings rollback
+object. Move it back with `mv`, which preserves the rollback path itself when it is a symlink rather
+than copying its target:
+
+```bash
+mv ~/.m2/settings.xml ~/.m2/settings.xml.mise-azure-artifacts-disabled
+mv ~/.config/mise/conf.d/azure-artifacts.toml ~/.config/mise/conf.d/azure-artifacts.toml.disabled
+mv ~/.m2/settings.xml.pre-mise-azure-artifacts ~/.m2/settings.xml
+```
+
+The active Maven settings are reference-only, but this rollback object can still expose the
+superseded PAT through a mode-`0600` copy or its original symlink target. Treat it as
+credential-bearing until the rollback window closes. The configurator enforces mode `0700` on
+`~/.m2`; rollback does not restore a former directory mode.
+
+If `~/.m2/settings.xml.pre-mise-azure-artifacts` does not exist, this was a fresh host: move or
+remove the generated settings and exact TOML fragment, then leave `~/.m2/settings.xml` absent.
+Start a fresh process, then repeat one cold Maven restore and one cold NuGet restore. Do not run
+`--verify-only` after disabling authentication: it is expected to fail. Do not use direct `mise
+env`, `env`, or verbose dumps in support transcripts: they can expose credential values.
+
+This is a host-only migration. CI and devcontainers are outside the host migration and retain
+independent authentication until separately qualified. The configurator preserves Maven settings
+semantics, comments, and processing instructions but does not provide byte-preserved formatting; it
+refuses Maven settings with a `DOCTYPE`.
 
 ### Quality tools
 

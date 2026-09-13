@@ -28,6 +28,8 @@ wsl-toolchain-doctor/           Linux-first PATH and toolchain auditor for WSL
 opencode-service/               Readiness probes for OpenCode and its Telegram
                                 sidecar, plus an optional plugin restart consumer
 headroom-runtime/               Opt-in standalone Headroom install, audit, and removal CLI
+azure-artifacts/                Host Azure Artifacts credential configuration through mise
+azure-artifacts/README.md       Opt-in Gewiss adapter contract and operations
 docs/multi-agent-workspace-guide.md
 docs/wsl-toolchain-doctor.md    Operational documentation for the doctor
 docs/opencode-service.md        Running OpenCode as a persistent service, and
@@ -38,6 +40,7 @@ tests/repository-policy.sh      Test suite for the policy validator
 tests/wsl-toolchain-doctor.sh   Test suite for the doctor
 tests/opencode-service.sh       Test suite for the service scripts
 tests/headroom-runtime.sh       Test suite for the Headroom runtime
+tests/azure-artifacts.sh        Test suite for Azure Artifacts configuration
 ```
 
 **`instructions/AGENTS.md` is a deliverable, not this file.** It is the template
@@ -55,11 +58,15 @@ bash tests/repository-policy.sh         # the policy validator suite
 bash tests/wsl-toolchain-doctor.sh      # the WSL toolchain doctor suite
 bash tests/opencode-service.sh          # the service scripts suite
 bash tests/headroom-runtime.sh          # the Headroom runtime suite
+bash tests/azure-artifacts.sh           # Azure Artifacts configuration suite (requires real mise)
 bash models/routing/opencode/eval/run-tests.sh   # the routing eval suite
-bash -n environments/linux/install.sh   # syntax check
+bash -n environments/linux/install.sh
 bash -n headroom-runtime/headroom-runtime.sh
 bash -n tests/headroom-runtime.sh
-shellcheck environments/linux/install.sh tests/install.sh \
+bash -n azure-artifacts/configure.sh
+bash -n tests/azure-artifacts.sh
+shellcheck azure-artifacts/configure.sh tests/azure-artifacts.sh \
+  environments/linux/install.sh tests/install.sh \
   tests/repository-policy.sh repository-policy/validate.sh \
   wsl-toolchain-doctor/wsl-toolchain-doctor.sh tests/wsl-toolchain-doctor.sh \
   opencode-service/opencode-startup-ready.sh \
@@ -68,8 +75,8 @@ shellcheck environments/linux/install.sh tests/install.sh \
   headroom-runtime/headroom-runtime.sh tests/headroom-runtime.sh
 ```
 
-All six suites are expected to be run and reported together; the evidence
-documents under `models/routing/opencode/docs/` transcribe them that way.
+All seven suites are the current required set. The routing evidence documents under
+`models/routing/opencode/docs/` do not establish this component's evidence.
 
 `tests/install.sh` sources the installer's functions by stripping its final
 `main "$@"` line, so **that line must remain last in the file** — the suite
@@ -81,6 +88,62 @@ location and would die on every test otherwise.
 
 Never run the installer itself to test a change; it mutates the machine. Use
 `--dry-run`, which prints every action without performing it.
+
+## Azure Artifacts authentication
+
+`azure-artifacts/configure.sh` makes mise the sole owner of host credential injection. It stores
+a Packaging Read PAT at `~/.config/mise/secrets/azure-artifacts.env` and configures
+`~/.config/mise/conf.d/azure-artifacts.toml`; Maven's `~/.m2/settings.xml` contains only
+`${env.AZDO_MAVEN_PAT}`, while NuGet receives
+`NuGetPackageSourceCredentials_JoinOn` and `NuGetPackageSourceCredentials_Foundation` through
+mise. Active Maven and NuGet files contain references only. The temporary Maven rollback copy or
+symlink can still expose the superseded PAT and remains credential-bearing until retired. Real PATs
+never belong in Git, test output, logs, or support transcripts; no test may print a real or
+synthetic PAT.
+
+Run `./azure-artifacts/configure.sh` to configure, or
+`./azure-artifacts/configure.sh --verify-only` to verify its structure. Rotate by rerunning the
+configurator with a new Packaging Read PAT, then require the new PAT passes verification and the
+cold-cache work test. Revoke the old PAT only once rollback no longer needs the old credential.
+Normal setup and rotation use the hidden `/dev/tty` prompt. `--pat-stdin` is for migration or
+controlled automation only.
+
+When initial migration reused an exposed current PAT, keep the rollback window as short as
+practical. Until a replacement PAT passes verification and cold-cache smoke tests, either complete
+that rotation promptly or roll back or stop using the exposed credential. After the replacement is
+proven, revoke the superseded PAT, remove or sanitize the plaintext Windows Maven settings target,
+and delete the rollback copy or symlink.
+
+To roll back, first disable the exact mise fragment and move or remove generated settings. The
+secret file remains dormant and unloaded once the fragment is disabled; remove it after rollback if
+it is no longer needed.
+
+If `~/.m2/settings.xml.pre-mise-azure-artifacts` exists, restore the recorded settings object with
+`mv` so a rollback symlink remains a symlink:
+
+```bash
+mv ~/.m2/settings.xml ~/.m2/settings.xml.mise-azure-artifacts-disabled
+mv ~/.config/mise/conf.d/azure-artifacts.toml ~/.config/mise/conf.d/azure-artifacts.toml.disabled
+mv ~/.m2/settings.xml.pre-mise-azure-artifacts ~/.m2/settings.xml
+```
+
+Treat that rollback object as credential-bearing until inspected and retired. The configurator
+enforces mode `0700` on `~/.m2`; rollback does not restore a former directory mode.
+
+If `~/.m2/settings.xml.pre-mise-azure-artifacts` does not exist, this was a fresh host: move or
+remove the generated settings and exact TOML fragment, then leave `~/.m2/settings.xml` absent.
+Start a fresh process and repeat one cold Maven restore and one cold NuGet restore. Do not run
+`--verify-only` after disabling authentication because it should fail. Direct `mise env`, `env`,
+and verbose dumps can expose values and must not be included in support transcripts.
+
+CI and devcontainers are outside the host migration and retain independent authentication until
+separately qualified. Real mise is a mandatory dependency of the component suite; the fake mise
+fixture only isolates unit cases. Maven migration preserves semantic XML, comments, and
+processing instructions, but does not provide byte-preserved formatting, and refuses `DOCTYPE` input.
+
+This repository's core assets remain company-neutral. `azure-artifacts/` is an opt-in,
+organization-specific Gewiss adapter; its hard-coded feed and source contracts are confined to its
+component documentation and configurator.
 
 ## The installer
 
@@ -281,6 +344,11 @@ script under `set -e` instead of capturing the status.
 Out of scope: application code, workflow or specification schemas, and anything
 that assumes a particular project's structure. Assets here must stay usable by
 any project that adopts them.
+
+`azure-artifacts/` is the opt-in organization-specific Gewiss adapter exempt from
+that portable-core scope. Its hard-coded Azure Artifacts organization, feed, and
+source contracts belong only in that component; all other root assets remain
+portable.
 
 "Workflow schema" there means a schema for how work is planned and executed —
 proposals, specifications, tasks, review gates. That remains out of scope and

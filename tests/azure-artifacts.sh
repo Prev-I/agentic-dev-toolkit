@@ -122,7 +122,7 @@ test_documentation_and_cli_contracts() {
       || fail "$document_path must limit --pat-stdin to migration or controlled automation"
   done
 
-  local deadline_contract='By 2026-09-14, either complete replacement-PAT rotation, smoke testing, and revocation, or roll back or stop using the exposed credential.'
+  local rollback_contract='Until a replacement PAT passes verification and cold-cache smoke tests'
   for document_path in \
     README.md \
     AGENTS.md \
@@ -130,8 +130,10 @@ test_documentation_and_cli_contracts() {
     docs/superpowers/specs/2026-09-12-mise-azure-artifacts-auth-design.md \
     docs/superpowers/plans/2026-09-12-mise-azure-artifacts-auth.md; do
     documentation="$(<"$REPOSITORY_ROOT/$document_path")"
-    [[ "$documentation" == *"$deadline_contract"* && "$documentation" == *'This is an operational deadline, not automatic enforcement.'* ]] \
-      || fail "$document_path must document the non-automatic exposed-PAT deadline"
+    [[ "$documentation" == *"$rollback_contract"* && \
+      "$documentation" == *'remove or sanitize the plaintext Windows Maven settings target'* && \
+      "$documentation" == *'rollback copy or symlink'* ]] \
+      || fail "$document_path must document the evidence-gated exposed-PAT rollback window"
   done
 
   [[ -f "$REPOSITORY_ROOT/azure-artifacts/README.md" ]] \
@@ -165,6 +167,9 @@ test_documentation_and_cli_contracts() {
     || fail "Azure Artifacts component README must defer old PAT revocation until the replacement is proven"
   [[ "$component_documentation" == *'byte-preserved formatting'* && "$component_documentation" == *'DOCTYPE'* && "$component_documentation" != *'preserves byte-preserved formatting'* && "$component_documentation" != *'preserves byte-for-byte formatting'* && "$component_documentation" != *'byte-for-byte formatting is preserved'* && "$component_documentation" != *'formatting is preserved byte-for-byte'* ]] \
     || fail "Azure Artifacts component README must document formatting limits and DOCTYPE refusal"
+  # shellcheck disable=SC2016 # Backticks and $HOME shorthand are required documentation literals.
+  [[ "$component_documentation" == *'rollback object as credential-bearing'* && "$component_documentation" == *'mode `0700` on `~/.m2`'* ]] \
+    || fail "Azure Artifacts component README must disclose rollback credential exposure and Maven directory mode"
   documentation="$(<"$REPOSITORY_ROOT/README.md")"
   [[ "$documentation" == *'    README.md                                      # Opt-in Gewiss Azure Artifacts adapter'* ]] \
     || fail "root README structure must include the exact Azure Artifacts README entry"

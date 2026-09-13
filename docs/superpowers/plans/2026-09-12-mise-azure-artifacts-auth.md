@@ -363,7 +363,8 @@ In `AGENTS.md`, add the component to the repository layout, add
 `bash tests/azure-artifacts.sh` to Build and Test, and state:
 
 - mise owns host credential injection;
-- Maven/NuGet files contain references only;
+- active Maven/NuGet files contain references only; temporary rollback material can remain
+  credential-bearing until retired;
 - CI and devcontainers retain independent auth until separately qualified;
 - no test may print a real or synthetic PAT.
 
@@ -763,8 +764,10 @@ and the credential referenced by the rollback target. Do not revoke it yet. Inst
 This ordering is load-bearing: revoking before Step 2 would revoke the current live
 mise credential and the rollback credential at the same time.
 
-By 2026-09-14, either complete replacement-PAT rotation, smoke testing, and revocation, or roll back or stop using the exposed credential.
-This is an operational deadline, not automatic enforcement.
+Until a replacement PAT passes verification and cold-cache smoke tests, either complete rotation
+promptly or roll back or stop using the exposed credential. After replacement validation, revoke
+the superseded PAT, remove or sanitize the plaintext Windows Maven settings target, and delete the
+credential-bearing rollback copy or symlink.
 
 - [ ] **Step 6: Record deferred cleanup inventory**
 

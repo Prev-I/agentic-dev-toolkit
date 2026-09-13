@@ -324,8 +324,10 @@ revoking the "old" PAT before rotating mise would revoke the live credential. Th
 rollback window is therefore bounded to the interval from initial migration through
 successful replacement-PAT smoke testing at the end of Phase 3.
 
-By 2026-09-14, either complete replacement-PAT rotation, smoke testing, and revocation, or roll back or stop using the exposed credential.
-This is an operational deadline, not automatic enforcement.
+Until a replacement PAT passes verification and cold-cache smoke tests, either complete rotation
+promptly or roll back or stop using the exposed credential. After replacement validation, revoke
+the superseded PAT, remove or sanitize the plaintext Windows Maven settings target, and delete the
+credential-bearing rollback copy or symlink.
 
 Do not remove Git Credential Manager, Azure CLI/MSAL state, the Azure Artifacts
 Credential Provider, package caches, or OpenCode runtime secrets. They serve distinct
@@ -362,7 +364,8 @@ rollback must use a newly issued PAT rather than restoring the exposed value.
 ## Security Properties
 
 - One PAT exists in one WSL-owned file with mode `0600`.
-- Ecosystem configs and mise TOML contain references only.
+- Active ecosystem configs and mise TOML contain references only; temporary rollback material can
+  remain credential-bearing until the bounded rollback window closes.
 - Mise redacts all derived variable names in managed task output.
 - The PAT is not stored in Git, systemd, OpenCode configuration, Maven settings,
   NuGet config, or shell startup files.

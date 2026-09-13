@@ -1627,8 +1627,7 @@ That is the complete literal set. It is the `REQUIRED` array passed to
 source-order array, so a malformed value is reported for the earliest such
 line in the file.
 
-**Phase 2 — structural predicates**, evaluated only after phase 1 passes and
-`validate_kv` returns clean, in exactly this order:
+**Phase 2 — structural predicates**, numbered here for reference:
 
 1. at least one key matches `requested.*`;
 2. every `requested.*` suffix is a catalog key — walked in **source order**,
@@ -1638,11 +1637,42 @@ line in the file.
    `installed.karpathy-sha256` satisfies this like any other: **`karpathy-sha256`
    is a catalog key**, so it needs no exception and none is granted;
 5. every element of `skipped` and of `overridden` is a catalog key. This is
-   `validate_kv`'s `MEMBERS` check, and it is skipped only where no catalog is
-   available.
+   `validate_kv`'s `MEMBERS` check.
 
 Predicates 2, 4 and 5 need a catalog. A doctor with none reports
 `TOOLKIT_CATALOG_UNAVAILABLE` and evaluates only 1 and 3.
+
+**The numbering above is conceptual, and does not match execution order.**
+Predicate 5 does not run where the list above places it. `load_receipt` makes
+one call to `validate_kv` passing the six phase-1 literal keys as `REQUIRED`
+and `skipped`/`overridden` as `LISTKEYS` with the catalog as `MEMBERS`; inside
+that single call, `validate_kv` checks phase 1's required keys and then walks
+every key in **source order** doing its per-key syntax pass, which for a list
+key also checks membership — this is predicate 5. All of that happens before
+`load_receipt` returns from `validate_kv` at all. Only once `validate_kv`
+reports clean does `load_receipt` evaluate predicates 1 through 4 itself, in
+that order. The actual, deterministic execution order is therefore:
+
+1. phase 1's six literal required keys, then `validate_kv`'s list syntax and
+   membership check (predicate 5), together in one call;
+2. then predicate 1 (at least one `requested.*`);
+3. then predicate 2 (`requested.*` suffixes are catalog keys);
+4. then predicate 3 (`requested.karpathy-sha256` absent);
+5. then predicate 4 (`installed.*` suffixes are catalog keys).
+
+A receipt violating both predicate 5 and predicate 1 at once — a
+`skipped=` member that is not a catalog key, and no `requested.*` key at all —
+reports predicate 5's message (`unknown catalog key in skipped: ...`), never
+predicate 1's. `tests/wsl-toolchain-doctor.sh` pins exactly this with a
+combined-violation test, asserting the predicate-5 message is present and
+predicate 1's is not.
+
+The outcome for a caller is unaffected by this reordering: either way the
+receipt is rejected as `TOOLKIT_RECEIPT_UNREADABLE`, and only the reported
+message differs. The implemented order is fully deterministic — it falls out
+of `validate_kv` and `load_receipt` being two ordinary, unconditional sequences
+of checks — so this document is amended to describe it rather than to invert
+the implementation to match the originally declared 1→2→3→4→5 order.
 
 **"The same order the installer uses" means the order this document declares**,
 not an order one program discovers by reading the other's output. The installer
@@ -2034,8 +2064,13 @@ iteration is what makes the comparison forward-compatible:
   not stale on a pin it was never offered; that is a case for reprovisioning,
   not a warning, and the receipt has nothing to compare against.
 - a `requested.*` key no longer in the catalog — a component since removed —
-  is likewise outside C. Unknown receipt keys remain tolerated by the format,
-  as they are everywhere else.
+  is likewise outside C in principle, since it falls outside the intersection.
+  **In practice this case is unreachable**: receipt validation's phase-2
+  predicate 2 already rejects any receipt carrying a `requested.*` suffix that
+  is not a catalog key, so such a receipt never survives `load_receipt` and C
+  never runs against it at all. The bullet above records the intended
+  direction of forward-compatibility should predicate 2 ever be relaxed; it is
+  not describing a case C has to handle today.
 
 `TOOLKIT_STALE_PIN` is emitted for a component in that intersection **only when
 all four hold**:
@@ -2691,7 +2726,8 @@ unreachability rather than assuming it:
 
 ```bash
 marker="$TEMP_DIR/fail-fell-through"
-
+err_trap="$(trap -p ERR)"
+trap - ERR
 set +e
 output="$(
   (
@@ -2701,6 +2737,7 @@ output="$(
 )"
 status=$?
 set -e
+eval "$err_trap"
 
 if (( status == 0 )); then
   printf 'FAIL: test harness fail helper returned success\n' >&2
@@ -2718,10 +2755,21 @@ if [[ -e "$marker" ]]; then
 fi
 ```
 
-`set +e` around the capture is required: the assignment takes the subshell's
-status, and a non-zero one is the *expected* outcome. It also means a
-replacement that merely `return`s does not abort the subshell, so `: > $marker`
-runs — which is exactly what the marker is there to catch.
+`set +e` around the capture is necessary but **not sufficient on its own**.
+Sourcing the installer body arms `trap on_error ERR` in the current shell, and
+`set +e` does not disarm an ERR trap — it only stops a failing *simple
+command* from aborting the script under `errexit`. `fail`'s `exit 1`, run
+inside the command substitution above, still fires the armed trap, and the
+trap's own handling then propagates the failure outward and takes the whole
+suite down before a single test runs, `set +e` notwithstanding. The gate must
+therefore disarm the trap for the duration of the capture and restore it
+afterwards: `trap -p ERR` prints the trap currently installed as a re-runnable
+`trap ... ERR` command, `trap - ERR` clears it, and `eval "$err_trap"` restores
+exactly what was there — whatever `on_error` was armed with, unchanged — once
+the capture is over. `set +e` still matters alongside this: the assignment
+takes the subshell's status, and a non-zero one is the *expected* outcome; it
+also means a replacement that merely `return`s does not abort the subshell, so
+`: > $marker` runs — which is exactly what the marker is there to catch.
 
 **Check 3 — catalog arrays survived the loader's scope.** The body is sourced
 inside a function, so a `declare` without `-g` is function-local and vanishes

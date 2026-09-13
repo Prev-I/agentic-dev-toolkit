@@ -29,6 +29,7 @@ TIMEOUT="${READY_TIMEOUT:-90}"
 INTERVAL="${READY_INTERVAL:-2}"
 MARKER="${READY_TOOL_MARKER:-bash}"
 
+readonly SCRIPT_VERSION="0.1.0"
 readonly BASE="http://${HOST}:${PORT}"
 readonly USERNAME="${OPENCODE_SERVER_USERNAME:-opencode}"
 readonly PASSWORD="${OPENCODE_SERVER_PASSWORD:-}"
@@ -40,6 +41,11 @@ curl_auth() { # $1 = path; prints the body, returns curl's status
 }
 
 main() {
+  if [[ "${1:-}" == "--version" ]]; then
+    printf '%s\n' "$SCRIPT_VERSION"
+    exit 0
+  fi
+
   local deadline=$(( SECONDS + TIMEOUT ))
   local http_ok=0 tools_ok=0
   local health_body="" tools_body=""

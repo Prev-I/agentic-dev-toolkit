@@ -2,7 +2,7 @@
 
 `wsl-toolchain-doctor.sh` enforces a Linux-first development boundary inside WSL, audits PATH hygiene, validates `mise`-managed tool bindings, and can conservatively remediate persistent PATH sources.
 
-Current tool version: `0.3.0`.
+Current tool version: `0.4.0`.
 
 ## Policy
 
@@ -94,6 +94,7 @@ The production script requires Bash and normal Linux base utilities such as `gre
 ```bash
 ./wsl-toolchain-doctor/wsl-toolchain-doctor.sh audit
 ./wsl-toolchain-doctor/wsl-toolchain-doctor.sh audit --json
+./wsl-toolchain-doctor/wsl-toolchain-doctor.sh audit --probe
 ```
 
 The audit checks:
@@ -112,7 +113,10 @@ The audit checks:
 12. symlink final targets, PE/ELF/script magic, and shebang interpreters;
 13. suspicious managed-tool wrappers containing explicit Windows executable references;
 14. mise ownership and binding for tools configured in the current mise context;
-15. startup/environment files that can reintroduce generic Windows paths.
+15. startup/environment files that can reintroduce generic Windows paths;
+16. the software catalog and install receipt, if one exists: requested-configuration
+    and catalog-staleness drift on every audit, plus installed-machine drift
+    against a fresh probe when `--probe` is given.
 
 Startup files are parsed as text. They are never sourced or evaluated.
 
@@ -166,6 +170,71 @@ Important codes include:
 - `MISE_TOOL_NOT_ACTIVATED` - a different Linux executable is visible and shell activation is not detected;
 - `MISE_TOOL_SHADOWED` - active mise context is shadowed by a different Linux executable;
 - `MISE_TOOL_SHADOWED_WINDOWS` - current PATH shadows the mise selection with Windows-backed tooling.
+
+## Software catalog and install receipt
+
+`install.sh` loads its version pins from `catalog/software-catalog.env` and, after
+a verified install, writes an install receipt recording what it requested and
+what it observed installed. The doctor reads both, when present, to run three
+comparisons under the `TOOLKIT_` finding domain — none of which is ever a
+`FAIL`, because a machine behind on a version is not the same kind of defect
+as a Windows PE on `PATH`:
+
+- **A — requested-configuration drift.** Receipt `requested.*` versus the
+  toolkit-managed `mise` configuration file. Runs on every `audit`.
+- **B — installed-machine drift.** Receipt `installed.*` versus a fresh probe
+  of the machine (`mise exec`, `dotnet --list-sdks`, `openspec --version`, each
+  bounded by `timeout`). Opt-in via `audit --probe`, because it launches
+  subprocesses; without the flag the doctor reports `TOOLKIT_INSTALLED_NOT_PROBED`
+  and skips it.
+- **C — catalog staleness.** The current catalog versus receipt `requested.*`,
+  over the intersection of their keys, so a component the catalog has since
+  added or dropped produces no finding either way. A component is reported
+  stale only when it is not `skipped=`, not `overridden=`, and neither side is
+  `latest`.
+
+Preconditions: no receipt at all yields `TOOLKIT_NOT_PROVISIONED` and all three
+comparisons are skipped — a normal state for any machine this toolkit did not
+provision. A receipt that fails `adt-kv` validation yields
+`TOOLKIT_RECEIPT_UNREADABLE`, likewise skipping all three. No catalog yields
+`TOOLKIT_CATALOG_UNAVAILABLE`; comparison C is then skipped, and comparison A
+still runs since it does not need the catalog.
+
+`TOOLKIT_*` codes:
+
+- `TOOLKIT_NOT_PROVISIONED` - info; no install receipt found;
+- `TOOLKIT_RECEIPT_UNREADABLE` - info; the receipt failed `adt-kv` validation;
+- `TOOLKIT_CATALOG_UNAVAILABLE` - info; the catalog is absent or unreadable, so
+  catalog staleness (C) was not checked;
+- `TOOLKIT_CONFIG_UNAVAILABLE` - info; the toolkit-managed `mise` configuration
+  is absent or unreadable, so requested-configuration drift (A) was not checked;
+- `TOOLKIT_CONFIG_OK` - info; comparison A, one or more requested components
+  match the `mise` configuration;
+- `TOOLKIT_CONFIG_DRIFT` - warn; comparison A, a requested value differs from
+  what the `mise` configuration has;
+- `TOOLKIT_CONFIG_MISSING` - warn; comparison A, a requested key is absent from
+  the `mise` configuration entirely;
+- `TOOLKIT_INSTALLED_NOT_PROBED` - info; `audit` ran without `--probe`, so
+  installed-machine drift (B) was not checked;
+- `TOOLKIT_PROBE_UNAVAILABLE` - info; a probe dependency (`timeout`, `mise`,
+  `openspec`) is unusable, or a probe's output could not be parsed into a
+  version; that one component was not measured;
+- `TOOLKIT_PROBE_TIMEOUT` - info; a bounded probe hit its timeout;
+- `TOOLKIT_INSTALLED_OK` - info; comparison B, one or more components match a
+  fresh probe of the machine;
+- `TOOLKIT_DRIFT_INSTALLED` - warn; comparison B, the machine now reports a
+  different version than the receipt recorded as installed;
+- `TOOLKIT_PINS_CURRENT` - info; comparison C, one or more components match
+  the current catalog;
+- `TOOLKIT_STALE_PIN` - warn; comparison C, the catalog now pins a different
+  value than was requested;
+- `TOOLKIT_NOT_COMPARABLE` - info; comparison C, one or more components were
+  excluded from staleness comparison because they are `skipped=`,
+  `overridden=`, or pinned to `latest` on either side — named rather than
+  silently dropped.
+
+See `docs/superpowers/specs/2026-09-09-software-catalog-design.md`, "Doctor:
+three comparisons", for the normative rules.
 
 ## Remediation
 
@@ -390,7 +459,7 @@ Schema version remains `1`:
 ```json
 {
   "schemaVersion": 1,
-  "toolVersion": "0.3.0",
+  "toolVersion": "0.4.0",
   "action": "audit",
   "status": "PASS",
   "findings": []

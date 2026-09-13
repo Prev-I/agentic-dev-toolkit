@@ -9,75 +9,9 @@ readonly CODEX_INSTALL_URL="https://chatgpt.com/codex/install.sh"
 readonly SUPERPOWERS_PLUGIN_BASE='superpowers@git+https://github.com/obra/superpowers.git'
 readonly KARPATHY_RAW_BASE='https://raw.githubusercontent.com/multica-ai/andrej-karpathy-skills'
 readonly KARPATHY_SKILL_PATH='skills/karpathy-guidelines/SKILL.md'
-readonly KARPATHY_DEFAULT_REF='2c606141936f1eeef17fa3043a72095b4765b9c2'
-readonly KARPATHY_DEFAULT_SHA256='6e22cc54cb02a5e98ae42d06d9d7292db0c1b43894831b32879beb0166b2aea7'
-
-DRY_RUN=0
-UPGRADE=0
-VERIFY_ONLY=0
-SKIP_PLATFORM_CHECK=0
-REMOVE_APT_NODE=0
-REPAIR_CODEX=0
-PROJECT_PATH=""
-
-SKIP_RUNTIMES=0
-SKIP_OPENCODE=0
-SKIP_CLAUDE=0
-SKIP_CODEX=0
-SKIP_OPENSPEC=0
-SKIP_SUPERPOWERS=0
-SKIP_KARPATHY=0
-SKIP_QUALITY_TOOLS=0
-SKIP_GIT_CREDENTIAL=0
-
-JAVA_21_VERSION="${ADT_JAVA_21_VERSION:-temurin-21}"
-JAVA_17_VERSION="${ADT_JAVA_17_VERSION:-temurin-17}"
-DOTNET_10_VERSION="${ADT_DOTNET_10_VERSION:-10}"
-DOTNET_8_VERSION="${ADT_DOTNET_8_VERSION:-8}"
-PYTHON_VERSION="${ADT_PYTHON_VERSION:-3.12}"
-NODE_VERSION="${ADT_NODE_VERSION:-24}"
-BUN_VERSION="${ADT_BUN_VERSION:-1}"
-MAVEN_VERSION="${ADT_MAVEN_VERSION:-3.9.16}"
-DOTNET_EF_VERSION="${ADT_DOTNET_EF_VERSION:-latest}"
-UV_VERSION="${ADT_UV_VERSION:-latest}"
-OPENSPEC_VERSION="${ADT_OPENSPEC_VERSION:-1.9.0}"
-SUPERPOWERS_REF="${ADT_SUPERPOWERS_REF:-v6.3.0}"
-KARPATHY_REF="${ADT_KARPATHY_REF:-$KARPATHY_DEFAULT_REF}"
-KARPATHY_SHA256="${ADT_KARPATHY_SHA256:-}"
-OPENSPEC_TOOLS="${ADT_OPENSPEC_TOOLS:-opencode,claude,codex}"
-SHELLCHECK_VERSION="${ADT_SHELLCHECK_VERSION:-latest}"
-GITLEAKS_VERSION="${ADT_GITLEAKS_VERSION:-latest}"
-PYYAML_VERSION="${ADT_PYYAML_VERSION:-latest}"
-
-XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
-XDG_CONFIG_HOME="${XDG_CONFIG_HOME%/}"
-MISE_BIN="${MISE_BIN:-$HOME/.local/bin/mise}"
-MISE_TOOLCHAIN_CONFIG="${MISE_TOOLCHAIN_CONFIG:-$XDG_CONFIG_HOME/mise/conf.d/agentic-dev-toolkit.toml}"
-OPENCODE_CONFIG="${OPENCODE_CONFIG:-$XDG_CONFIG_HOME/opencode/opencode.json}"
-CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
-CODEX_STANDALONE_ROOT="$CODEX_HOME/packages/standalone"
-GCM_WINDOWS_PATH="${ADT_GCM_PATH:-/mnt/c/Program Files/Git/mingw64/bin/git-credential-manager.exe}"
-GIT_CREDENTIAL_WRAPPER="${GIT_CREDENTIAL_WRAPPER:-$HOME/.local/bin/git-credential-manager-wsl}"
-
-# Prepend a directory to PATH only when it exists and is not already present.
-# Ubuntu's stock ~/.profile guards $HOME/bin and $HOME/.local/bin the same way;
-# prepending them unconditionally duplicates $HOME/.local/bin and inserts
-# $HOME/bin on the many machines that do not have one.
-prepend_path() {
-  [[ -d "$1" ]] || return 0
-  case ":$PATH:" in
-    *":$1:"*) return 0 ;;
-  esac
-  PATH="$1:$PATH"
-}
-
-prepend_path "$HOME/.opencode/bin"
-prepend_path "$HOME/bin"
-prepend_path "$HOME/.local/bin"
-export PATH
-
-TEMP_PATHS=()
-DOWNLOADED_INSTALLER=""
+# The installer's own version, declared with the other constants for parity
+# with the repository's other versioned scripts. Printed verbatim by --version.
+readonly SCRIPT_VERSION="0.1.0"
 
 log() {
   printf '\n==> %s\n' "$*"
@@ -95,6 +29,14 @@ die() {
   printf 'ERROR: %s\n' "$*" >&2
   exit 1
 }
+
+TEMP_PATHS=()
+DOWNLOADED_INSTALLER=""
+# Zero-invocation provenance for the install receipt: the SHA-256 that was
+# actually verified by install_karpathy_skill before it wrote the file. Empty
+# unless Karpathy was installed on this run; never recomputed by the receipt
+# writer, which is the whole point of recording it here instead.
+INSTALLED_KARPATHY_SHA256=""
 
 quote_command() {
   printf '+'
@@ -132,6 +74,257 @@ on_error() {
 
 trap cleanup EXIT
 trap on_error ERR
+
+# Diagnostics and traps are defined above this point on purpose: resolving the
+# root is I/O and can fail, and a failure there must be reportable.
+ADT_INSTALL_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)" ||
+  die "cannot resolve the toolkit root from ${BASH_SOURCE[0]}"
+readonly ADT_INSTALL_ROOT
+ADT_CATALOG_FILE="${ADT_CATALOG_FILE:-$ADT_INSTALL_ROOT/catalog/software-catalog.env}"
+
+# CATALOG_LINES, CATALOG_ORDER and CATALOG_ERROR are populated by name
+# through load_kv_file's namerefs; shellcheck cannot trace that indirection.
+# shellcheck disable=SC2034
+declare -gA CATALOG=() CATALOG_LINES=()
+# shellcheck disable=SC2034
+declare -ga CATALOG_ORDER=()
+# shellcheck disable=SC2034
+CATALOG_ERROR=""
+
+# REQUESTED_VALUE and REQUESTED_SOURCE record, per catalog key, the effective
+# value in play and which layer it came from: `the catalog`, `ADT_<NAME>`, or
+# `--<flag>` once parse_args overrides it. validate_requested_values reads
+# both to build its diagnostic. Declared -g because tests/install.sh sources
+# this file's body from inside a shell function; a plain `declare` here would
+# be function-local and leave both arrays empty once the loader returns.
+declare -gA REQUESTED_VALUE=()
+declare -gA REQUESTED_SOURCE=()
+
+# OVERRIDDEN_SET records SET MEMBERSHIP, not append history: it answers only
+# "was this catalog key's effective value replaced by an ADT_* variable or a
+# CLI flag", never how many times or which layer. resolve_pin marks it for the
+# environment layer, record_flag_override for the CLI layer, and both are
+# idempotent -- marking an already-marked key is a no-op. Declared -g for the
+# same sourcing reason as REQUESTED_VALUE above.
+# shellcheck disable=SC2034 # read by serialize_catalog_set through a nameref
+declare -gA OVERRIDDEN_SET=()
+
+load_kv_file() {
+  local file=$1
+  # kv_* prefixes: a nameref whose identifier equals the caller's name is a
+  # circular reference. No caller may pass kv_values, kv_lines, kv_order or
+  # kv_errname.
+  local -n kv_values=$2
+  local -n kv_lines=$3
+  local -n kv_order=$4
+  local kv_errname=$5
+  local line key value lineno=0
+
+  printf -v "$kv_errname" '%s' ''
+
+  if [[ ! -r "$file" ]]; then
+    printf -v "$kv_errname" '%s' "cannot read $file"
+    return 1
+  fi
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    lineno=$(( lineno + 1 ))
+    line="${line%$'\r'}"
+    if [[ -z "${line//[[:space:]]/}" || "${line#"${line%%[![:space:]]*}"}" == '#'* ]]; then
+      continue
+    fi
+    if [[ "$line" != *=* ]]; then
+      printf -v "$kv_errname" '%s' "$file:$lineno: missing '=' separator"
+      return 1
+    fi
+    key="${line%%=*}"
+    value="${line#*=}"
+    value="${value%"${value##*[![:space:]]}"}"
+    if [[ ! "$key" =~ ^[a-z0-9][a-z0-9.-]*$ ]]; then
+      printf -v "$kv_errname" '%s' "$file:$lineno: malformed key: $key"
+      return 1
+    fi
+    if [[ -n "${kv_values[$key]+set}" ]]; then
+      printf -v "$kv_errname" '%s' \
+        "$file:$lineno: duplicate key: $key (first seen at line ${kv_lines[$key]})"
+      return 1
+    fi
+    kv_values["$key"]="$value"
+    kv_lines["$key"]="$lineno"
+    kv_order+=("$key")
+  done < "$file"
+}
+
+validate_kv() {
+  local file=$1
+  local -n v_values=$2 v_lines=$3 v_order=$4
+  local -n v_required=$5 v_listkeys=$6 v_members=$7
+  local key value element
+  local -a elements
+  local -A seen
+
+  for key in "${v_required[@]}"; do
+    if [[ -z "${v_values[$key]+set}" ]]; then
+      die "$file: missing required key: $key"
+    fi
+  done
+
+  for key in "${v_order[@]}"; do
+    value="${v_values[$key]}"
+
+    if [[ -n "${v_listkeys[$key]+set}" ]]; then
+      if [[ -z "$value" ]]; then
+        continue
+      fi
+      if [[ ! "$value" =~ ^[a-z0-9][a-z0-9.-]*(,[a-z0-9][a-z0-9.-]*)*$ ]]; then
+        die "$file:${v_lines[$key]}: malformed list for key: $key"
+      fi
+      IFS=, read -ra elements <<<"$value"
+      seen=()
+      for element in "${elements[@]}"; do
+        if [[ -n "${seen[$element]+set}" ]]; then
+          die "$file:${v_lines[$key]}: duplicate element in $key: $element"
+        fi
+        seen["$element"]=1
+        if (( ${#v_members[@]} > 0 )) && [[ -z "${v_members[$element]+set}" ]]; then
+          die "$file:${v_lines[$key]}: unknown catalog key in $key: $element"
+        fi
+      done
+      continue
+    fi
+
+    if [[ -z "$value" ]]; then
+      die "$file:${v_lines[$key]}: empty value for key: $key"
+    fi
+    if [[ ! "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._:+@/-]*$ ]]; then
+      die "$file:${v_lines[$key]}: malformed value for key: $key"
+    fi
+  done
+}
+
+catalog_value() {
+  printf '%s' "${CATALOG[$1]:?missing catalog key: $1}"
+}
+
+# resolve_pin OUT_VAR CATALOG_KEY ENV_NAME ENV_VALUE
+# Assigns OUT_VAR, by nameref, to ENV_VALUE when it is non-empty, else to the
+# catalog's value for CATALOG_KEY, and records the winning value and its
+# source layer in REQUESTED_VALUE/REQUESTED_SOURCE. rp_* local names: no
+# caller may pass a variable named rp_target, rp_key, rp_envname or
+# rp_envvalue as OUT_VAR, which would alias the nameref to itself.
+#
+# Called directly in this shell, never inside a command substitution: the
+# nameref assignment and the two associative-array writes would land in a
+# subshell and vanish with it.
+resolve_pin() {
+  local -n rp_target="$1"
+  local rp_key="$2" rp_envname="$3" rp_envvalue="$4"
+  if [[ -n "$rp_envvalue" ]]; then
+    rp_target="$rp_envvalue"
+    REQUESTED_SOURCE["$rp_key"]="$rp_envname"
+    OVERRIDDEN_SET["$rp_key"]=1
+  else
+    rp_target="$(catalog_value "$rp_key")"
+    REQUESTED_SOURCE["$rp_key"]="the catalog"
+  fi
+  REQUESTED_VALUE["$rp_key"]="$rp_target"
+}
+
+# Called directly in this shell. Never inside a command substitution, pipeline
+# or subshell: the arrays are populated through namerefs and would die with it,
+# leaving an empty catalog behind a zero exit status.
+if ! load_kv_file "$ADT_CATALOG_FILE" CATALOG CATALOG_LINES CATALOG_ORDER CATALOG_ERROR; then
+  die "$CATALOG_ERROR"
+fi
+
+# validate_kv reads these three by name through its namerefs.
+# shellcheck disable=SC2034
+CATALOG_REQUIRED=(
+  java-17 java-21 dotnet-10 dotnet-8 python node bun maven
+  dotnet-ef uv shellcheck gitleaks pyyaml openspec superpowers
+  karpathy-ref karpathy-sha256
+)
+# shellcheck disable=SC2034
+declare -gA CATALOG_NO_LISTS=() CATALOG_NO_MEMBERS=()
+validate_kv "$ADT_CATALOG_FILE" CATALOG CATALOG_LINES CATALOG_ORDER \
+  CATALOG_REQUIRED CATALOG_NO_LISTS CATALOG_NO_MEMBERS
+
+resolve_pin JAVA_21_VERSION java-21 ADT_JAVA_21_VERSION "${ADT_JAVA_21_VERSION:-}"
+resolve_pin JAVA_17_VERSION java-17 ADT_JAVA_17_VERSION "${ADT_JAVA_17_VERSION:-}"
+resolve_pin DOTNET_10_VERSION dotnet-10 ADT_DOTNET_10_VERSION "${ADT_DOTNET_10_VERSION:-}"
+resolve_pin DOTNET_8_VERSION dotnet-8 ADT_DOTNET_8_VERSION "${ADT_DOTNET_8_VERSION:-}"
+resolve_pin PYTHON_VERSION python ADT_PYTHON_VERSION "${ADT_PYTHON_VERSION:-}"
+resolve_pin NODE_VERSION node ADT_NODE_VERSION "${ADT_NODE_VERSION:-}"
+resolve_pin BUN_VERSION bun ADT_BUN_VERSION "${ADT_BUN_VERSION:-}"
+resolve_pin MAVEN_VERSION maven ADT_MAVEN_VERSION "${ADT_MAVEN_VERSION:-}"
+resolve_pin DOTNET_EF_VERSION dotnet-ef ADT_DOTNET_EF_VERSION "${ADT_DOTNET_EF_VERSION:-}"
+resolve_pin UV_VERSION uv ADT_UV_VERSION "${ADT_UV_VERSION:-}"
+resolve_pin OPENSPEC_VERSION openspec ADT_OPENSPEC_VERSION "${ADT_OPENSPEC_VERSION:-}"
+resolve_pin SUPERPOWERS_REF superpowers ADT_SUPERPOWERS_REF "${ADT_SUPERPOWERS_REF:-}"
+OPENSPEC_TOOLS="${ADT_OPENSPEC_TOOLS:-opencode,claude,codex}"
+resolve_pin SHELLCHECK_VERSION shellcheck ADT_SHELLCHECK_VERSION "${ADT_SHELLCHECK_VERSION:-}"
+resolve_pin GITLEAKS_VERSION gitleaks ADT_GITLEAKS_VERSION "${ADT_GITLEAKS_VERSION:-}"
+resolve_pin PYYAML_VERSION pyyaml ADT_PYYAML_VERSION "${ADT_PYYAML_VERSION:-}"
+
+# The mapping is deliberately asymmetric. The catalog digest is the default of
+# KARPATHY_DEFAULT_SHA256 only: KARPATHY_SHA256, the user override, still
+# defaults to empty. Were the digest its default, a custom ref would silently
+# acquire the digest of a different artefact and the refusal to install an
+# unverified ref would never fire.
+KARPATHY_DEFAULT_REF="$(catalog_value karpathy-ref)"
+readonly KARPATHY_DEFAULT_REF
+KARPATHY_DEFAULT_SHA256="$(catalog_value karpathy-sha256)"
+readonly KARPATHY_DEFAULT_SHA256
+resolve_pin KARPATHY_REF karpathy-ref ADT_KARPATHY_REF "${ADT_KARPATHY_REF:-}"
+# karpathy-sha256 is deliberately NOT resolved through resolve_pin: it is not
+# a requested value, defaults to empty by design, and install_karpathy_skill
+# already holds it to ^[0-9a-f]{64}$. validate_requested_values skips it too.
+KARPATHY_SHA256="${ADT_KARPATHY_SHA256:-}"
+
+DRY_RUN=0
+UPGRADE=0
+VERIFY_ONLY=0
+SKIP_PLATFORM_CHECK=0
+REMOVE_APT_NODE=0
+REPAIR_CODEX=0
+PROJECT_PATH=""
+
+SKIP_RUNTIMES=0
+SKIP_OPENCODE=0
+SKIP_CLAUDE=0
+SKIP_CODEX=0
+SKIP_OPENSPEC=0
+SKIP_SUPERPOWERS=0
+SKIP_KARPATHY=0
+SKIP_QUALITY_TOOLS=0
+SKIP_GIT_CREDENTIAL=0
+
+XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+XDG_CONFIG_HOME="${XDG_CONFIG_HOME%/}"
+MISE_BIN="${MISE_BIN:-$HOME/.local/bin/mise}"
+MISE_TOOLCHAIN_CONFIG="${MISE_TOOLCHAIN_CONFIG:-$XDG_CONFIG_HOME/mise/conf.d/agentic-dev-toolkit.toml}"
+OPENCODE_CONFIG="${OPENCODE_CONFIG:-$XDG_CONFIG_HOME/opencode/opencode.json}"
+CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+CODEX_STANDALONE_ROOT="$CODEX_HOME/packages/standalone"
+GCM_WINDOWS_PATH="${ADT_GCM_PATH:-/mnt/c/Program Files/Git/mingw64/bin/git-credential-manager.exe}"
+GIT_CREDENTIAL_WRAPPER="${GIT_CREDENTIAL_WRAPPER:-$HOME/.local/bin/git-credential-manager-wsl}"
+
+# Prepend a directory to PATH only when it exists and is not already present.
+# Ubuntu's stock ~/.profile guards $HOME/bin and $HOME/.local/bin the same way;
+# prepending them unconditionally duplicates $HOME/.local/bin and inserts
+# $HOME/bin on the many machines that do not have one.
+prepend_path() {
+  [[ -d "$1" ]] || return 0
+  case ":$PATH:" in
+    *":$1:"*) return 0 ;;
+  esac
+  PATH="$1:$PATH"
+}
+
+prepend_path "$HOME/.opencode/bin"
+prepend_path "$HOME/bin"
+prepend_path "$HOME/.local/bin"
+export PATH
 
 usage() {
   cat <<EOF_USAGE
@@ -217,6 +410,21 @@ require_value() {
   [[ -n "$value" && "$value" != --* ]] || die "$option requires a value"
 }
 
+# record_flag_override CATALOG_KEY FLAG VALUE
+# Records that --FLAG set CATALOG_KEY's effective value to VALUE, overriding
+# whatever the catalog or an ADT_* variable had already recorded for it. Only
+# ever called from the sixteen allowlisted parse_args arms, so marking
+# OVERRIDDEN_SET here is exactly the CLI layer of override tracking; marking an
+# already-marked key (an environment override the CLI also names) is a no-op.
+# Called directly in this shell, never inside a command substitution, for the
+# same reason as resolve_pin.
+record_flag_override() {
+  REQUESTED_VALUE["$1"]="$3"
+  REQUESTED_SOURCE["$1"]="$2"
+  # shellcheck disable=SC2034 # read by serialize_catalog_set through a nameref
+  OVERRIDDEN_SET["$1"]=1
+}
+
 parse_args() {
   while (( $# > 0 )); do
     case "$1" in
@@ -242,55 +450,115 @@ parse_args() {
         ;;
       --project=*) PROJECT_PATH="${1#*=}" ;;
       --node-version)
-        require_value "$1" "${2:-}"; NODE_VERSION="$2"; shift ;;
-      --node-version=*) NODE_VERSION="${1#*=}" ;;
+        require_value "$1" "${2:-}"; NODE_VERSION="$2"
+        record_flag_override node --node-version "$NODE_VERSION"; shift ;;
+      --node-version=*)
+        NODE_VERSION="${1#*=}"
+        [[ -n "$NODE_VERSION" ]] || die "--node-version requires a value"
+        record_flag_override node --node-version "$NODE_VERSION" ;;
       --bun-version)
-        require_value "$1" "${2:-}"; BUN_VERSION="$2"; shift ;;
-      --bun-version=*) BUN_VERSION="${1#*=}" ;;
+        require_value "$1" "${2:-}"; BUN_VERSION="$2"
+        record_flag_override bun --bun-version "$BUN_VERSION"; shift ;;
+      --bun-version=*)
+        BUN_VERSION="${1#*=}"
+        [[ -n "$BUN_VERSION" ]] || die "--bun-version requires a value"
+        record_flag_override bun --bun-version "$BUN_VERSION" ;;
       --python-version)
-        require_value "$1" "${2:-}"; PYTHON_VERSION="$2"; shift ;;
-      --python-version=*) PYTHON_VERSION="${1#*=}" ;;
+        require_value "$1" "${2:-}"; PYTHON_VERSION="$2"
+        record_flag_override python --python-version "$PYTHON_VERSION"; shift ;;
+      --python-version=*)
+        PYTHON_VERSION="${1#*=}"
+        [[ -n "$PYTHON_VERSION" ]] || die "--python-version requires a value"
+        record_flag_override python --python-version "$PYTHON_VERSION" ;;
       --uv-version)
-        require_value "$1" "${2:-}"; UV_VERSION="$2"; shift ;;
-      --uv-version=*) UV_VERSION="${1#*=}" ;;
+        require_value "$1" "${2:-}"; UV_VERSION="$2"
+        record_flag_override uv --uv-version "$UV_VERSION"; shift ;;
+      --uv-version=*)
+        UV_VERSION="${1#*=}"
+        [[ -n "$UV_VERSION" ]] || die "--uv-version requires a value"
+        record_flag_override uv --uv-version "$UV_VERSION" ;;
       --java-17-version)
-        require_value "$1" "${2:-}"; JAVA_17_VERSION="$2"; shift ;;
-      --java-17-version=*) JAVA_17_VERSION="${1#*=}" ;;
+        require_value "$1" "${2:-}"; JAVA_17_VERSION="$2"
+        record_flag_override java-17 --java-17-version "$JAVA_17_VERSION"; shift ;;
+      --java-17-version=*)
+        JAVA_17_VERSION="${1#*=}"
+        [[ -n "$JAVA_17_VERSION" ]] || die "--java-17-version requires a value"
+        record_flag_override java-17 --java-17-version "$JAVA_17_VERSION" ;;
       --java-21-version)
-        require_value "$1" "${2:-}"; JAVA_21_VERSION="$2"; shift ;;
-      --java-21-version=*) JAVA_21_VERSION="${1#*=}" ;;
+        require_value "$1" "${2:-}"; JAVA_21_VERSION="$2"
+        record_flag_override java-21 --java-21-version "$JAVA_21_VERSION"; shift ;;
+      --java-21-version=*)
+        JAVA_21_VERSION="${1#*=}"
+        [[ -n "$JAVA_21_VERSION" ]] || die "--java-21-version requires a value"
+        record_flag_override java-21 --java-21-version "$JAVA_21_VERSION" ;;
       --dotnet-8-version)
-        require_value "$1" "${2:-}"; DOTNET_8_VERSION="$2"; shift ;;
-      --dotnet-8-version=*) DOTNET_8_VERSION="${1#*=}" ;;
+        require_value "$1" "${2:-}"; DOTNET_8_VERSION="$2"
+        record_flag_override dotnet-8 --dotnet-8-version "$DOTNET_8_VERSION"; shift ;;
+      --dotnet-8-version=*)
+        DOTNET_8_VERSION="${1#*=}"
+        [[ -n "$DOTNET_8_VERSION" ]] || die "--dotnet-8-version requires a value"
+        record_flag_override dotnet-8 --dotnet-8-version "$DOTNET_8_VERSION" ;;
       --dotnet-10-version)
-        require_value "$1" "${2:-}"; DOTNET_10_VERSION="$2"; shift ;;
-      --dotnet-10-version=*) DOTNET_10_VERSION="${1#*=}" ;;
+        require_value "$1" "${2:-}"; DOTNET_10_VERSION="$2"
+        record_flag_override dotnet-10 --dotnet-10-version "$DOTNET_10_VERSION"; shift ;;
+      --dotnet-10-version=*)
+        DOTNET_10_VERSION="${1#*=}"
+        [[ -n "$DOTNET_10_VERSION" ]] || die "--dotnet-10-version requires a value"
+        record_flag_override dotnet-10 --dotnet-10-version "$DOTNET_10_VERSION" ;;
       --openspec-version)
-        require_value "$1" "${2:-}"; OPENSPEC_VERSION="$2"; shift ;;
-      --openspec-version=*) OPENSPEC_VERSION="${1#*=}" ;;
+        require_value "$1" "${2:-}"; OPENSPEC_VERSION="$2"
+        record_flag_override openspec --openspec-version "$OPENSPEC_VERSION"; shift ;;
+      --openspec-version=*)
+        OPENSPEC_VERSION="${1#*=}"
+        [[ -n "$OPENSPEC_VERSION" ]] || die "--openspec-version requires a value"
+        record_flag_override openspec --openspec-version "$OPENSPEC_VERSION" ;;
       --superpowers-ref)
-        require_value "$1" "${2:-}"; SUPERPOWERS_REF="$2"; shift ;;
-      --superpowers-ref=*) SUPERPOWERS_REF="${1#*=}" ;;
+        require_value "$1" "${2:-}"; SUPERPOWERS_REF="$2"
+        record_flag_override superpowers --superpowers-ref "$SUPERPOWERS_REF"; shift ;;
+      --superpowers-ref=*)
+        SUPERPOWERS_REF="${1#*=}"
+        [[ -n "$SUPERPOWERS_REF" ]] || die "--superpowers-ref requires a value"
+        record_flag_override superpowers --superpowers-ref "$SUPERPOWERS_REF" ;;
       --karpathy-ref)
-        require_value "$1" "${2:-}"; KARPATHY_REF="$2"; shift ;;
-      --karpathy-ref=*) KARPATHY_REF="${1#*=}" ;;
+        require_value "$1" "${2:-}"; KARPATHY_REF="$2"
+        record_flag_override karpathy-ref --karpathy-ref "$KARPATHY_REF"; shift ;;
+      --karpathy-ref=*)
+        KARPATHY_REF="${1#*=}"
+        [[ -n "$KARPATHY_REF" ]] || die "--karpathy-ref requires a value"
+        record_flag_override karpathy-ref --karpathy-ref "$KARPATHY_REF" ;;
       --karpathy-sha256)
         require_value "$1" "${2:-}"; KARPATHY_SHA256="$2"; shift ;;
       --karpathy-sha256=*) KARPATHY_SHA256="${1#*=}" ;;
       --shellcheck-version)
-        require_value "$1" "${2:-}"; SHELLCHECK_VERSION="$2"; shift ;;
-      --shellcheck-version=*) SHELLCHECK_VERSION="${1#*=}" ;;
+        require_value "$1" "${2:-}"; SHELLCHECK_VERSION="$2"
+        record_flag_override shellcheck --shellcheck-version "$SHELLCHECK_VERSION"; shift ;;
+      --shellcheck-version=*)
+        SHELLCHECK_VERSION="${1#*=}"
+        [[ -n "$SHELLCHECK_VERSION" ]] || die "--shellcheck-version requires a value"
+        record_flag_override shellcheck --shellcheck-version "$SHELLCHECK_VERSION" ;;
       --gitleaks-version)
-        require_value "$1" "${2:-}"; GITLEAKS_VERSION="$2"; shift ;;
-      --gitleaks-version=*) GITLEAKS_VERSION="${1#*=}" ;;
+        require_value "$1" "${2:-}"; GITLEAKS_VERSION="$2"
+        record_flag_override gitleaks --gitleaks-version "$GITLEAKS_VERSION"; shift ;;
+      --gitleaks-version=*)
+        GITLEAKS_VERSION="${1#*=}"
+        [[ -n "$GITLEAKS_VERSION" ]] || die "--gitleaks-version requires a value"
+        record_flag_override gitleaks --gitleaks-version "$GITLEAKS_VERSION" ;;
       --pyyaml-version)
-        require_value "$1" "${2:-}"; PYYAML_VERSION="$2"; shift ;;
-      --pyyaml-version=*) PYYAML_VERSION="${1#*=}" ;;
+        require_value "$1" "${2:-}"; PYYAML_VERSION="$2"
+        record_flag_override pyyaml --pyyaml-version "$PYYAML_VERSION"; shift ;;
+      --pyyaml-version=*)
+        PYYAML_VERSION="${1#*=}"
+        [[ -n "$PYYAML_VERSION" ]] || die "--pyyaml-version requires a value"
+        record_flag_override pyyaml --pyyaml-version "$PYYAML_VERSION" ;;
       --gcm-path)
         require_value "$1" "${2:-}"; GCM_WINDOWS_PATH="$2"; shift ;;
       --gcm-path=*) GCM_WINDOWS_PATH="${1#*=}" ;;
       -h|--help)
         usage
+        exit 0
+        ;;
+      --version)
+        printf '%s\n' "$SCRIPT_VERSION"
         exit 0
         ;;
       *)
@@ -301,6 +569,36 @@ parse_args() {
   done
 
   (( REPAIR_CODEX == 0 || SKIP_CODEX == 0 )) || die "--repair-codex cannot be combined with --skip-codex"
+}
+
+requested_value_for() {
+  printf '%s' "${REQUESTED_VALUE[$1]:-}"
+}
+
+requested_source_for() {
+  printf '%s' "${REQUESTED_SOURCE[$1]:-}"
+}
+
+# validate_requested_values is the gate: every effective value the installer
+# is about to act on must be scalar-grammar-clean before any installation
+# work begins. Called from main between parse_args, the last thing that can
+# change an effective value, and validate_environment, the first thing that
+# inspects the machine. karpathy-sha256 is excluded: it is not a requested
+# value, defaults to empty by design, and install_karpathy_skill already
+# holds it to ^[0-9a-f]{64}$.
+validate_requested_values() {
+  local key value source
+  for key in "${CATALOG_ORDER[@]}"; do
+    [[ "$key" != "karpathy-sha256" ]] || continue
+    value="$(requested_value_for "$key")"
+    source="$(requested_source_for "$key")"
+    if [[ -z "$value" ]]; then
+      die "invalid value for '$key' from $source: empty"
+    fi
+    if [[ ! "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._:+@/-]*$ ]]; then
+      die "invalid value for '$key' from $source: '$value'"
+    fi
+  done
 }
 
 validate_environment() {
@@ -506,6 +804,11 @@ render_mise_configuration() {
   # config. The projects on this workstation build on 17, so 17 is the default
   # and 21 is the one you opt into. Reordering this list silently changes which
   # JDK every unpinned build picks up.
+  # DOTNET_EF_VERSION is assigned only through resolve_pin's nameref, so the
+  # literal assignment is invisible to static analysis, and seeing
+  # DOTNET_10_VERSION and DOTNET_8_VERSION assigned nearby, it is flagged as a
+  # probable misspelling of one of those.
+  # shellcheck disable=SC2153
   cat <<EOF_MISE
 [tools]
 java = ["${JAVA_17_VERSION}", "${JAVA_21_VERSION}"]
@@ -975,6 +1278,9 @@ install_karpathy_skill() {
   actual_sha="$(sha256sum -- "$temp_file" | cut -d' ' -f1)"
   [[ "$actual_sha" == "$expected_sha" ]] || \
     die "Karpathy skill checksum mismatch: expected $expected_sha, got $actual_sha"
+  # Zero-invocation provenance for the install receipt: the digest just
+  # verified above, recorded once rather than recomputed later.
+  INSTALLED_KARPATHY_SHA256="$actual_sha"
 
   # Every harness resolves a skill by the name in its frontmatter, which must
   # equal the containing directory. A file that fails this is silently ignored
@@ -1216,6 +1522,306 @@ configure_project() {
   )
 }
 
+# serialize_catalog_set SET_NAME
+# Prints the members of the named associative array as a comma-joined list,
+# walked in CANONICAL CATALOG ORDER rather than the set's own hash order --
+# that is what makes skipped= and overridden= reproducible across runs.
+# ss_* local names: no caller may pass a set literally named ss_set.
+serialize_catalog_set() {
+  local -n ss_set="$1"
+  local key out=""
+  for key in "${CATALOG_ORDER[@]}"; do
+    if [[ -n "${ss_set[$key]+set}" ]]; then
+      out="${out:+$out,}$key"
+    fi
+  done
+  printf '%s' "$out"
+}
+
+# populate_skipped_set OUT_ARRAY
+# Fills the named associative array with the catalog keys the current run's
+# --skip-* flags expand to. Shared by skipped_keys, which serializes it for
+# the receipt's skipped= value, and write_installed_versions, which must probe
+# none of them. --skip-runtimes implies the three quality tools because three
+# separate gates produce that effect elsewhere (configure_runtimes returns
+# before rendering them, render_mise_configuration gates only on
+# SKIP_QUALITY_TOOLS, and install_python_quality_libraries gates on either
+# flag); --skip-opencode, --skip-claude, --skip-codex and --skip-git-credential
+# contribute nothing, because those components have no catalog key at all.
+populate_skipped_set() {
+  local -n ps_set="$1"
+  local key
+  if (( SKIP_RUNTIMES == 1 )); then
+    for key in java-17 java-21 dotnet-10 dotnet-8 python node bun maven dotnet-ef uv; do
+      ps_set["$key"]=1
+    done
+  fi
+  if (( SKIP_RUNTIMES == 1 || SKIP_QUALITY_TOOLS == 1 )); then
+    for key in shellcheck gitleaks pyyaml; do
+      ps_set["$key"]=1
+    done
+  fi
+  (( SKIP_OPENSPEC == 0 ))    || ps_set["openspec"]=1
+  (( SKIP_SUPERPOWERS == 0 )) || ps_set["superpowers"]=1
+  # shellcheck disable=SC2034 # read by the caller through populate_skipped_set's nameref
+  (( SKIP_KARPATHY == 0 ))    || ps_set["karpathy-ref"]=1
+}
+
+# skipped_keys prints the receipt's skipped= value: every catalog key this
+# run's flags expand to, in catalog order.
+skipped_keys() {
+  # shellcheck disable=SC2034 # populated by name through populate_skipped_set's nameref
+  local -A skipped=()
+  populate_skipped_set skipped
+  serialize_catalog_set skipped
+}
+
+# emit_or_warn_installed KEY CANDIDATE
+# The single point where a probe's extracted candidate becomes
+# installed.<KEY>=<CANDIDATE> or is dropped with a warning. Enforces the
+# receipt's scalar grammar: nothing reaches the file that is empty or that
+# fails ^[A-Za-z0-9][A-Za-z0-9._:+@/-]*$ -- no blank, quoted or raw value ever
+# gets written.
+emit_or_warn_installed() {
+  local key="$1" candidate="$2"
+  if [[ -n "$candidate" && "$candidate" =~ ^[A-Za-z0-9][A-Za-z0-9._:+@/-]*$ ]]; then
+    printf 'installed.%s=%s\n' "$key" "$candidate"
+  else
+    warn "Could not record installed version for $key."
+  fi
+}
+
+# run_bounded_probe TIMEOUT_BIN CMD...
+# Runs CMD bounded by "TIMEOUT_BIN 10s". Callers invoke this only as
+# `if output="$(run_bounded_probe ...)"; then`, so an expected probe failure
+# cannot trip errexit or the ERR trap.
+run_bounded_probe() {
+  local timeout_bin="$1"
+  shift
+  "$timeout_bin" 10s "$@"
+}
+
+# write_installed_versions emits installed.* for every catalog key a probe can
+# observe, in catalog order, skip-aware and time-bounded. Called only from
+# write_receipt_body.
+#
+# Three rules from the installer's probe contract:
+#   - a skipped component is never probed: no probe, no key, no warning;
+#   - every probe is guarded, so an expected failure cannot trip errexit or
+#     the ERR trap;
+#   - every probe is bounded by `timeout 10s`, resolved once. If `timeout`
+#     cannot be resolved, all probe-derived capture is skipped with one
+#     aggregate warning, but installed.karpathy-sha256 is still written when
+#     Karpathy was installed: it is zero-invocation provenance already
+#     computed and verified before the file was written, so it runs no
+#     command and has nothing to bound.
+write_installed_versions() {
+  local -A skip=()
+  populate_skipped_set skip
+
+  local timeout_bin=""
+  if ! timeout_bin="$(command -v timeout 2>/dev/null)"; then
+    warn "timeout is unavailable; no installed versions will be recorded."
+  fi
+
+  local output candidate
+
+  if [[ -n "$timeout_bin" ]]; then
+    if [[ -z "${skip[java-17]+set}" ]]; then
+      if output="$(run_bounded_probe "$timeout_bin" "$MISE_BIN" exec "java@$JAVA_17_VERSION" -- java -version 2>&1)"; then
+        candidate="$(awk -F'"' 'NF>=3{print $2; exit}' <<<"$output")"
+        emit_or_warn_installed java-17 "$candidate"
+      else
+        warn "Could not record installed version for java-17."
+      fi
+    fi
+
+    if [[ -z "${skip[java-21]+set}" ]]; then
+      if output="$(run_bounded_probe "$timeout_bin" "$MISE_BIN" exec "java@$JAVA_21_VERSION" -- java -version 2>&1)"; then
+        candidate="$(awk -F'"' 'NF>=3{print $2; exit}' <<<"$output")"
+        emit_or_warn_installed java-21 "$candidate"
+      else
+        warn "Could not record installed version for java-21."
+      fi
+    fi
+
+    # dotnet-10 and dotnet-8 share one probe: one `--list-sdks` invocation
+    # supplies both. It runs if at least one of the two is unskipped, and
+    # emits a value only for the ones that are.
+    if [[ -z "${skip[dotnet-10]+set}" || -z "${skip[dotnet-8]+set}" ]]; then
+      if output="$(run_bounded_probe "$timeout_bin" "$MISE_BIN" exec -- dotnet --list-sdks 2>/dev/null)"; then
+        if [[ -z "${skip[dotnet-10]+set}" ]]; then
+          candidate="$(awk '{ split($1, v, "."); if (v[1] == "10") { print $1; exit } }' <<<"$output")"
+          emit_or_warn_installed dotnet-10 "$candidate"
+        fi
+        if [[ -z "${skip[dotnet-8]+set}" ]]; then
+          candidate="$(awk '{ split($1, v, "."); if (v[1] == "8") { print $1; exit } }' <<<"$output")"
+          emit_or_warn_installed dotnet-8 "$candidate"
+        fi
+      else
+        [[ -n "${skip[dotnet-10]+set}" ]] || warn "Could not record installed version for dotnet-10."
+        [[ -n "${skip[dotnet-8]+set}" ]]  || warn "Could not record installed version for dotnet-8."
+      fi
+    fi
+
+    if [[ -z "${skip[python]+set}" ]]; then
+      if output="$(run_bounded_probe "$timeout_bin" "$MISE_BIN" exec -- python --version 2>/dev/null)"; then
+        candidate="$(awk 'NR==1{print $2}' <<<"$output")"
+        emit_or_warn_installed python "$candidate"
+      else
+        warn "Could not record installed version for python."
+      fi
+    fi
+
+    if [[ -z "${skip[node]+set}" ]]; then
+      if output="$(run_bounded_probe "$timeout_bin" "$MISE_BIN" exec -- node --version 2>/dev/null)"; then
+        candidate="$(awk 'NR==1{ sub(/^v/, "", $1); print $1 }' <<<"$output")"
+        emit_or_warn_installed node "$candidate"
+      else
+        warn "Could not record installed version for node."
+      fi
+    fi
+
+    if [[ -z "${skip[bun]+set}" ]]; then
+      if output="$(run_bounded_probe "$timeout_bin" "$MISE_BIN" exec -- bun --version 2>/dev/null)"; then
+        candidate="$(awk 'NR==1{print $1}' <<<"$output")"
+        emit_or_warn_installed bun "$candidate"
+      else
+        warn "Could not record installed version for bun."
+      fi
+    fi
+
+    if [[ -z "${skip[maven]+set}" ]]; then
+      if output="$(run_bounded_probe "$timeout_bin" "$MISE_BIN" exec -- mvn -version 2>/dev/null)"; then
+        candidate="$(awk 'NR==1{print $3}' <<<"$output")"
+        emit_or_warn_installed maven "$candidate"
+      else
+        warn "Could not record installed version for maven."
+      fi
+    fi
+
+    if [[ -z "${skip[dotnet-ef]+set}" ]]; then
+      if output="$(run_bounded_probe "$timeout_bin" "$MISE_BIN" exec -- dotnet-ef --version 2>/dev/null)"; then
+        candidate="$(awk 'NF{last=$1} END{print last}' <<<"$output")"
+        emit_or_warn_installed dotnet-ef "$candidate"
+      else
+        warn "Could not record installed version for dotnet-ef."
+      fi
+    fi
+
+    if [[ -z "${skip[uv]+set}" ]]; then
+      if output="$(run_bounded_probe "$timeout_bin" "$MISE_BIN" exec -- uv --version 2>/dev/null)"; then
+        candidate="$(awk 'NR==1{print $2}' <<<"$output")"
+        emit_or_warn_installed uv "$candidate"
+      else
+        warn "Could not record installed version for uv."
+      fi
+    fi
+
+    if [[ -z "${skip[shellcheck]+set}" ]]; then
+      if output="$(run_bounded_probe "$timeout_bin" "$MISE_BIN" exec -- shellcheck --version 2>/dev/null)"; then
+        candidate="$(awk '$1=="version:"{print $2; exit}' <<<"$output")"
+        emit_or_warn_installed shellcheck "$candidate"
+      else
+        warn "Could not record installed version for shellcheck."
+      fi
+    fi
+
+    if [[ -z "${skip[gitleaks]+set}" ]]; then
+      if output="$(run_bounded_probe "$timeout_bin" "$MISE_BIN" exec -- gitleaks version 2>/dev/null)"; then
+        candidate="$(awk 'NR==1{ sub(/^v/, "", $1); print $1 }' <<<"$output")"
+        emit_or_warn_installed gitleaks "$candidate"
+      else
+        warn "Could not record installed version for gitleaks."
+      fi
+    fi
+
+    if [[ -z "${skip[pyyaml]+set}" ]]; then
+      if output="$(run_bounded_probe "$timeout_bin" "$MISE_BIN" exec -- python -c 'import yaml; print(yaml.__version__)' 2>/dev/null)"; then
+        candidate="$(awk 'NR==1{print $1}' <<<"$output")"
+        emit_or_warn_installed pyyaml "$candidate"
+      else
+        warn "Could not record installed version for pyyaml."
+      fi
+    fi
+
+    if [[ -z "${skip[openspec]+set}" ]]; then
+      if output="$(run_bounded_probe "$timeout_bin" openspec --version 2>/dev/null)"; then
+        candidate="$(grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' <<<"$output" | head -n1 || true)"
+        emit_or_warn_installed openspec "$candidate"
+      else
+        warn "Could not record installed version for openspec."
+      fi
+    fi
+  fi
+
+  # superpowers and karpathy-ref have no reliable probe and get no
+  # installed.* key at all -- see the design's "Observing installed versions".
+
+  # Zero-invocation provenance: independent of timeout_bin, because recording
+  # it runs no command. Empty unless Karpathy was actually installed.
+  if [[ -n "$INSTALLED_KARPATHY_SHA256" ]]; then
+    printf 'installed.karpathy-sha256=%s\n' "$INSTALLED_KARPATHY_SHA256"
+  fi
+}
+
+# write_receipt_body emits the install receipt to stdout, in the canonical
+# order the design declares: the four provenance literals, skipped=,
+# overridden=, every requested.* in catalog order (karpathy-sha256 excepted --
+# it is integrity provenance, never a requested value), then installed.* in
+# catalog order. Called directly by tests and, in production, only through
+# write_install_receipt, which redirects it into the atomic temp file.
+write_receipt_body() {
+  local source_commit="unknown"
+  if git -C "$ADT_INSTALL_ROOT" rev-parse HEAD >/dev/null 2>&1; then
+    source_commit="$(git -C "$ADT_INSTALL_ROOT" rev-parse HEAD)"
+    if [[ -n "$(git -C "$ADT_INSTALL_ROOT" status --porcelain 2>/dev/null)" ]]; then
+      source_commit="$source_commit-dirty"
+    fi
+  fi
+
+  printf 'script-version=%s\n' "$SCRIPT_VERSION"
+  printf 'installed-at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  printf 'source-commit=%s\n' "$source_commit"
+  printf 'catalog-sha256=%s\n' "$(sha256sum -- "$ADT_CATALOG_FILE" | cut -d' ' -f1)"
+  printf 'skipped=%s\n' "$(skipped_keys)"
+  printf 'overridden=%s\n' "$(serialize_catalog_set OVERRIDDEN_SET)"
+
+  local key
+  for key in "${CATALOG_ORDER[@]}"; do
+    [[ "$key" != "karpathy-sha256" ]] || continue
+    printf 'requested.%s=%s\n' "$key" "$(requested_value_for "$key")"
+  done
+
+  write_installed_versions
+}
+
+# write_install_receipt persists write_receipt_body's output atomically at
+# ${XDG_STATE_HOME:-$HOME/.local/state}/agentic-dev-toolkit/install-receipt.env.
+# Called from main between verify_installation and print_summary: only after
+# verification succeeds, and before the summary claims success, so a write
+# failure is an installation failure under the ERR trap rather than a warning
+# after "Setup complete". --verify-only never reaches this call; --dry-run
+# reaches it and returns immediately after describing what would be written.
+write_install_receipt() {
+  local state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/agentic-dev-toolkit"
+  local receipt="$state_dir/install-receipt.env"
+  local tmp
+
+  if (( DRY_RUN == 1 )); then
+    info "Would write the install receipt to $receipt"
+    return 0
+  fi
+
+  mkdir -p "$state_dir"
+  chmod 0755 "$state_dir"
+  tmp="$(mktemp "$state_dir/.install-receipt.XXXXXX")"
+  TEMP_PATHS+=("$tmp")
+  write_receipt_body > "$tmp"
+  chmod 0644 "$tmp"
+  mv -f "$tmp" "$receipt"
+}
+
 verify_installation() {
   log "Verifying workstation"
 
@@ -1427,6 +2033,7 @@ EOF_SUMMARY
 
 main() {
   parse_args "$@"
+  validate_requested_values
   validate_environment
 
   if (( VERIFY_ONLY == 1 )); then
@@ -1449,6 +2056,7 @@ main() {
   configure_git_credential_helper
   configure_project
   verify_installation
+  write_install_receipt
   print_summary
 }
 

@@ -2,7 +2,7 @@
 
 `wsl-toolchain-doctor.sh` enforces a Linux-first development boundary inside WSL, audits PATH hygiene, validates `mise`-managed tool bindings, and can conservatively remediate persistent PATH sources.
 
-Current tool version: `0.4.0`.
+Current tool version: `0.5.0`.
 
 ## Policy
 
@@ -204,6 +204,13 @@ still runs since it does not need the catalog.
 
 - `TOOLKIT_NOT_PROVISIONED` - info; no install receipt found;
 - `TOOLKIT_RECEIPT_UNREADABLE` - info; the receipt failed `adt-kv` validation;
+- `TOOLKIT_RECEIPT_UNKNOWN_KEY` - info; the receipt names a component the
+  catalog no longer pins. That component is excluded from catalog staleness
+  (C), but the receipt stays readable and every still-pinned component is
+  still compared. Either the pin was retired or the receipt was edited by
+  hand; the two are indistinguishable from the receipt alone. Rejecting
+  such a receipt would take all three comparisons dark on every provisioned
+  machine the moment a pin is retired;
 - `TOOLKIT_CATALOG_UNAVAILABLE` - info; the catalog is absent or unreadable, so
   catalog staleness (C) was not checked;
 - `TOOLKIT_CONFIG_UNAVAILABLE` - info; the toolkit-managed `mise` configuration
@@ -459,7 +466,7 @@ Schema version remains `1`:
 ```json
 {
   "schemaVersion": 1,
-  "toolVersion": "0.4.0",
+  "toolVersion": "0.5.0",
   "action": "audit",
   "status": "PASS",
   "findings": []

@@ -4,7 +4,7 @@ Enforces a Linux-first development boundary inside WSL: it audits PATH hygiene,
 validates `mise`-managed tool bindings, and can conservatively remediate the
 WSL configuration and persistent PATH sources.
 
-Version **0.4.0**, JSON schema version `1`. Bash only — no Python, Java, .NET,
+Version **0.5.0**, JSON schema version `1`. Bash only — no Python, Java, .NET,
 Node.js, Go or `jq`.
 
 ## Files
@@ -78,6 +78,11 @@ policy violation the way a Windows PE on `PATH` is. The `TOOLKIT_*` codes:
 
 - `TOOLKIT_NOT_PROVISIONED` — info; no install receipt found;
 - `TOOLKIT_RECEIPT_UNREADABLE` — info; the receipt fails `adt-kv` validation;
+- `TOOLKIT_RECEIPT_UNKNOWN_KEY` — info; the receipt names a component the
+  catalog no longer pins, so that component is excluded from staleness
+  checking. The pin was retired, or the receipt was hand-edited — the
+  doctor cannot tell which. The receipt stays readable and every
+  still-pinned component is still compared;
 - `TOOLKIT_CATALOG_UNAVAILABLE` — info; the catalog is absent or unreadable;
 - `TOOLKIT_CONFIG_UNAVAILABLE` — info; the toolkit-managed `mise` configuration
   is absent or unreadable;

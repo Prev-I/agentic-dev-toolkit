@@ -5,6 +5,10 @@ IFS=$'\n\t'
 REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly REPOSITORY_ROOT
 readonly CONFIGURATOR="$REPOSITORY_ROOT/azure-artifacts/configure.sh"
+readonly WINDOWS_CONFIGURATOR="$REPOSITORY_ROOT/azure-artifacts/configure-windows.ps1"
+readonly WINDOWS_CREDENTIAL_MODULE="$REPOSITORY_ROOT/azure-artifacts/windows/AzureArtifactsCredential.psm1"
+readonly WINDOWS_MAVEN_WRAPPER="$REPOSITORY_ROOT/azure-artifacts/windows/mvn-azure.ps1"
+readonly WINDOWS_TEST="$REPOSITORY_ROOT/tests/azure-artifacts-windows.ps1"
 
 resolve_mise_data_dir() {
   if [[ -n "${MISE_DATA_DIR:-}" ]]; then
@@ -206,6 +210,38 @@ test_documentation_and_cli_contracts() {
   help="$(tr -s '[:space:]' ' ' <<<"$help")"
   [[ "$help" == *'migration or controlled automation'* && "$help" == *'normal setup and rotation'* && "$help" == *'/dev/tty'* ]] \
     || fail "configurator help must limit --pat-stdin to migration or controlled automation"
+}
+
+test_windows_adapter_contract() {
+  local documentation powershell
+
+  [[ -f "$WINDOWS_CONFIGURATOR" ]] || fail "Windows Azure Artifacts configurator must exist"
+  [[ -f "$WINDOWS_CREDENTIAL_MODULE" ]] || fail "Windows Credential Manager module must exist"
+  [[ -f "$WINDOWS_MAVEN_WRAPPER" ]] || fail "Windows Maven wrapper must exist"
+  [[ -f "$WINDOWS_TEST" ]] || fail "Windows Azure Artifacts test must exist"
+
+  documentation="$(<"$REPOSITORY_ROOT/azure-artifacts/README.md")"
+  # shellcheck disable=SC2016
+  [[ "$documentation" == *'configure-windows.ps1'* && \
+    "$documentation" == *'Windows Credential Manager'* && \
+    "$documentation" == *'mvn-azure.ps1'* && \
+    "$documentation" == *'${env.AZDO_MAVEN_PAT}'* && \
+    "$documentation" == *'`-PatStdin` is reserved for controlled migration and automated tests'* ]] \
+    || fail "Azure Artifacts README must document the Windows Maven adapter"
+
+  powershell="$(command -v powershell.exe 2>/dev/null || true)"
+  if [[ -z "$powershell" && -x /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe ]]; then
+    powershell=/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe
+  fi
+  if [[ -z "$powershell" ]]; then
+    printf 'SKIP: Windows Azure Artifacts tests require Windows PowerShell\n'
+  elif command -v wslpath >/dev/null 2>&1; then
+    "$powershell" -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w "$WINDOWS_TEST")"
+  elif command -v cygpath >/dev/null 2>&1; then
+    "$powershell" -NoProfile -ExecutionPolicy Bypass -File "$(cygpath -w "$WINDOWS_TEST")"
+  else
+    printf 'SKIP: Windows Azure Artifacts tests need a Windows path converter\n'
+  fi
 }
 
 test_successful_configuration_uses_required_summary() {
@@ -1251,6 +1287,7 @@ write_fake_mise
 load_configurator_functions
 test_mise_data_dir_resolution_prefers_explicit_then_xdg_then_home
 test_documentation_and_cli_contracts
+test_windows_adapter_contract
 test_successful_configuration_uses_required_summary
 test_secret_file_contains_one_assignment
 test_mise_config_derives_all_consumers_without_embedding_pat

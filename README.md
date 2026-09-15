@@ -155,6 +155,8 @@ Key flags:
 | `--skip-superpowers` | Skip Superpowers configuration |
 | `--skip-karpathy` | Skip the Karpathy guidelines skill |
 | `--skip-quality-tools` | Skip shellcheck, gitleaks, and PyYAML |
+| `--skip-git-credential` | Skip the WSL Git credential wrapper (WSL only) |
+| `--skip-az-shim` | Skip the WSL Azure CLI shim (WSL only) |
 | `--repair-codex` | Remove conflicting Codex installs and reinstall standalone |
 
 Version overrides are available via `--node-version`, `--python-version`, etc., or through
@@ -377,6 +379,71 @@ The empty value first is required, not decoration: `credential.helper` is a
 **list**, and a URL-specific section appends to the global helper unless an empty
 value resets it. Omit it and GCM stays first in line for GitHub.
 
+### Azure CLI on WSL
+
+On WSL the installer generates `~/.local/bin/az`, a shim that runs the *Windows*
+Azure CLI and forwards only read-only verbs. Off WSL it does nothing — a Linux
+machine installs the CLI natively with nothing in the way. Skip it with
+`--skip-az-shim`; point it elsewhere with `--az-path`.
+
+**Why the Windows CLI rather than a Linux one.** The Azure CLI's token cache on
+Windows is DPAPI-encrypted under `C:\Users\<user>\.azure`, so a Linux process
+cannot read it. A WSL-native `az` would therefore need its own second `az login`
+and its own credential store to keep alive, and the two would expire
+independently. Delegating keeps exactly one login, shared by both sides.
+
+**Why it refuses most of the CLI.** The point of the shim is a working `az` that
+an agent can reach, and an `az` an agent can reach is an `az` an agent can
+`delete` with. What actually needs to work is one call. The Azure MCP servers
+carry no credential of their own — they authenticate through Azure.Identity's
+`ChainedTokenCredential`, and on a WSL workstation every other link of that chain
+is unavailable: no `EnvironmentCredential` variables, no Visual Studio, no
+`msalruntime` for the VS Code broker, no PowerShell, no `azd`, no libsecret for
+the interactive browser. The Azure CLI link is the only one that resolves, and it
+is reached by:
+
+```bash
+az account get-access-token --output json --resource <resource>
+```
+
+So the allowlist is that call plus routine account inspection: `version`,
+`login`, `logout`, and `account {get-access-token,show,list}`. Everything else
+returns in under a second with the command echoed back:
+
+```
+az: 'storage account delete --name x' is not in this shim's read-only allowlist.
+az: allowed - version, login, logout, account {get-access-token,show,list}
+az: to run it anyway, deliberately:  AZ_UNSAFE=1 az storage account delete --name x
+```
+
+`AZ_UNSAFE=1` is a real escape hatch, not a locked door — it just has to be
+typed, so that a write against a live subscription is never something that
+happens in passing.
+
+> `az account get-access-token` prints a bearer token on stdout. Keep its output
+> out of transcripts, logs and issues.
+
+Two details are load-bearing, and both are covered by tests:
+
+- **The delegate is `python.exe`, not `az.cmd`.** `az.cmd` is a batch file and
+  would need `cmd.exe` to run; `python.exe` is a real PE, so WSL's `binfmt_misc`
+  runs it directly, and `-m azure.cli` is what `az.cmd` invokes internally
+  anyway.
+- **The shim is verified by behaviour.** Installation checks that a verb outside
+  the allowlist is actually refused, not that a file called `az` exists. A shim
+  that forwards everything looks like a restriction and is not one.
+
+The interop rules from the credential wrapper above apply unchanged, because the
+delegate is a Windows process either way: a Linux variable such as
+`AZURE_CONFIG_DIR` or a proxy setting reaches it only if `WSLENV` names it, and
+relative paths resolve against a Windows current directory, so any argument that
+names a file wants an absolute Windows path.
+
+`~/.local/bin` is on `PATH` ahead of most things, so this file becomes `az` for
+everything on the machine. If a WSL-native Azure CLI is already installed, the
+installer says so and names it rather than taking over silently; `--skip-az-shim`
+keeps it.
+
 ## Shared `AGENTS.md` pattern
 
 The core idea: write workspace guidance once in `AGENTS.md`, then give each agent harness access
@@ -446,7 +513,10 @@ pattern in [agentic-engineering](https://github.com/Prev-I/agentic-engineering).
 
 - No secrets, tokens, API keys, or connection strings in any committed file.
 - MCP server authentication uses ambient credentials (Azure CLI, environment variables, device
-  login flows).
+  login flows). On WSL the Azure CLI link of that chain is the
+  [`az` shim](#azure-cli-on-wsl), which is restricted to read-only verbs for this reason.
+- `az account get-access-token` prints a bearer token. Never paste its output into a commit,
+  an issue, a log, or a support transcript.
 - Audit config files before committing — search for `Bearer`, `password`, `connectionString`,
   `-----BEGIN`, `sk-`, `pat:`.
 

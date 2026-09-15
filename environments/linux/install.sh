@@ -11,7 +11,7 @@ readonly KARPATHY_RAW_BASE='https://raw.githubusercontent.com/multica-ai/andrej-
 readonly KARPATHY_SKILL_PATH='skills/karpathy-guidelines/SKILL.md'
 # The installer's own version, declared with the other constants for parity
 # with the repository's other versioned scripts. Printed verbatim by --version.
-readonly SCRIPT_VERSION="0.1.0"
+readonly SCRIPT_VERSION="0.2.0"
 
 log() {
   printf '\n==> %s\n' "$*"
@@ -298,6 +298,7 @@ SKIP_SUPERPOWERS=0
 SKIP_KARPATHY=0
 SKIP_QUALITY_TOOLS=0
 SKIP_GIT_CREDENTIAL=0
+SKIP_AZ_SHIM=0
 
 XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 XDG_CONFIG_HOME="${XDG_CONFIG_HOME%/}"
@@ -308,6 +309,11 @@ CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 CODEX_STANDALONE_ROOT="$CODEX_HOME/packages/standalone"
 GCM_WINDOWS_PATH="${ADT_GCM_PATH:-/mnt/c/Program Files/Git/mingw64/bin/git-credential-manager.exe}"
 GIT_CREDENTIAL_WRAPPER="${GIT_CREDENTIAL_WRAPPER:-$HOME/.local/bin/git-credential-manager-wsl}"
+# python.exe, not az.cmd: az.cmd is a batch file and would need cmd.exe, while
+# python.exe is a real PE that WSL's binfmt_misc runs directly. `-m azure.cli`
+# is what az.cmd invokes internally anyway.
+AZ_WINDOWS_PATH="${ADT_AZ_PATH:-/mnt/c/Program Files/Microsoft SDKs/Azure/CLI2/python.exe}"
+AZ_SHIM="${AZ_SHIM:-$HOME/.local/bin/az}"
 
 # Prepend a directory to PATH only when it exists and is not already present.
 # Ubuntu's stock ~/.profile guards $HOME/bin and $HOME/.local/bin the same way;
@@ -358,6 +364,8 @@ Selective installation:
                                installs them.
   --skip-git-credential        Do not install the WSL Git credential wrapper.
                                Ignored off WSL, where it is never installed.
+  --skip-az-shim               Do not install the WSL Azure CLI shim.
+                               Ignored off WSL, where it is never installed.
 
 Version overrides:
   --node-version VERSION       Node.js version (default: $NODE_VERSION).
@@ -382,6 +390,8 @@ Other paths:
   --gcm-path PATH              Windows Git Credential Manager executable the WSL
                                credential wrapper delegates to
                                (default: $GCM_WINDOWS_PATH).
+  --az-path PATH               Windows Azure CLI interpreter the WSL az shim
+                               delegates to (default: $AZ_WINDOWS_PATH).
   -h, --help                   Show this help.
 
 Environment variables provide the same defaults:
@@ -392,7 +402,7 @@ Environment variables provide the same defaults:
   ADT_OPENSPEC_VERSION, ADT_SUPERPOWERS_REF, ADT_OPENSPEC_TOOLS,
   ADT_KARPATHY_REF, ADT_KARPATHY_SHA256,
   ADT_SHELLCHECK_VERSION, ADT_GITLEAKS_VERSION, ADT_PYYAML_VERSION,
-  ADT_GCM_PATH
+  ADT_GCM_PATH, ADT_AZ_PATH
 
 Examples:
   ./$SCRIPT_NAME --dry-run
@@ -443,6 +453,7 @@ parse_args() {
       --skip-karpathy) SKIP_KARPATHY=1 ;;
       --skip-quality-tools) SKIP_QUALITY_TOOLS=1 ;;
       --skip-git-credential) SKIP_GIT_CREDENTIAL=1 ;;
+      --skip-az-shim) SKIP_AZ_SHIM=1 ;;
       --project)
         require_value "$1" "${2:-}"
         PROJECT_PATH="$2"
@@ -553,6 +564,9 @@ parse_args() {
       --gcm-path)
         require_value "$1" "${2:-}"; GCM_WINDOWS_PATH="$2"; shift ;;
       --gcm-path=*) GCM_WINDOWS_PATH="${1#*=}" ;;
+      --az-path)
+        require_value "$1" "${2:-}"; AZ_WINDOWS_PATH="$2"; shift ;;
+      --az-path=*) AZ_WINDOWS_PATH="${1#*=}" ;;
       -h|--help)
         usage
         exit 0
@@ -1482,6 +1496,162 @@ configure_git_credential_helper() {
   warn "  git config --global credential.helper $GIT_CREDENTIAL_WRAPPER"
 }
 
+render_az_shim() {
+  # The same interop shape as render_git_credential_helper: a Windows program
+  # reached from WSL, generated from one place so the boundary rules are not
+  # rediscovered by hand. What differs is why the Windows side is used at all,
+  # and why the generated file restricts what it will run.
+  #
+  # Why not simply install the Azure CLI into WSL. The CLI's token cache on
+  # Windows is DPAPI-encrypted under C:\Users\<user>\.azure, so a Linux process
+  # cannot read it. A WSL-native `az` would therefore need a second `az login`
+  # and a second credential store to keep alive. Running the Windows CLI keeps
+  # exactly one login, shared by both sides.
+  #
+  # Why the allowlist is this narrow. The Azure MCP servers carry no credential
+  # of their own: they authenticate through Azure.Identity's
+  # ChainedTokenCredential, and on a WSL workstation every other link of that
+  # chain is unavailable -- no EnvironmentCredential variables, no Visual
+  # Studio, no msalruntime for the VS Code broker, no PowerShell, no azd, no
+  # libsecret for the interactive browser. The Azure CLI link is the only one
+  # that resolves, and it is reached by a single call:
+  #
+  #     az account get-access-token --output json --resource <resource>
+  #
+  # So the allowlist below is the whole set of verbs that call and routine
+  # account inspection need. Everything else an agent might reach for -- every
+  # create, delete and update against a live subscription -- has to be asked
+  # for deliberately, which is what AZ_UNSAFE is.
+  #
+  # Note for anyone reading output: `account get-access-token` prints a bearer
+  # token on stdout. It belongs in no transcript, log or issue.
+  cat <<'EOF_AZ_HEAD'
+#!/usr/bin/env bash
+# az - run the Windows Azure CLI from WSL, restricted to read-only verbs.
+#
+# Generated by the agentic-dev-toolkit installer. Local edits are replaced on the
+# next run; change the installer instead.
+#
+# The Azure CLI's token cache on Windows is DPAPI-encrypted, so a Linux process
+# cannot read it and a WSL-native install would need its own second login. This
+# delegates to the Windows CLI instead, so one login serves both sides.
+#
+# The allowlist is what makes the single login safe to leave reachable by an
+# agent: the credential chain used by the Azure MCP servers needs exactly
+# `account get-access-token`, and nothing here can change a subscription unless
+# a human types AZ_UNSAFE=1.
+#
+# `account get-access-token` prints a bearer token on stdout. Keep it out of
+# transcripts, logs and issues.
+#
+# Two interop details, the same ones as git-credential-manager-wsl beside it:
+#  - the delegate is a Windows process, so a Linux environment variable reaches
+#    it only if WSLENV names it. Setting AZURE_CONFIG_DIR or a proxy variable in
+#    bash alone will not take effect.
+#  - it resolves relative paths against a Windows current directory, so any
+#    argument naming a file wants an absolute Windows path.
+#
+# az.cmd is deliberately not the delegate: it is a batch file and would need
+# cmd.exe. python.exe is a real PE, so WSL's binfmt_misc runs it directly, and
+# `-m azure.cli` is what az.cmd invokes internally anyway.
+
+set -Eeuo pipefail
+IFS=$'\n\t'
+
+EOF_AZ_HEAD
+
+  # Baked in at install time rather than resolved at run time, for the same
+  # reason as the credential wrapper's delegate: this file is machine-specific
+  # already, and a shim that guessed would fail later and less clearly than one
+  # that states where it looked. The ${AZ_PY:-...} is emitted literally, to be
+  # expanded by the generated script.
+  # shellcheck disable=SC2016
+  printf 'AZ_PY="${AZ_PY:-%s}"\n' "$AZ_WINDOWS_PATH"
+
+  cat <<'EOF_AZ_BODY'
+
+if [[ ! -x "$AZ_PY" ]]; then
+  printf '%s: Windows Azure CLI not found at: %s\n' "${0##*/}" "$AZ_PY" >&2
+  printf '%s: check the install on the Windows side, or pass --az-path to the installer\n' "${0##*/}" >&2
+  exit 127
+fi
+
+# $* joins on the first character of IFS, which this script sets to a newline.
+# The refusal below quotes the command the caller typed and offers it back with
+# AZ_UNSAFE=1 in front, so it joins on a space instead: a suggestion printed one
+# word per line cannot be copied and run, which is the only thing that message
+# is for.
+quoted_args() {
+  local IFS=' '
+  printf '%s' "$*"
+}
+
+if [[ "${AZ_UNSAFE:-0}" != "1" ]]; then
+  ok=0
+  case "${1:-}" in
+    ""|version|login|logout|--version|--help|-h)
+      ok=1 ;;
+    account)
+      case "${2:-}" in
+        get-access-token|show|list) ok=1 ;;
+      esac ;;
+  esac
+
+  if (( ok != 1 )); then
+    typed="$(quoted_args "$@")"
+    printf '%s: '\''%s'\'' is not in this shim'\''s read-only allowlist.\n' "${0##*/}" "$typed" >&2
+    printf '%s: allowed - version, login, logout, account {get-access-token,show,list}\n' "${0##*/}" >&2
+    printf '%s: to run it anyway, deliberately:  AZ_UNSAFE=1 az %s\n' "${0##*/}" "$typed" >&2
+    exit 1
+  fi
+fi
+
+exec "$AZ_PY" -m azure.cli "$@"
+EOF_AZ_BODY
+}
+
+configure_az_shim() {
+  if (( SKIP_AZ_SHIM == 1 )); then
+    return
+  fi
+
+  # Off WSL there is no Windows Azure CLI to delegate to, and a machine that
+  # needs `az` there installs it natively with no DPAPI cache in the way. Skip
+  # without comment: this is the expected state on a plain Debian host.
+  if ! is_wsl; then
+    return
+  fi
+
+  local content
+  content="$(render_az_shim)"
+
+  log "Configuring the WSL Azure CLI shim at $AZ_SHIM"
+
+  if [[ ! -e "$AZ_WINDOWS_PATH" ]]; then
+    warn "The Windows Azure CLI was not found at $AZ_WINDOWS_PATH."
+    warn "The shim is still installed; correct the path with --az-path."
+  fi
+
+  # ~/.local/bin is prepended to PATH, so this file becomes `az` for everything
+  # on the machine. Taking over a WSL-native Azure CLI somebody installed on
+  # purpose is reported rather than done quietly -- the same rule the credential
+  # helper follows about settings it does not own. It is still installed,
+  # because being asked for it is what this function means.
+  local shadowed
+  if shadowed="$(command -v az 2>/dev/null)" && [[ "$shadowed" != "$AZ_SHIM" ]]; then
+    warn "An Azure CLI is already on PATH at $shadowed."
+    warn "The shim at $AZ_SHIM will shadow it; use --skip-az-shim to keep it."
+  fi
+
+  if (( DRY_RUN == 1 )); then
+    printf '%s\n' "$content"
+    quote_command chmod 755 "$AZ_SHIM"
+  else
+    write_managed_file "$AZ_SHIM" "$content"
+    chmod 755 "$AZ_SHIM"
+  fi
+}
+
 configure_project() {
   [[ -n "$PROJECT_PATH" ]] || return 0
 
@@ -1917,6 +2087,29 @@ verify_installation() {
     info "Git credential wrapper declines to prompt with no terminal, and exports WSLENV."
   fi
 
+  if (( SKIP_AZ_SHIM == 0 && DRY_RUN == 0 )) && is_wsl; then
+    # Verified by behaviour, for the same reason as the wrapper above. What
+    # makes this file safe to leave reachable by an agent is the allowlist, and
+    # a shim that is present but forwards everything is worse than no shim: it
+    # looks like a restriction and is not one. So the check is that a verb
+    # outside the allowlist is actually refused.
+    #
+    # A stub delegate stands in for the Windows CLI, so verification neither
+    # needs Azure nor can obtain a token.
+    [[ -x "$AZ_SHIM" ]] || die "the Azure CLI shim is missing at $AZ_SHIM"
+
+    local az_stub az_status=0
+    az_stub="$(mktemp)"
+    TEMP_PATHS+=("$az_stub")
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$az_stub"
+    chmod 755 "$az_stub"
+
+    AZ_PY="$az_stub" "$AZ_SHIM" group delete --name adt-verification </dev/null >/dev/null 2>&1 || az_status=$?
+    (( az_status == 1 )) ||
+      die "the Azure CLI shim did not refuse a verb outside its allowlist (exit $az_status)"
+    info "Azure CLI shim refuses write verbs; AZ_UNSAFE=1 is the deliberate override."
+  fi
+
   if (( SKIP_SUPERPOWERS == 0 && DRY_RUN == 0 )) && [[ -s "$OPENCODE_CONFIG" ]] && jq empty "$OPENCODE_CONFIG" >/dev/null 2>&1; then
     local plugin="$SUPERPOWERS_PLUGIN_BASE#$SUPERPOWERS_REF"
     jq -e --arg plugin "$plugin" '.plugin | type == "array" and index($plugin) != null' "$OPENCODE_CONFIG" >/dev/null || \
@@ -1989,8 +2182,23 @@ Git credentials on WSL:
   value resets it."
   fi
 
+  local az_note=""
+  if (( SKIP_AZ_SHIM == 0 )) && is_wsl; then
+    az_note="
+Azure CLI on WSL:
+  az is $AZ_SHIM, a shim onto the Windows Azure CLI, so this
+  machine keeps one login rather than two credential stores. It allows only
+  version, login, logout and account {get-access-token,show,list}; anything
+  else needs AZ_UNSAFE=1 typed deliberately.
+
+  Sign in once from Windows or by running 'az login' here. Note that
+  'az account get-access-token' prints a bearer token, so keep its output out
+  of transcripts, logs and issues."
+  fi
+
   cat <<EOF_SUMMARY
 $credential_note
+$az_note
 
 Manual steps after installation:
   1. Open a fresh shell, or run: exec bash -l
@@ -2054,6 +2262,7 @@ main() {
   configure_opencode_superpowers
   install_karpathy_skill
   configure_git_credential_helper
+  configure_az_shim
   configure_project
   verify_installation
   write_install_receipt

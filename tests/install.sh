@@ -1016,6 +1016,265 @@ test_git_credential_wrapper_is_valid_shell_and_rewritten_on_change() {
   teardown_credential_sandbox "$original_home"
 }
 
+# Isolates $HOME so the generated shim lands in the suite's tree. Without this
+# the tests would write ~/.local/bin/az on the developer's own machine, which is
+# exactly the file the feature is about and exactly the one not to clobber.
+#
+# No test here ever reaches Azure. The delegate is always a stub, so nothing in
+# this suite can obtain, print or record a real access token.
+setup_az_sandbox() {
+  local sandbox="$TEMP_DIR/$1"
+
+  HOME="$sandbox/home"
+  AZ_SHIM="$HOME/.local/bin/az"
+  AZ_WINDOWS_PATH="$sandbox/python.exe"
+  DRY_RUN=0
+  SKIP_AZ_SHIM=0
+  ADT_FORCE_WSL=1
+
+  mkdir -p "$HOME/.local/bin"
+
+  # PATH is ambient machine state here in the same way WSLENV is above. The
+  # step under test asks `command -v az` whether it is about to shadow another
+  # Azure CLI, and the suite's own PATH still carries the developer's real
+  # ~/.local/bin -- which on a machine that has already run the installer holds
+  # exactly this shim. Left alone, every case in this block would report a
+  # shadowing that only the host, not the behaviour, produced.
+  AZ_SANDBOX_ORIGINAL_PATH="$PATH"
+  PATH="$HOME/.local/bin:/usr/bin:/bin"
+
+  # A stand-in for the Windows CLI's python.exe. It echoes the argument vector
+  # it was handed, which is what lets these tests assert what the shim forwards
+  # rather than merely that a file was written.
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*"\n' > "$AZ_WINDOWS_PATH"
+  chmod 755 "$AZ_WINDOWS_PATH"
+}
+
+teardown_az_sandbox() {
+  HOME="$1"
+  PATH="$AZ_SANDBOX_ORIGINAL_PATH"
+  unset ADT_FORCE_WSL
+}
+
+test_az_shim_forwards_an_allowlisted_verb_to_the_windows_cli() {
+  local original_home="$HOME"
+  setup_az_sandbox az-allowlisted
+
+  configure_az_shim >/dev/null
+
+  [[ -x "$AZ_SHIM" ]] || fail "the shim must be installed executable"
+  # `account get-access-token` is the single call the Azure credential chain
+  # makes, and `-m azure.cli` is what az.cmd invokes internally -- the route
+  # that avoids needing cmd.exe for a batch file.
+  assert_equal "$("$AZ_SHIM" account get-access-token --output json </dev/null)" \
+    "-m azure.cli account get-access-token --output json" \
+    "an allowlisted verb must reach the Windows CLI with its arguments intact"
+
+  teardown_az_sandbox "$original_home"
+}
+
+test_az_shim_refuses_a_verb_outside_the_allowlist() {
+  local original_home="$HOME"
+  setup_az_sandbox az-denied
+
+  configure_az_shim >/dev/null
+
+  local status=0 forwarded message
+  # stdout and stderr are captured separately on purpose: an empty stdout is
+  # what proves the stub delegate was never reached, which is the actual
+  # security property. A refusal that still ran the command would look
+  # identical if both streams were merged.
+  forwarded="$("$AZ_SHIM" group delete --name anything </dev/null 2>"$TEMP_DIR/az-denied.err")" || status=$?
+  message="$(cat "$TEMP_DIR/az-denied.err")"
+
+  assert_equal "$status" "1" "a verb outside the allowlist must fail"
+  assert_equal "$forwarded" "" "a refused verb must never reach the Windows CLI"
+  [[ "$message" == *"read-only allowlist"* ]] || fail "the refusal must say why, got: $message"
+  # The override line has to be copy-pasteable. $* joins on the first character
+  # of IFS, which the shim sets to a newline, so a refusal that quotes "$*"
+  # directly prints the command one word per line and the suggestion cannot be
+  # run. The message is the entire value of refusing rather than failing.
+  [[ "$message" == *"AZ_UNSAFE=1 az group delete --name anything"* ]] ||
+    fail "the refusal must offer the deliberate override as one runnable line, got: $message"
+
+  teardown_az_sandbox "$original_home"
+}
+
+test_az_shim_runs_a_denied_verb_only_when_asked_deliberately() {
+  local original_home="$HOME"
+  setup_az_sandbox az-unsafe
+
+  configure_az_shim >/dev/null
+
+  # The escape hatch. It has to be reached by typing it, so that a write
+  # against a subscription is never something an agent does by accident.
+  assert_equal "$(AZ_UNSAFE=1 "$AZ_SHIM" group list </dev/null)" "-m azure.cli group list" \
+    "AZ_UNSAFE=1 must forward a verb the allowlist would otherwise refuse"
+
+  teardown_az_sandbox "$original_home"
+}
+
+test_az_shim_reports_a_missing_delegate_without_running_anything() {
+  local original_home="$HOME"
+  setup_az_sandbox az-missing-delegate
+
+  configure_az_shim >/dev/null 2>&1
+  rm -f "$AZ_WINDOWS_PATH"
+
+  local status=0 message
+  message="$("$AZ_SHIM" account show </dev/null 2>&1 >/dev/null)" || status=$?
+  assert_equal "$status" "127" "a missing Windows CLI must fail as a missing command"
+  [[ "$message" == *"$AZ_WINDOWS_PATH"* ]] || fail "the failure must name the path it looked at, got: $message"
+
+  teardown_az_sandbox "$original_home"
+}
+
+test_az_shim_bakes_in_the_configured_delegate_path() {
+  local original_home="$HOME"
+  setup_az_sandbox az-delegate
+  AZ_WINDOWS_PATH="/somewhere/else/python.exe"
+
+  configure_az_shim >/dev/null 2>&1
+
+  grep -qF "$AZ_WINDOWS_PATH" "$AZ_SHIM" || fail "--az-path must reach the generated shim"
+
+  teardown_az_sandbox "$original_home"
+}
+
+test_az_shim_options_are_parsed_in_both_forms() {
+  local original_az_path="$AZ_WINDOWS_PATH"
+  AZ_WINDOWS_PATH=""; SKIP_AZ_SHIM=0
+  parse_args --az-path /a/python.exe --skip-az-shim
+  assert_equal "$AZ_WINDOWS_PATH" "/a/python.exe" "--az-path must accept a separate value"
+  assert_equal "$SKIP_AZ_SHIM" "1" "--skip-az-shim must set the skip flag"
+
+  AZ_WINDOWS_PATH=""
+  parse_args --az-path=/b/python.exe
+  assert_equal "$AZ_WINDOWS_PATH" "/b/python.exe" "--az-path= must accept an inline value"
+
+  if ( parse_args --az-path 2>/dev/null ); then
+    fail "--az-path must require a value"
+  fi
+
+  AZ_WINDOWS_PATH="$original_az_path"
+  SKIP_AZ_SHIM=0
+}
+
+test_az_shim_warns_when_it_shadows_another_azure_cli() {
+  local original_home="$HOME"
+  setup_az_sandbox az-shadow
+
+  # A WSL-native Azure CLI already on PATH. The shim lands in ~/.local/bin,
+  # which the installer prepends, so it would silently take over every `az`
+  # on the machine. That is the user's call, not the installer's.
+  mkdir -p "$TEMP_DIR/az-shadow/otherbin"
+  printf '#!/usr/bin/env bash\n:\n' > "$TEMP_DIR/az-shadow/otherbin/az"
+  chmod 755 "$TEMP_DIR/az-shadow/otherbin/az"
+  PATH="$TEMP_DIR/az-shadow/otherbin:$PATH"
+
+  local message
+  message="$( configure_az_shim 2>&1 >/dev/null )"
+
+  [[ "$message" == *"$TEMP_DIR/az-shadow/otherbin/az"* ]] ||
+    fail "the shadowed Azure CLI must be named, got: $message"
+  [[ "$message" == *"--skip-az-shim"* ]] || fail "the warning must name the way out, got: $message"
+  [[ -x "$AZ_SHIM" ]] || fail "the shim is still installed; the shadowing is reported, not refused"
+
+  teardown_az_sandbox "$original_home"
+}
+
+test_az_shim_is_not_installed_off_wsl() {
+  local original_home="$HOME"
+  setup_az_sandbox az-not-wsl
+  # Read by is_wsl in the sourced installer, which shellcheck cannot see.
+  # shellcheck disable=SC2034
+  ADT_FORCE_WSL=0
+
+  configure_az_shim >/dev/null
+
+  [[ ! -e "$AZ_SHIM" ]] || fail "a shim around a Windows executable must not be installed off WSL"
+
+  teardown_az_sandbox "$original_home"
+}
+
+test_az_shim_is_skipped_when_requested() {
+  local original_home="$HOME"
+  setup_az_sandbox az-skipped
+  # Read by the sourced installer, which shellcheck cannot see.
+  # shellcheck disable=SC2034
+  SKIP_AZ_SHIM=1
+
+  configure_az_shim >/dev/null
+
+  [[ ! -e "$AZ_SHIM" ]] || fail "--skip-az-shim must install nothing"
+
+  teardown_az_sandbox "$original_home"
+}
+
+test_az_shim_dry_run_previews_without_writing() {
+  local original_home="$HOME"
+  setup_az_sandbox az-dry-run
+  # Read by the sourced installer, which shellcheck cannot see.
+  # shellcheck disable=SC2034
+  DRY_RUN=1
+
+  local output
+  output="$(configure_az_shim)"
+
+  [[ ! -e "$AZ_SHIM" ]] || fail "--dry-run must not write the shim"
+  [[ "$output" == *"azure.cli"* ]] || fail "--dry-run must preview the shim it would write"
+  [[ "$output" == *"AZ_UNSAFE"* ]] || fail "the preview must show the allowlist it would enforce"
+
+  teardown_az_sandbox "$original_home"
+}
+
+test_az_shim_is_valid_shell_and_rewritten_on_change() {
+  local original_home="$HOME"
+  setup_az_sandbox az-idempotent
+
+  configure_az_shim >/dev/null
+  bash -n "$AZ_SHIM" || fail "the generated shim must be valid bash"
+
+  # write_managed_file leaves an identical file untouched; a changed delegate
+  # must still take effect, since that is how --az-path gets corrected.
+  local before after
+  before="$(sha256sum "$AZ_SHIM" | cut -d' ' -f1)"
+  configure_az_shim >/dev/null
+  assert_equal "$(sha256sum "$AZ_SHIM" | cut -d' ' -f1)" "$before" \
+    "re-running with no change must leave the shim byte-identical"
+
+  AZ_WINDOWS_PATH="$TEMP_DIR/az-idempotent/other.exe"
+  cp "$TEMP_DIR/az-idempotent/python.exe" "$AZ_WINDOWS_PATH"
+  configure_az_shim >/dev/null
+  after="$(sha256sum "$AZ_SHIM" | cut -d' ' -f1)"
+  [[ "$after" != "$before" ]] || fail "a changed delegate path must be rewritten into the shim"
+
+  teardown_az_sandbox "$original_home"
+}
+
+test_az_shim_verification_rejects_a_shim_that_lost_its_allowlist() {
+  local original_home="$HOME"
+  setup_az_sandbox az-verify-tampered
+  configure_az_shim >/dev/null
+
+  # Verifying that the file exists would pass this: the name is still right,
+  # only the restriction that makes it safe to hand to an agent is gone.
+  printf '#!/usr/bin/env bash\nexec "%s" -m azure.cli "$@"\n' "$AZ_WINDOWS_PATH" > "$AZ_SHIM"
+  chmod 755 "$AZ_SHIM"
+
+  # shellcheck disable=SC2034
+  { SKIP_RUNTIMES=1; SKIP_OPENCODE=1; SKIP_CLAUDE=1; SKIP_CODEX=1; SKIP_OPENSPEC=1
+    SKIP_SUPERPOWERS=1; SKIP_QUALITY_TOOLS=1; SKIP_KARPATHY=1; SKIP_GIT_CREDENTIAL=1; }
+  # shellcheck disable=SC2329
+  verify_command() { :; }
+
+  if ( verify_installation >/dev/null 2>&1 ); then
+    fail "verification must reject a shim that no longer refuses anything"
+  fi
+
+  teardown_az_sandbox "$original_home"
+}
+
 readonly CATALOG_FILE="$REPOSITORY_ROOT/catalog/software-catalog.env"
 
 kv_fixture() {
@@ -1322,7 +1581,7 @@ test_installer_version_flag() {
   status=$?
   set -e
   assert_equal "$status" "0" "--version must exit 0"
-  assert_equal "$output" "0.1.0" "--version must print exactly the version"
+  assert_equal "$output" "0.2.0" "--version must print exactly the version"
   [[ "$output" != *"Unknown option"* ]] \
     || fail "--version must be parsed before the generic unknown-option arm"
 }
@@ -1848,6 +2107,18 @@ test_git_credential_wrapper_is_not_installed_off_wsl
 test_git_credential_wrapper_is_skipped_when_requested
 test_git_credential_wrapper_dry_run_previews_without_writing
 test_git_credential_wrapper_is_valid_shell_and_rewritten_on_change
+test_az_shim_forwards_an_allowlisted_verb_to_the_windows_cli
+test_az_shim_refuses_a_verb_outside_the_allowlist
+test_az_shim_runs_a_denied_verb_only_when_asked_deliberately
+test_az_shim_reports_a_missing_delegate_without_running_anything
+test_az_shim_bakes_in_the_configured_delegate_path
+test_az_shim_options_are_parsed_in_both_forms
+test_az_shim_warns_when_it_shadows_another_azure_cli
+test_az_shim_is_not_installed_off_wsl
+test_az_shim_is_skipped_when_requested
+test_az_shim_dry_run_previews_without_writing
+test_az_shim_is_valid_shell_and_rewritten_on_change
+test_az_shim_verification_rejects_a_shim_that_lost_its_allowlist
 test_reader_loads_a_valid_file_in_source_order
 test_reader_keeps_a_final_line_with_no_newline
 test_reader_normalizes_crlf

@@ -164,9 +164,9 @@ component documentation and configurator.
 Targets Debian/Ubuntu. Ubuntu under WSL2 is the reference and tested platform.
 
 Key flags: `--dry-run`, `--upgrade`, `--verify-only`, `--project PATH`,
-`--repair-codex`, `--gcm-path PATH`, and `--skip-*` for each component
-(`runtimes`, `opencode`, `claude`, `codex`, `openspec`, `superpowers`,
-`karpathy`, `quality-tools`, `git-credential`).
+`--repair-codex`, `--gcm-path PATH`, `--az-path PATH`, and `--skip-*` for each
+component (`runtimes`, `opencode`, `claude`, `codex`, `openspec`, `superpowers`,
+`karpathy`, `quality-tools`, `git-credential`, `az-shim`).
 
 Pinned defaults live in `catalog/software-catalog.env`, not in this file —
 read it for the current values. `install.sh` and that catalog ship together as
@@ -286,6 +286,46 @@ covers only Claude Code — so do not "simplify" it into either.
 Verification runs the wrapper against a stub delegate and asserts the decision,
 rather than checking that a file exists: the failure being prevented is a hang,
 and a file that is present but deciding wrongly hangs just as badly.
+
+## The Azure CLI on WSL
+
+`configure_az_shim` generates `~/.local/bin/az`, a shim onto the Windows Azure
+CLI that forwards only read-only verbs. It is a no-op off WSL. See `README.md`
+for the full rationale.
+
+It shares `configure_git_credential_helper`'s shape — generated file, baked-in
+delegate path, WSL-only, behavioural verification — and the same interop rules
+apply, since the delegate is a Windows process either way. Three things are
+specific to it.
+
+**The Windows CLI is used because the token cache cannot be shared.** That cache
+is DPAPI-encrypted under `C:\Users\<user>\.azure`, so a Linux process cannot read
+it and a WSL-native `az` would need a second `az login` and a second credential
+store to keep alive. One login for both sides is the whole point; do not
+"simplify" this into an apt or pip install of the Linux CLI.
+
+**The allowlist is sized to one caller.** The Azure MCP servers hold no
+credential of their own and authenticate through Azure.Identity's
+`ChainedTokenCredential`. On a WSL workstation every other link of that chain is
+unavailable — no `EnvironmentCredential` variables, no Visual Studio, no
+`msalruntime` for the VS Code broker, no PowerShell, no `azd`, no libsecret for
+the interactive browser — so the Azure CLI link is the only one that resolves,
+and it is reached by `az account get-access-token`. `version`, `login`, `logout`
+and `account {show,list}` round it out. Widening the list widens what an agent
+can do to a live subscription, so treat additions as a security change, not a
+convenience. `AZ_UNSAFE=1` is the deliberate override and is meant to be typed.
+
+**The delegate is `python.exe`, not `az.cmd`.** `az.cmd` is a batch file and
+would need `cmd.exe`; `python.exe` is a real PE that binfmt_misc runs directly,
+and `-m azure.cli` is what `az.cmd` invokes internally anyway.
+
+`az account get-access-token` prints a bearer token on stdout. No test, log or
+support transcript may carry its output; the suite's delegate is always a stub,
+so nothing here can obtain a real token.
+
+Verification runs the shim against a stub delegate and asserts that a verb
+outside the allowlist is refused. A shim that exists but forwards everything is
+worse than none: it looks like a restriction and is not one.
 
 ## The WSL toolchain doctor
 

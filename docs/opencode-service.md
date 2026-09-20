@@ -432,60 +432,70 @@ loopback.** The edge exists for *other* devices.
 
 ### The attach wrapper
 
-A shell function that makes the bare command attach to the running server rather
-than starting a second backend:
+The `oca` (OpenCode attach) Bash function attaches to the running server in the
+current directory. The original `opencode` command keeps its normal behaviour.
+Additional arguments are attach options, for example `oca --continue` or
+`oca --session <id>`:
 
 ```bash
 # >>> opencode-attach-wrapper >>>
-opencode() {
+oca() {
     local __oc_secrets="$HOME/.config/opencode-runtime/secrets.env"
 
-    if [ "$#" -eq 0 ]; then
-        if ! systemctl --user is-active --quiet opencode.service; then
-            echo "OpenCode persistent service is not running." >&2
-            echo "Start it with: systemctl --user start opencode.service" >&2
-            return 1
-        fi
-
-        if [ ! -r "$__oc_secrets" ]; then
-            echo "OpenCode server credentials not readable: $__oc_secrets" >&2
-            echo "Refusing to attach unauthenticated." >&2
-            return 1
-        fi
-
-        # Subshell is intentional: the imported credentials live only for the
-        # duration of the attached TUI and never reach the interactive shell.
-        (
-            set -a
-            . "$__oc_secrets"
-            set +a
-
-            # The attach client does not need any channel tokens.
-            unset TELEGRAM_BOT_TOKEN
-
-            command opencode attach http://127.0.0.1:4096
-        )
-    else
-        command opencode "$@"
+    if ! systemctl --user is-active --quiet opencode.service; then
+        echo "OpenCode persistent service is not running." >&2
+        echo "Start it with: systemctl --user start opencode.service" >&2
+        return 1
     fi
+
+    if [ ! -r "$__oc_secrets" ]; then
+        echo "OpenCode server credentials not readable: $__oc_secrets" >&2
+        echo "Refusing to attach unauthenticated." >&2
+        return 1
+    fi
+
+    # Keep imported credentials inside the attached client's environment.
+    (
+        set -a
+        . "$__oc_secrets" || exit 1
+        set +a
+        unset TELEGRAM_BOT_TOKEN
+
+        command opencode attach http://127.0.0.1:4096 --dir "$PWD" "$@"
+    )
 }
 # <<< opencode-attach-wrapper <<<
 ```
 
-Four properties are each there for a reason:
+The wrapper's contract:
 
 - **The subshell.** Credentials exist only for the attached process. Sourcing
   them in the interactive shell would leak them into every later child process
   and into anything that dumps the environment.
-- **Arguments are forwarded untouched.** `--version`, `models`, `debug` keep
-  their normal behaviour; only the no-argument form is reinterpreted.
-- **It refuses rather than degrading.** No credentials means no attach, instead
-  of a confusing unauthenticated attempt.
-- **`command opencode` is the escape hatch**, and the function relies on it
-  internally to avoid recursing.
+- **Directory is evaluated on each call.** Quoted `"$PWD"` preserves spaces and
+  selects the current directory on the backend, including after a `cd`.
+- **Arguments are attach options.** `"$@"` preserves their boundaries. Use
+  `opencode models`, `opencode debug`, etc. for the original CLI commands.
+- **It refuses rather than degrading.** An inactive service, unreadable secrets
+  file or failed credential load prevents attach. The client's exit status is
+  returned to the caller.
+- **No command shadowing.** The function is named `oca`, not `opencode`.
 
 Place this **outside** any block an installer rewrites wholesale, or the next
 install will silently delete it. Mark the boundary with comments, as above.
+Replace an existing `opencode-attach-wrapper` block rather than appending a second
+one. Open a new shell after installation. If the previous `opencode()` wrapper
+is still loaded in the current shell, run `unset -f opencode` before sourcing
+the updated `~/.bashrc`.
+
+This block is installed separately from `environments/linux/install.sh`; the
+installer manages PATH/mise/direnv, not the optional attach shortcut.
+`tests/opencode-service.sh` executes this documented block with a disposable
+home and stubbed external commands.
+
+The sourced file supplies backend HTTP credentials. `--dir` selects a backend
+workspace; it does not transfer the client's direnv environment to the running
+service. MCP credential loading on the backend is a separate configuration step.
 
 ### Verification
 

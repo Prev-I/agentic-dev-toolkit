@@ -119,6 +119,168 @@ systemctl --user enable --now opencode.service
 systemctl --user status opencode.service
 ```
 
+### Tool discovery through mise shims
+
+The persistent server needs its own deterministic tool PATH. A TUI attaching
+from an interactive terminal does not transfer that terminal's environment to
+the already-running server. Keep three responsibilities separate:
+
+- **systemd** supplies the server's PATH, inherited by its tool subprocesses;
+- **mise shims** resolve tools against configuration in the command's working
+  directory;
+- **interactive Bash** continues to use `mise activate bash` in `.bashrc`.
+
+Do not move mise activation above `.bashrc`'s non-interactive early return or
+remove that return. Do not add a versioned runtime directory or `dotnet-root`
+directly to the service PATH. Commands such as `dotnet`, `node` and `python`
+should work without requiring agents to prefix every call with `mise exec`.
+
+#### Inspect the boundary first
+
+Inspect the unit, its drop-ins, `ExecStart` wrappers and any existing PATH
+assignment before changing anything:
+
+```bash
+systemctl --user status opencode.service --no-pager --lines=0
+systemctl --user cat opencode.service
+systemctl --user show opencode.service -p Environment -p EnvironmentFiles \
+  -p ExecStart -p FragmentPath -p DropInPaths
+ls -l ~/.local/bin/mise ~/.local/share/mise/shims/dotnet
+~/.local/bin/mise --version
+~/.local/bin/mise which dotnet
+```
+
+Inspect secret-bearing environment files locally without printing their
+contents. `EnvironmentFile=` assignments can override `Environment=`; resolve
+an existing PATH override before adding another. Compare the server process's
+PATH with the PATH reported by an actual OpenCode tool call, not just the
+interactive terminal. Avoid dumping the entire process environment.
+
+#### Install a PATH-only drop-in
+
+Create `~/.config/systemd/user/opencode.service.d/10-mise-path.conf`:
+
+```ini
+[Service]
+Environment="PATH=/home/<USER>/.local/bin:/home/<USER>/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+```
+
+Replace `/home/<USER>` with the account's actual absolute home directory before
+installation. `Environment=` does **not** perform shell variable expansion:
+`$HOME` and `$PATH` would be literal text. systemd specifier expansion is a
+different mechanism; this example deliberately uses absolute paths.
+
+This drop-in adds only PATH. Do not add an empty `Environment=` line, which
+would reset earlier assignments, or replace `ExecStart`, readiness checks,
+credentials, restart policy or the original unit. This is a manual service
+configuration step, not something `environments/linux/install.sh` installs.
+
+```bash
+systemctl --user daemon-reload
+systemd-analyze --user verify ~/.config/systemd/user/opencode.service
+systemctl --user restart opencode.service
+systemctl --user status opencode.service --no-pager --lines=0
+systemctl --user show opencode.service -p Environment -p NRestarts
+```
+
+Restart from a separate terminal: restarting the backend can interrupt the
+OpenCode session that requested it. Reconnect with `oca` afterwards.
+
+#### Verify inside the persistent backend
+
+Ask the attached OpenCode session to execute this through its Bash tool:
+
+```bash
+printf 'shell=%s\nflags=%s\nPATH=%s\n' "$SHELL" "$-" "$PATH"
+command -v mise
+command -v dotnet
+type -a mise
+type -a dotnet
+mise --version
+dotnet --version
+dotnet --info
+command -v node
+node --version
+command -v python
+python --version
+```
+
+Expected: `mise` resolves to `~/.local/bin/mise`, and runtime commands resolve
+to `~/.local/share/mise/shims/<tool>`. A separately launched standalone OpenCode
+process can inherit activated runtime paths from its terminal; that is not a
+test of the systemd server. An authenticated call to the running backend's
+`POST /session/{sessionID}/shell` endpoint is another way to exercise a real
+server-side shell. Login-shell profile additions may make its PATH differ from
+the service PATH; check the actual command resolution as well.
+
+**No `BASH_ENV` is required when the service PATH reaches the tools.** If it
+does not, identify the exact wrapper or subprocess launch that resets PATH
+before considering a dedicated, minimal non-interactive bootstrap. Never point
+`BASH_ENV` at `.bashrc`.
+
+#### Project-aware .NET SDK selection
+
+Most mise tools select their version from the current project's configuration.
+.NET has an additional resolver: in mise's default **shared** installation mode,
+SDKs live side by side in one root. `mise current dotnet` can report an 8.x
+request while `dotnet --version` still selects the highest installed SDK.
+`mise.toml` alone does not isolate that SDK selection.
+
+Use the project's native `global.json` to select the .NET SDK. For example:
+
+```json
+{
+  "sdk": {
+    "version": "8.0.425",
+    "rollForward": "disable"
+  }
+}
+```
+
+The version above is an example, not a workstation pin: choose a version the
+project requires and that is installed. Keep any `mise.toml` declaration
+consistent with it. mise can also discover `global.json` with its optional
+idiomatic-version-file setting; .NET itself interprets the SDK selection and
+roll-forward policy. See [mise's .NET documentation](https://mise.jdx.dev/lang/dotnet.html).
+Switching mise to isolated .NET installations is a separate migration, not a
+PATH repair.
+
+Validate with two temporary directories, each containing a `mise.toml` request
+for an installed SDK and a matching `global.json`. Trust only these test mise
+files with `mise trust <path-to-mise.toml>`, then run `command -v dotnet`,
+`mise current dotnet` and `dotnet --version` from both working directories in
+separate sessions on the same server. Do not change global mise configuration.
+
+Host verification on 2026-09-20, using OpenCode 1.18.31 and mise 2026.9.7:
+
+| Check | Observed result |
+|---|---|
+| Before the drop-in | Server and tool had the same system-only PATH; `mise` and `dotnet` were not found |
+| Server-side command discovery after restart | `dotnet`, `node`, `python` resolved through mise shims |
+| Plain commands | .NET 10.0.401, Node v24.21.0, Python 3.12.14 |
+| Two concurrent directories, only `mise.toml` | Requests 8.0.425 / 10.0.401 both ran SDK 10.0.401 |
+| Same directories with matching `global.json` | SDK 8.0.425 / 10.0.401 respectively |
+| Regression checks | Healthy server, zero automatic restarts, interactive Bash working; `.bashrc`, base unit and global tool config unchanged |
+
+The discovery fix passed; selecting different .NET SDKs using **only**
+`mise.toml` remained unsupported in the existing shared setup. Backend MCP
+credentials from direnv are a separate concern: exposing the executables does
+not load project secrets.
+
+#### Rollback
+
+If this procedure created the drop-in, remove only that file and restart from a
+separate terminal:
+
+```bash
+rm ~/.config/systemd/user/opencode.service.d/10-mise-path.conf
+systemctl --user daemon-reload
+systemctl --user restart opencode.service
+```
+
+If the drop-in already existed before your change, back it up first and restore
+that copy instead. Leave other drop-ins, the base unit and `.bashrc` intact.
+
 ### Credentials
 
 One file, never committed, readable only by its owner:

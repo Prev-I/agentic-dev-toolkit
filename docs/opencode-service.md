@@ -281,6 +281,113 @@ systemctl --user restart opencode.service
 If the drop-in already existed before your change, back it up first and restore
 that copy instead. Leave other drop-ins, the base unit and `.bashrc` intact.
 
+### Optional workspace credentials through direnv
+
+`opencode-service/opencode-direnv-exec.sh` is a versioned Bash launcher for a
+server that needs environment-based MCP credentials from several workspaces.
+It loads those environments once, then replaces itself with the original
+server command using `exec`. It requires Bash, direnv, jq and GNU timeout.
+
+Configuration (non-secret):
+
+| Variable | Meaning |
+|---|---|
+| `OPENCODE_DIRENV_ROOT` | Absolute scan root; defaults to `$HOME/code` |
+| `OPENCODE_DIRENV_VARS` | Required single-line, whitespace-separated list of uppercase variable names to import |
+
+The launcher scans immediate real child directories containing `.envrc`,
+including hidden directories. It skips directory symlinks and does not recurse
+into checkouts, follow parent configurations on its own, or discover `.env`
+files. A trusted `.envrc` may itself source other files under normal direnv
+semantics. Authorization remains direnv-owned: the launcher never runs
+`direnv allow`.
+
+Each workspace runs in an independent `direnv exec`, with the allowlisted
+variables removed from its input and interactive `DIRENV_*` state cleared
+(`DIRENV_CONFIG` is preserved). Previously collected values never become the
+next workspace's input. Only allowlisted exports return to the launcher;
+workspace changes to PATH, HOME or WORKSPACE_ROOT are not applied to the server.
+Reserved runtime/bootstrap names are rejected in the allowlist.
+
+Identical duplicate values are accepted. Different values for the same name,
+including a conflict with the inherited service environment, prevent server
+startup and identify the variable and source directories without printing values.
+Missing variables are reported by name but are not mandatory: each workspace
+need only supply the variables it uses. A missing scan root, empty allowlist,
+blocked `.envrc`, direnv failure or evaluation exceeding 20 seconds fails startup.
+Use simple credential-loading `.envrc` files rather than long-running installers.
+Failure follows direnv's own shell semantics: use `strict_env` inside `.envrc`
+when failed intermediate commands must abort evaluation. The launcher cannot
+detect errors a script deliberately ignores or that direnv treats as successful.
+
+Values stay in memory and the process environment, not generated secret files or
+command arguments. Arbitrary `.envrc` stdout/stderr is suppressed; diagnostics
+show paths, variable names and counts only. Diagnose an evaluation failure
+locally with `direnv status` and review the file before reauthorizing it.
+This is environment sharing, not a sandbox: the backend and its children receive
+the combined credentials, even in workspaces without the corresponding MCP.
+Other WSL shells do not receive them. OAuth stores (such as New Relic's) and
+Azure CLI authentication remain separate from direnv.
+
+#### Install and configure
+
+```bash
+install -D -m 755 opencode-service/opencode-direnv-exec.sh \
+  ~/.local/libexec/opencode/opencode-direnv-exec
+```
+
+Create `~/.config/opencode-runtime/direnv.env` with the actual absolute root and
+the names your configured MCPs require. For example:
+
+```ini
+OPENCODE_DIRENV_ROOT=/home/<USER>/code
+OPENCODE_DIRENV_VARS="GITHUB_PERSONAL_ACCESS_TOKEN PG_URL_FOUNDATION PG_URL_JOINON KUBECONFIG"
+```
+
+Values remain in existing workspace `env.local` files. The file above is only a
+selection policy; systemd does not expand `$HOME` in its assignments. Protect it
+from unintended edits and keep the runtime directory owner-only.
+
+Create `~/.config/systemd/user/opencode.service.d/20-direnv.conf`:
+
+```ini
+[Service]
+EnvironmentFile=%h/.config/opencode-runtime/direnv.env
+ExecStart=
+ExecStart=%h/.local/libexec/opencode/opencode-direnv-exec %h/.opencode/bin/opencode web --hostname 127.0.0.1 --port 4096
+```
+
+Copy the arguments of your existing `ExecStart` exactly after the launcher.
+This override changes only the executable launch chain and adds a non-secret
+environment file. The original credential file, working directory, readiness
+probe, restart policy and `10-mise-path.conf` remain in effect. The launcher
+does not source `.bashrc` or activate mise; shims still own runtime discovery.
+
+Before restarting, execute the launcher with the service's environment and a
+harmless verifier instead of OpenCode. Check only presence of expected variables
+and equality of PATH and existing service variables; never print secret values.
+Then validate and restart from a separate terminal:
+
+```bash
+systemctl --user daemon-reload
+systemd-analyze --user verify ~/.config/systemd/user/opencode.service
+systemctl --user restart opencode.service
+systemctl --user show opencode.service -p ActiveState -p SubState -p NRestarts
+```
+
+Reconnect with `oca` and verify the relevant MCP connections. Discovering new
+workspaces or changing secrets requires a service restart; attach alone does not
+reload the backend environment. A failed evaluation participates in the unit's
+existing bounded restart policy. Fix the indicated workspace before restarting.
+
+To roll back this opt-in integration, remove only `20-direnv.conf` (or restore
+its previous version), run `daemon-reload`, then restart the service. Keep the
+mise PATH drop-in and workspace secrets. The launcher and non-secret selection
+file can remain dormant or be removed afterwards.
+
+`tests/opencode-direnv.sh` uses real direnv with a temporary home and isolated
+approval database. `tests/opencode-service.sh` includes it automatically.
+
 ### Credentials
 
 One file, never committed, readable only by its owner:

@@ -500,7 +500,79 @@ test_service_helpers_survive_no_arguments_under_set_u() {
   done
 }
 
+test_documented_attach_shortcut() (
+  local sandbox="$TEMP_DIR/attach"
+  mkdir -p "$sandbox/bin" "$sandbox/home/.config/opencode-runtime" "$sandbox/work space" "$sandbox/other"
+  export HOME="$sandbox/home" PATH="$sandbox/bin:$PATH"
+  export ATTACH_RECORD="$sandbox/args"
+  unset OPENCODE_SERVER_PASSWORD OPENCODE_SERVER_USERNAME
+  export TELEGRAM_BOT_TOKEN=fixture-only
+
+  cat > "$sandbox/bin/systemctl" <<'STUB'
+#!/usr/bin/env bash
+[[ "$*" == '--user is-active --quiet opencode.service' ]] || exit 2
+exit "${ATTACH_SERVICE_STATUS:-0}"
+STUB
+  cat > "$sandbox/bin/opencode" <<'STUB'
+#!/usr/bin/env bash
+[[ "${OPENCODE_SERVER_PASSWORD:-}" == fixture-password ]] || exit 91
+[[ "${OPENCODE_SERVER_USERNAME:-}" == fixture-user ]] || exit 92
+[[ -z "${TELEGRAM_BOT_TOKEN+x}" ]] || exit 93
+printf '%s\n' "$@" > "$ATTACH_RECORD"
+exit "${ATTACH_EXIT_STATUS:-0}"
+STUB
+  chmod +x "$sandbox/bin/systemctl" "$sandbox/bin/opencode"
+  cat > "$HOME/.config/opencode-runtime/secrets.env" <<'ENV'
+OPENCODE_SERVER_USERNAME=fixture-user
+OPENCODE_SERVER_PASSWORD=fixture-password
+ENV
+  # Execute the shipped snippet, rather than a second implementation of it.
+  sed -n '/^# >>> opencode-attach-wrapper >>>$/,/^# <<< opencode-attach-wrapper <<<$/{p;}' \
+    "$REPOSITORY_ROOT/docs/opencode-service.md" > "$sandbox/wrapper.sh"
+  # shellcheck source=/dev/null
+  source "$sandbox/wrapper.sh"
+  declare -F oca >/dev/null || fail "documented wrapper must define oca"
+  [[ "$(type -t opencode)" == file ]] || fail "opencode must remain the original command"
+
+  cd "$sandbox/work space"
+  oca --session 'session with spaces'
+  local -a arguments
+  mapfile -t arguments < "$ATTACH_RECORD"
+  assert_equal "${#arguments[@]}" 6 "attach arguments must keep their boundaries"
+  assert_equal "${arguments[0]}" attach "oca must attach"
+  assert_equal "${arguments[1]}" http://127.0.0.1:4096 "oca must use loopback"
+  assert_equal "${arguments[2]}" --dir "oca must select the backend directory"
+  assert_equal "${arguments[3]}" "$sandbox/work space" "directory with spaces must survive"
+  assert_equal "${arguments[4]}" --session "attach options must be forwarded"
+  assert_equal "${arguments[5]}" 'session with spaces' "option values must survive"
+  [[ -z "${OPENCODE_SERVER_PASSWORD+x}" && -z "${OPENCODE_SERVER_USERNAME+x}" ]] \
+    || fail "server credentials must not leak into the caller"
+  assert_equal "$TELEGRAM_BOT_TOKEN" fixture-only "caller environment must be preserved"
+
+  cd "$sandbox/other"
+  oca
+  mapfile -t arguments < "$ATTACH_RECORD"
+  assert_equal "${arguments[3]}" "$sandbox/other" "directory must be evaluated at each invocation"
+  local status=0
+  ATTACH_EXIT_STATUS=17 oca || status=$?
+  assert_equal "$status" 17 "attach exit status must propagate"
+
+  rm "$ATTACH_RECORD"
+  status=0
+  ATTACH_SERVICE_STATUS=1 oca >/dev/null 2>&1 || status=$?
+  [[ "$status" != 0 && ! -e "$ATTACH_RECORD" ]] || fail "inactive service must prevent attach"
+  rm "$HOME/.config/opencode-runtime/secrets.env"
+  status=0
+  oca >/dev/null 2>&1 || status=$?
+  [[ "$status" != 0 && ! -e "$ATTACH_RECORD" ]] || fail "missing credentials must prevent attach"
+  printf 'return 1\n' > "$HOME/.config/opencode-runtime/secrets.env"
+  status=0
+  oca >/dev/null 2>&1 || status=$?
+  [[ "$status" != 0 && ! -e "$ATTACH_RECORD" ]] || fail "failed credential load must prevent attach"
+)
+
 TEMP_DIR="$(mktemp -d)"
+test_documented_attach_shortcut
 install_stubs
 test_no_work_writes_nothing
 test_settled_status_is_left_untouched
@@ -522,3 +594,4 @@ test_service_helpers_declare_and_print_their_versions
 test_service_helpers_survive_no_arguments_under_set_u
 
 printf 'PASS: opencode service tests\n'
+bash "$REPOSITORY_ROOT/tests/opencode-direnv.sh"

@@ -594,3 +594,4 @@ test_service_helpers_declare_and_print_their_versions
 test_service_helpers_survive_no_arguments_under_set_u
 
 printf 'PASS: opencode service tests\n'
+bash "$REPOSITORY_ROOT/tests/opencode-direnv.sh"

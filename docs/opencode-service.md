@@ -119,6 +119,275 @@ systemctl --user enable --now opencode.service
 systemctl --user status opencode.service
 ```
 
+### Tool discovery through mise shims
+
+The persistent server needs its own deterministic tool PATH. A TUI attaching
+from an interactive terminal does not transfer that terminal's environment to
+the already-running server. Keep three responsibilities separate:
+
+- **systemd** supplies the server's PATH, inherited by its tool subprocesses;
+- **mise shims** resolve tools against configuration in the command's working
+  directory;
+- **interactive Bash** continues to use `mise activate bash` in `.bashrc`.
+
+Do not move mise activation above `.bashrc`'s non-interactive early return or
+remove that return. Do not add a versioned runtime directory or `dotnet-root`
+directly to the service PATH. Commands such as `dotnet`, `node` and `python`
+should work without requiring agents to prefix every call with `mise exec`.
+
+#### Inspect the boundary first
+
+Inspect the unit, its drop-ins, `ExecStart` wrappers and any existing PATH
+assignment before changing anything:
+
+```bash
+systemctl --user status opencode.service --no-pager --lines=0
+systemctl --user cat opencode.service
+systemctl --user show opencode.service -p Environment -p EnvironmentFiles \
+  -p ExecStart -p FragmentPath -p DropInPaths
+ls -l ~/.local/bin/mise ~/.local/share/mise/shims/dotnet
+~/.local/bin/mise --version
+~/.local/bin/mise which dotnet
+```
+
+Inspect secret-bearing environment files locally without printing their
+contents. `EnvironmentFile=` assignments can override `Environment=`; resolve
+an existing PATH override before adding another. Compare the server process's
+PATH with the PATH reported by an actual OpenCode tool call, not just the
+interactive terminal. Avoid dumping the entire process environment.
+
+#### Install a PATH-only drop-in
+
+Create `~/.config/systemd/user/opencode.service.d/10-mise-path.conf`:
+
+```ini
+[Service]
+Environment="PATH=/home/<USER>/.local/bin:/home/<USER>/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+```
+
+Replace `/home/<USER>` with the account's actual absolute home directory before
+installation. `Environment=` does **not** perform shell variable expansion:
+`$HOME` and `$PATH` would be literal text. systemd specifier expansion is a
+different mechanism; this example deliberately uses absolute paths.
+
+This drop-in adds only PATH. Do not add an empty `Environment=` line, which
+would reset earlier assignments, or replace `ExecStart`, readiness checks,
+credentials, restart policy or the original unit. This is a manual service
+configuration step, not something `environments/linux/install.sh` installs.
+
+```bash
+systemctl --user daemon-reload
+systemd-analyze --user verify ~/.config/systemd/user/opencode.service
+systemctl --user restart opencode.service
+systemctl --user status opencode.service --no-pager --lines=0
+systemctl --user show opencode.service -p Environment -p NRestarts
+```
+
+Restart from a separate terminal: restarting the backend can interrupt the
+OpenCode session that requested it. Reconnect with `oca` afterwards.
+
+#### Verify inside the persistent backend
+
+Ask the attached OpenCode session to execute this through its Bash tool:
+
+```bash
+printf 'shell=%s\nflags=%s\nPATH=%s\n' "$SHELL" "$-" "$PATH"
+command -v mise
+command -v dotnet
+type -a mise
+type -a dotnet
+mise --version
+dotnet --version
+dotnet --info
+command -v node
+node --version
+command -v python
+python --version
+```
+
+Expected: `mise` resolves to `~/.local/bin/mise`, and runtime commands resolve
+to `~/.local/share/mise/shims/<tool>`. A separately launched standalone OpenCode
+process can inherit activated runtime paths from its terminal; that is not a
+test of the systemd server. An authenticated call to the running backend's
+`POST /session/{sessionID}/shell` endpoint is another way to exercise a real
+server-side shell. Login-shell profile additions may make its PATH differ from
+the service PATH; check the actual command resolution as well.
+
+**No `BASH_ENV` is required when the service PATH reaches the tools.** If it
+does not, identify the exact wrapper or subprocess launch that resets PATH
+before considering a dedicated, minimal non-interactive bootstrap. Never point
+`BASH_ENV` at `.bashrc`.
+
+#### Project-aware .NET SDK selection
+
+Most mise tools select their version from the current project's configuration.
+.NET has an additional resolver: in mise's default **shared** installation mode,
+SDKs live side by side in one root. `mise current dotnet` can report an 8.x
+request while `dotnet --version` still selects the highest installed SDK.
+`mise.toml` alone does not isolate that SDK selection.
+
+Use the project's native `global.json` to select the .NET SDK. For example:
+
+```json
+{
+  "sdk": {
+    "version": "8.0.425",
+    "rollForward": "disable"
+  }
+}
+```
+
+The version above is an example, not a workstation pin: choose a version the
+project requires and that is installed. Keep any `mise.toml` declaration
+consistent with it. mise can also discover `global.json` with its optional
+idiomatic-version-file setting; .NET itself interprets the SDK selection and
+roll-forward policy. See [mise's .NET documentation](https://mise.jdx.dev/lang/dotnet.html).
+Switching mise to isolated .NET installations is a separate migration, not a
+PATH repair.
+
+Validate with two temporary directories, each containing a `mise.toml` request
+for an installed SDK and a matching `global.json`. Trust only these test mise
+files with `mise trust <path-to-mise.toml>`, then run `command -v dotnet`,
+`mise current dotnet` and `dotnet --version` from both working directories in
+separate sessions on the same server. Do not change global mise configuration.
+
+Host verification on 2026-09-20, using OpenCode 1.18.31 and mise 2026.9.7:
+
+| Check | Observed result |
+|---|---|
+| Before the drop-in | Server and tool had the same system-only PATH; `mise` and `dotnet` were not found |
+| Server-side command discovery after restart | `dotnet`, `node`, `python` resolved through mise shims |
+| Plain commands | .NET 10.0.401, Node v24.21.0, Python 3.12.14 |
+| Two concurrent directories, only `mise.toml` | Requests 8.0.425 / 10.0.401 both ran SDK 10.0.401 |
+| Same directories with matching `global.json` | SDK 8.0.425 / 10.0.401 respectively |
+| Regression checks | Healthy server, zero automatic restarts, interactive Bash working; `.bashrc`, base unit and global tool config unchanged |
+
+The discovery fix passed; selecting different .NET SDKs using **only**
+`mise.toml` remained unsupported in the existing shared setup. Backend MCP
+credentials from direnv are a separate concern: exposing the executables does
+not load project secrets.
+
+#### Rollback
+
+If this procedure created the drop-in, remove only that file and restart from a
+separate terminal:
+
+```bash
+rm ~/.config/systemd/user/opencode.service.d/10-mise-path.conf
+systemctl --user daemon-reload
+systemctl --user restart opencode.service
+```
+
+If the drop-in already existed before your change, back it up first and restore
+that copy instead. Leave other drop-ins, the base unit and `.bashrc` intact.
+
+### Optional workspace credentials through direnv
+
+`opencode-service/opencode-direnv-exec.sh` is a versioned Bash launcher for a
+server that needs environment-based MCP credentials from several workspaces.
+It loads those environments once, then replaces itself with the original
+server command using `exec`. It requires Bash, direnv, jq and GNU timeout.
+
+Configuration (non-secret):
+
+| Variable | Meaning |
+|---|---|
+| `OPENCODE_DIRENV_ROOT` | Absolute scan root; defaults to `$HOME/code` |
+| `OPENCODE_DIRENV_VARS` | Required single-line, whitespace-separated list of uppercase variable names to import |
+
+The launcher scans immediate real child directories containing `.envrc`,
+including hidden directories. It skips directory symlinks and does not recurse
+into checkouts, follow parent configurations on its own, or discover `.env`
+files. A trusted `.envrc` may itself source other files under normal direnv
+semantics. Authorization remains direnv-owned: the launcher never runs
+`direnv allow`.
+
+Each workspace runs in an independent `direnv exec`, with the allowlisted
+variables removed from its input and interactive `DIRENV_*` state cleared
+(`DIRENV_CONFIG` is preserved). Previously collected values never become the
+next workspace's input. Only allowlisted exports return to the launcher;
+workspace changes to PATH, HOME or WORKSPACE_ROOT are not applied to the server.
+Reserved runtime/bootstrap names are rejected in the allowlist.
+
+Identical duplicate values are accepted. Different values for the same name,
+including a conflict with the inherited service environment, prevent server
+startup and identify the variable and source directories without printing values.
+Missing variables are reported by name but are not mandatory: each workspace
+need only supply the variables it uses. A missing scan root, empty allowlist,
+blocked `.envrc`, direnv failure or evaluation exceeding 20 seconds fails startup.
+Use simple credential-loading `.envrc` files rather than long-running installers.
+Failure follows direnv's own shell semantics: use `strict_env` inside `.envrc`
+when failed intermediate commands must abort evaluation. The launcher cannot
+detect errors a script deliberately ignores or that direnv treats as successful.
+
+Values stay in memory and the process environment, not generated secret files or
+command arguments. Arbitrary `.envrc` stdout/stderr is suppressed; diagnostics
+show paths, variable names and counts only. Diagnose an evaluation failure
+locally with `direnv status` and review the file before reauthorizing it.
+This is environment sharing, not a sandbox: the backend and its children receive
+the combined credentials, even in workspaces without the corresponding MCP.
+Other WSL shells do not receive them. OAuth stores (such as New Relic's) and
+Azure CLI authentication remain separate from direnv.
+
+#### Install and configure
+
+```bash
+install -D -m 755 opencode-service/opencode-direnv-exec.sh \
+  ~/.local/libexec/opencode/opencode-direnv-exec
+```
+
+Create `~/.config/opencode-runtime/direnv.env` with the actual absolute root and
+the names your configured MCPs require. For example:
+
+```ini
+OPENCODE_DIRENV_ROOT=/home/<USER>/code
+OPENCODE_DIRENV_VARS="GITHUB_PERSONAL_ACCESS_TOKEN PG_URL_FOUNDATION PG_URL_JOINON KUBECONFIG"
+```
+
+Values remain in existing workspace `env.local` files. The file above is only a
+selection policy; systemd does not expand `$HOME` in its assignments. Protect it
+from unintended edits and keep the runtime directory owner-only.
+
+Create `~/.config/systemd/user/opencode.service.d/20-direnv.conf`:
+
+```ini
+[Service]
+EnvironmentFile=%h/.config/opencode-runtime/direnv.env
+ExecStart=
+ExecStart=%h/.local/libexec/opencode/opencode-direnv-exec %h/.opencode/bin/opencode web --hostname 127.0.0.1 --port 4096
+```
+
+Copy the arguments of your existing `ExecStart` exactly after the launcher.
+This override changes only the executable launch chain and adds a non-secret
+environment file. The original credential file, working directory, readiness
+probe, restart policy and `10-mise-path.conf` remain in effect. The launcher
+does not source `.bashrc` or activate mise; shims still own runtime discovery.
+
+Before restarting, execute the launcher with the service's environment and a
+harmless verifier instead of OpenCode. Check only presence of expected variables
+and equality of PATH and existing service variables; never print secret values.
+Then validate and restart from a separate terminal:
+
+```bash
+systemctl --user daemon-reload
+systemd-analyze --user verify ~/.config/systemd/user/opencode.service
+systemctl --user restart opencode.service
+systemctl --user show opencode.service -p ActiveState -p SubState -p NRestarts
+```
+
+Reconnect with `oca` and verify the relevant MCP connections. Discovering new
+workspaces or changing secrets requires a service restart; attach alone does not
+reload the backend environment. A failed evaluation participates in the unit's
+existing bounded restart policy. Fix the indicated workspace before restarting.
+
+To roll back this opt-in integration, remove only `20-direnv.conf` (or restore
+its previous version), run `daemon-reload`, then restart the service. Keep the
+mise PATH drop-in and workspace secrets. The launcher and non-secret selection
+file can remain dormant or be removed afterwards.
+
+`tests/opencode-direnv.sh` uses real direnv with a temporary home and isolated
+approval database. `tests/opencode-service.sh` includes it automatically.
+
 ### Credentials
 
 One file, never committed, readable only by its owner:
@@ -432,60 +701,70 @@ loopback.** The edge exists for *other* devices.
 
 ### The attach wrapper
 
-A shell function that makes the bare command attach to the running server rather
-than starting a second backend:
+The `oca` (OpenCode attach) Bash function attaches to the running server in the
+current directory. The original `opencode` command keeps its normal behaviour.
+Additional arguments are attach options, for example `oca --continue` or
+`oca --session <id>`:
 
 ```bash
 # >>> opencode-attach-wrapper >>>
-opencode() {
+oca() {
     local __oc_secrets="$HOME/.config/opencode-runtime/secrets.env"
 
-    if [ "$#" -eq 0 ]; then
-        if ! systemctl --user is-active --quiet opencode.service; then
-            echo "OpenCode persistent service is not running." >&2
-            echo "Start it with: systemctl --user start opencode.service" >&2
-            return 1
-        fi
-
-        if [ ! -r "$__oc_secrets" ]; then
-            echo "OpenCode server credentials not readable: $__oc_secrets" >&2
-            echo "Refusing to attach unauthenticated." >&2
-            return 1
-        fi
-
-        # Subshell is intentional: the imported credentials live only for the
-        # duration of the attached TUI and never reach the interactive shell.
-        (
-            set -a
-            . "$__oc_secrets"
-            set +a
-
-            # The attach client does not need any channel tokens.
-            unset TELEGRAM_BOT_TOKEN
-
-            command opencode attach http://127.0.0.1:4096
-        )
-    else
-        command opencode "$@"
+    if ! systemctl --user is-active --quiet opencode.service; then
+        echo "OpenCode persistent service is not running." >&2
+        echo "Start it with: systemctl --user start opencode.service" >&2
+        return 1
     fi
+
+    if [ ! -r "$__oc_secrets" ]; then
+        echo "OpenCode server credentials not readable: $__oc_secrets" >&2
+        echo "Refusing to attach unauthenticated." >&2
+        return 1
+    fi
+
+    # Keep imported credentials inside the attached client's environment.
+    (
+        set -a
+        . "$__oc_secrets" || exit 1
+        set +a
+        unset TELEGRAM_BOT_TOKEN
+
+        command opencode attach http://127.0.0.1:4096 --dir "$PWD" "$@"
+    )
 }
 # <<< opencode-attach-wrapper <<<
 ```
 
-Four properties are each there for a reason:
+The wrapper's contract:
 
 - **The subshell.** Credentials exist only for the attached process. Sourcing
   them in the interactive shell would leak them into every later child process
   and into anything that dumps the environment.
-- **Arguments are forwarded untouched.** `--version`, `models`, `debug` keep
-  their normal behaviour; only the no-argument form is reinterpreted.
-- **It refuses rather than degrading.** No credentials means no attach, instead
-  of a confusing unauthenticated attempt.
-- **`command opencode` is the escape hatch**, and the function relies on it
-  internally to avoid recursing.
+- **Directory is evaluated on each call.** Quoted `"$PWD"` preserves spaces and
+  selects the current directory on the backend, including after a `cd`.
+- **Arguments are attach options.** `"$@"` preserves their boundaries. Use
+  `opencode models`, `opencode debug`, etc. for the original CLI commands.
+- **It refuses rather than degrading.** An inactive service, unreadable secrets
+  file or failed credential load prevents attach. The client's exit status is
+  returned to the caller.
+- **No command shadowing.** The function is named `oca`, not `opencode`.
 
 Place this **outside** any block an installer rewrites wholesale, or the next
 install will silently delete it. Mark the boundary with comments, as above.
+Replace an existing `opencode-attach-wrapper` block rather than appending a second
+one. Open a new shell after installation. If the previous `opencode()` wrapper
+is still loaded in the current shell, run `unset -f opencode` before sourcing
+the updated `~/.bashrc`.
+
+This block is installed separately from `environments/linux/install.sh`; the
+installer manages PATH/mise/direnv, not the optional attach shortcut.
+`tests/opencode-service.sh` executes this documented block with a disposable
+home and stubbed external commands.
+
+The sourced file supplies backend HTTP credentials. `--dir` selects a backend
+workspace; it does not transfer the client's direnv environment to the running
+service. MCP credential loading on the backend is a separate configuration step.
 
 ### Verification
 

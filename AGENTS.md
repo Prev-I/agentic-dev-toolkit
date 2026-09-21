@@ -26,7 +26,8 @@ models/routing/opencode/        Model-routing config bundle for OpenCode
 repository-policy/              `.repository-policy.yaml` format, schema and validator
 wsl-toolchain-doctor/           Linux-first PATH and toolchain auditor for WSL
 opencode-service/               Readiness probes for OpenCode and its Telegram
-                                sidecar, plus an optional plugin restart consumer
+                                sidecar, optional plugin restart consumer and
+                                allowlisted workspace-direnv launcher
 headroom-runtime/               Opt-in standalone Headroom install, audit, and removal CLI
 azure-artifacts/                WSL mise and optional Windows Maven Azure Artifacts adapters
 azure-artifacts/README.md       Opt-in Gewiss adapter contract and operations

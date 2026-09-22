@@ -186,6 +186,77 @@ systemctl --user show opencode.service -p Environment -p NRestarts
 Restart from a separate terminal: restarting the backend can interrupt the
 OpenCode session that requested it. Reconnect with `oca` afterwards.
 
+#### Optional OpenCode CLI and Rancher Desktop tools on WSL
+
+The minimal PATH above exposes mise-managed runtimes, but does not include the
+OpenCode CLI installed in `~/.opencode/bin` or Rancher Desktop's Linux tools.
+The server's absolute `ExecStart` can work while `command -v opencode` and
+`command -v docker` in its tool shell still fail.
+
+On WSL with Rancher Desktop integration enabled, verify the local installation:
+
+```bash
+test -x "$HOME/.opencode/bin/opencode"
+rd_bin='/mnt/c/Program Files/Rancher Desktop/resources/resources/linux/bin'
+file "$rd_bin/docker" "$rd_bin/kubectl"  # expect Linux ELF, not Windows PE
+test -S /var/run/docker.sock
+"$rd_bin/docker" version
+"$rd_bin/docker" compose version
+"$rd_bin/docker" buildx version
+```
+
+Use the actual Rancher installation/mount path if different. The socket must
+also be accessible to the service user; adding a CLI directory does not provide
+a daemon or grant socket permissions. Before this host's PATH extension, the
+client already reached the Rancher Desktop daemon by absolute path with the
+service environment, so executable discovery was the missing part.
+
+Back up the existing `10-mise-path.conf` outside the `*.conf` filename pattern,
+then replace its PATH assignment with the full value below:
+
+```ini
+[Service]
+Environment="PATH=/home/<USER>/.local/bin:/home/<USER>/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/<USER>/.opencode/bin:/mnt/c/Program Files/Rancher Desktop/resources/resources/linux/bin"
+```
+
+The quotes enclose the entire assignment, preserving the spaces in `Program
+Files` and `Rancher Desktop`. Both additions are at the end: user tools, mise
+shims and system tools retain precedence, and Windows-mounted directory
+lookups are only needed when those locations do not provide a command.
+Do not append using `$PATH` inside `Environment=`; systemd would keep it literal.
+
+The Rancher directory also exposes `nerdctl`, `kubectl`, `helm`, `rdctl` and
+Docker credential helpers. Compose and Buildx are Docker CLI plugins: their
+`linux/docker-cli-plugins` directory does not need to be in PATH when Docker's
+plugin discovery is already configured. Confirm both plugin commands above.
+This extension deliberately excludes VS Code, nonexistent `~/bin` or
+`/snap/bin` entries, and direct mise runtime installation directories.
+
+Run the same daemon-reload, unit validation and separate-terminal restart
+procedure above. Preserve the base unit, `20-direnv.conf`, existing credentials
+and `.bashrc`. Through a shell on the persistent backend, check:
+
+```bash
+command -v opencode
+opencode --version
+command -v docker
+command -v nerdctl
+command -v kubectl
+command -v helm
+command -v rdctl
+docker version
+docker compose version
+docker buildx version
+command -v dotnet   # still ~/.local/share/mise/shims/dotnet
+command -v node     # still ~/.local/share/mise/shims/node
+```
+
+`docker version` tests client-to-daemon access without modifying containers.
+To roll back just these additions, restore the previous `10-mise-path.conf`,
+reload systemd and restart the service; retain the earlier mise PATH setup.
+These optional host paths are documented configuration, not additions performed
+automatically by the workstation installer.
+
 #### Verify inside the persistent backend
 
 Ask the attached OpenCode session to execute this through its Bash tool:

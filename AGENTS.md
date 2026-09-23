@@ -165,9 +165,16 @@ component documentation and configurator.
 Targets Debian/Ubuntu. Ubuntu under WSL2 is the reference and tested platform.
 
 Key flags: `--dry-run`, `--upgrade`, `--verify-only`, `--project PATH`,
-`--repair-codex`, `--gcm-path PATH`, `--az-path PATH`, and `--skip-*` for each
+`--repair-claude`, `--repair-codex`, `--gcm-path PATH`, `--az-path PATH`, and `--skip-*` for each
 component (`runtimes`, `opencode`, `claude`, `codex`, `openspec`, `superpowers`,
 `karpathy`, `quality-tools`, `git-credential`, `az-shim`).
+
+Claude Code and Codex both come from their vendors' native installers into
+`~/.local/bin`, never from npm. An npm copy lives inside one mise Node version,
+drops off `PATH` when Node moves, and — because `mise activate` puts Node's bin
+ahead of `~/.local/bin` — shadows a native copy installed beside it. So the
+installer refuses to run over an npm install and leaves the migration to
+`--repair-claude` / `--repair-codex`, which keep `~/.claude` and `$CODEX_HOME`.
 
 Pinned defaults live in `catalog/software-catalog.env`, not in this file —
 read it for the current values. `install.sh` and that catalog ship together as

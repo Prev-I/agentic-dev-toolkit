@@ -1969,6 +1969,214 @@ test_receipt_is_not_written_after_a_failure() {
     || fail "a failed run must never write the install receipt"
 }
 
+# Claude Code install-method tests. Nothing here reaches the network: the
+# installer download is replaced, and npm and mise are stand-ins inside the
+# sandbox. PATH is narrowed to the sandbox so the host's own claude -- which on
+# a machine that ran the installer is exactly what is under test -- cannot
+# answer `command -v claude`. Node's bin precedes ~/.local/bin, the order
+# `mise activate` produces, which is what lets an npm copy shadow a native one.
+setup_claude_sandbox() {
+  local sandbox="$TEMP_DIR/$1"
+
+  unset -f download_installer || true
+  CLAUDE_SANDBOX_ORIGINAL_HOME="$HOME"
+  CLAUDE_SANDBOX_ORIGINAL_PATH="$PATH"
+  CLAUDE_SANDBOX_ORIGINAL_MISE_BIN="$MISE_BIN"
+  HOME="$sandbox/home"
+  CLAUDE_NATIVE_ROOT="$HOME/.local/share/claude"
+  MISE_SHIMS_DIR="$HOME/.local/share/mise/shims"
+  MISE_BIN="$HOME/.local/bin/mise"
+  DRY_RUN=0; UPGRADE=0; SKIP_CLAUDE=0; REPAIR_CLAUDE=0
+  mkdir -p "$HOME/.local/bin" "$HOME/node/bin" "$HOME/.claude"
+  printf '{"keep":true}\n' > "$HOME/.claude/settings.json"
+  PATH="$HOME/node/bin:$HOME/.local/bin:/usr/bin:/bin"
+
+  # npm: answers the three calls the installer makes, against the sandbox tree.
+  cat > "$HOME/node/bin/npm" <<'EOF_NPM'
+#!/usr/bin/env bash
+root="$(cd "$(dirname "$0")/.." && pwd)"
+case "$1" in
+  prefix) printf '%s\n' "$root" ;;
+  ls) [[ -d "$root/lib/node_modules/$4" ]] ;;
+  uninstall) rm -rf "$root/lib/node_modules/$3" "$root/bin/claude"
+             printf 'uninstall %s\n' "$3" >> "$root/npm.log" ;;
+  *) exit 2 ;;
+esac
+EOF_NPM
+  chmod 755 "$HOME/node/bin/npm"
+
+  # mise: `which` resolves the shim to the npm copy; reshim is a no-op.
+  cat > "$MISE_BIN" <<EOF_MISE
+#!/usr/bin/env bash
+case "\$1" in
+  which) [[ -e "$HOME/node/bin/\$2" ]] && printf '%s\n' "$HOME/node/bin/\$2" ;;
+  reshim) : ;;
+  *) exit 2 ;;
+esac
+EOF_MISE
+  chmod 755 "$MISE_BIN"
+}
+
+teardown_claude_sandbox() {
+  unset -f download_installer || true
+  # The stub replaced the real function; restore it from the installer body.
+  eval "$(sed -n '/^download_installer() {$/,/^}$/p' "$TEMP_DIR/install-functions.sh")"
+  HOME="$CLAUDE_SANDBOX_ORIGINAL_HOME"
+  PATH="$CLAUDE_SANDBOX_ORIGINAL_PATH"
+  MISE_BIN="$CLAUDE_SANDBOX_ORIGINAL_MISE_BIN"
+  CLAUDE_NATIVE_ROOT="$HOME/.local/share/claude"
+  MISE_SHIMS_DIR="$HOME/.local/share/mise/shims"
+  DRY_RUN=0; UPGRADE=0; SKIP_CLAUDE=0; REPAIR_CLAUDE=0
+  hash -r
+}
+
+make_npm_claude() {
+  local package="$HOME/node/lib/node_modules/@anthropic-ai/claude-code"
+  mkdir -p "$package/bin"
+  printf '#!/usr/bin/env bash\necho npm-claude\n' > "$package/bin/claude.exe"
+  chmod 755 "$package/bin/claude.exe"
+  ln -sf ../lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe "$HOME/node/bin/claude"
+}
+
+make_native_claude() {
+  mkdir -p "$CLAUDE_NATIVE_ROOT/versions"
+  printf '#!/usr/bin/env bash\necho native-claude\n' > "$CLAUDE_NATIVE_ROOT/versions/$1"
+  chmod 755 "$CLAUDE_NATIVE_ROOT/versions/$1"
+  ln -sfn "$CLAUDE_NATIVE_ROOT/versions/$1" "$HOME/.local/bin/claude"
+}
+
+# Stands in for the download. The "installer" it hands back lays out what the
+# real one does -- a versioned binary and a ~/.local/bin launcher -- and records
+# the arguments it was given.
+stub_claude_installer() {
+  # shellcheck disable=SC2329
+  download_installer() {
+    DOWNLOADED_INSTALLER="$TEMP_DIR/claude-installer-$RANDOM.sh"
+    cat > "$DOWNLOADED_INSTALLER" <<EOF_INSTALLER
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$HOME/installer.log"
+mkdir -p "$CLAUDE_NATIVE_ROOT/versions"
+printf '#!/usr/bin/env bash\necho native-claude\n' > "$CLAUDE_NATIVE_ROOT/versions/9.9.9"
+chmod 755 "$CLAUDE_NATIVE_ROOT/versions/9.9.9"
+ln -sfn "$CLAUDE_NATIVE_ROOT/versions/9.9.9" "$HOME/.local/bin/claude"
+EOF_INSTALLER
+  }
+}
+
+test_claude_install_kind_recognizes_each_install_method() {
+  setup_claude_sandbox claude-kinds
+
+  assert_equal "$(claude_install_kind "$(claude_visible_path)")" "none" "no claude on PATH must be 'none'"
+
+  make_native_claude 1.0.0
+  assert_equal "$(claude_install_kind "$(claude_visible_path)")" "native" "a launcher into the versions directory must be 'native'"
+
+  make_npm_claude
+  hash -r
+  assert_equal "$(claude_install_kind "$(claude_visible_path)")" "npm" "an npm copy ahead on PATH must be 'npm'"
+
+  printf '#!/usr/bin/env bash\n' > "$HOME/stray-claude"
+  chmod 755 "$HOME/stray-claude"
+  assert_equal "$(claude_install_kind "$HOME/stray-claude")" "unknown" "an unrecognized binary must be 'unknown'"
+
+  teardown_claude_sandbox
+}
+
+test_claude_mise_shim_resolves_to_the_npm_copy_behind_it() {
+  setup_claude_sandbox claude-shim
+  make_npm_claude
+  mkdir -p "$MISE_SHIMS_DIR"
+  ln -sf "$MISE_BIN" "$MISE_SHIMS_DIR/claude"
+  # Shims only, no Node bin: what a non-interactive shell with mise shims sees.
+  PATH="$MISE_SHIMS_DIR:$HOME/.local/bin:/usr/bin:/bin"
+  hash -r
+
+  assert_equal "$(claude_visible_path)" "$HOME/node/bin/claude" "a mise shim must resolve to the real binary"
+  assert_equal "$(claude_install_kind "$(claude_visible_path)")" "npm" "an npm copy behind a shim must still be 'npm'"
+
+  teardown_claude_sandbox
+}
+
+test_claude_install_refuses_an_npm_copy_without_repair() {
+  setup_claude_sandbox claude-refuse
+  make_npm_claude
+  stub_claude_installer
+
+  local status=0 output
+  output="$( (install_claude) 2>&1 )" || status=$?
+
+  assert_equal "$status" "1" "an active npm install must stop the installer"
+  [[ "$output" == *"--repair-claude"* ]] || fail "the refusal must name --repair-claude, got: $output"
+  [[ -d "$HOME/node/lib/node_modules/@anthropic-ai/claude-code" ]] || fail "a refusal must not remove the npm copy"
+  [[ ! -e "$HOME/installer.log" ]] || fail "a refusal must not run the native installer"
+
+  teardown_claude_sandbox
+}
+
+test_claude_repair_migrates_npm_to_native_and_keeps_configuration() {
+  setup_claude_sandbox claude-repair
+  make_npm_claude
+  stub_claude_installer
+  REPAIR_CLAUDE=1
+
+  install_claude >/dev/null
+
+  [[ ! -e "$HOME/node/lib/node_modules/@anthropic-ai/claude-code" ]] || fail "repair must uninstall the npm package"
+  assert_equal "$(cat "$HOME/node/npm.log")" "uninstall @anthropic-ai/claude-code" "repair must uninstall through the owning npm"
+  assert_equal "$(cat "$HOME/installer.log")" "latest" "the native installer must be asked for the latest channel"
+  assert_equal "$(claude_install_kind "$(claude_visible_path)")" "native" "claude must resolve to the native install afterwards"
+  assert_equal "$(cat "$HOME/.claude/settings.json")" '{"keep":true}' "repair must leave ~/.claude untouched"
+
+  teardown_claude_sandbox
+}
+
+test_claude_repair_dry_run_previews_without_changing_anything() {
+  setup_claude_sandbox claude-repair-dry
+  make_npm_claude
+  stub_claude_installer
+  REPAIR_CLAUDE=1
+  # shellcheck disable=SC2034
+  DRY_RUN=1
+
+  local output
+  output="$(install_claude 2>&1)"
+
+  [[ "$output" == *"uninstall -g @anthropic-ai/claude-code"* ]] || fail "dry-run must show the npm uninstall, got: $output"
+  [[ -d "$HOME/node/lib/node_modules/@anthropic-ai/claude-code" ]] || fail "dry-run must not uninstall anything"
+  [[ ! -e "$HOME/installer.log" ]] || fail "dry-run must not run the native installer"
+
+  teardown_claude_sandbox
+}
+
+test_claude_native_install_is_left_alone_unless_upgrading() {
+  setup_claude_sandbox claude-native
+  make_native_claude 1.0.0
+  stub_claude_installer
+
+  install_claude >/dev/null
+  [[ ! -e "$HOME/installer.log" ]] || fail "an existing native install must not be reinstalled without --upgrade"
+
+  # shellcheck disable=SC2034
+  UPGRADE=1
+  install_claude >/dev/null
+  assert_equal "$(cat "$HOME/installer.log")" "latest" "--upgrade must rerun the native installer"
+
+  teardown_claude_sandbox
+}
+
+test_claude_repair_options_are_parsed_and_validated() {
+  REPAIR_CLAUDE=0; SKIP_CLAUDE=0
+  parse_args --repair-claude
+  assert_equal "$REPAIR_CLAUDE" "1" "--repair-claude must set the repair flag"
+
+  if ( parse_args --repair-claude --skip-claude 2>/dev/null ); then
+    fail "--repair-claude must be rejected together with --skip-claude"
+  fi
+  REPAIR_CLAUDE=0
+  # shellcheck disable=SC2034
+  SKIP_CLAUDE=0
+}
+
 TEMP_DIR="$(mktemp -d)"
 test_claude_template_resolves_after_copying_to_project_root
 
@@ -2156,5 +2364,12 @@ test_receipt_modes_are_deterministic_under_a_strict_umask
 test_receipt_is_not_written_on_dry_run
 test_receipt_is_not_written_on_verify_only
 test_receipt_is_not_written_after_a_failure
+test_claude_install_kind_recognizes_each_install_method
+test_claude_mise_shim_resolves_to_the_npm_copy_behind_it
+test_claude_install_refuses_an_npm_copy_without_repair
+test_claude_repair_migrates_npm_to_native_and_keeps_configuration
+test_claude_repair_dry_run_previews_without_changing_anything
+test_claude_native_install_is_left_alone_unless_upgrading
+test_claude_repair_options_are_parsed_and_validated
 
 printf 'PASS: installer compatibility tests\n'

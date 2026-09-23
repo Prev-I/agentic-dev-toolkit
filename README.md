@@ -157,6 +157,7 @@ Key flags:
 | `--skip-quality-tools` | Skip shellcheck, gitleaks, and PyYAML |
 | `--skip-git-credential` | Skip the WSL Git credential wrapper (WSL only) |
 | `--skip-az-shim` | Skip the WSL Azure CLI shim (WSL only) |
+| `--repair-claude` | Remove conflicting Claude Code installs (npm) and reinstall native |
 | `--repair-codex` | Remove conflicting Codex installs and reinstall standalone |
 
 Version overrides are available via `--node-version`, `--python-version`, etc., or through

@@ -5,6 +5,7 @@ IFS=$'\n\t'
 readonly SCRIPT_NAME="${0##*/}"
 readonly MISE_INSTALL_URL="https://mise.run"
 readonly OPENCODE_INSTALL_URL="https://opencode.ai/install"
+readonly CLAUDE_INSTALL_URL="https://claude.ai/install.sh"
 readonly CODEX_INSTALL_URL="https://chatgpt.com/codex/install.sh"
 readonly SUPERPOWERS_PLUGIN_BASE='superpowers@git+https://github.com/obra/superpowers.git'
 readonly KARPATHY_RAW_BASE='https://raw.githubusercontent.com/multica-ai/andrej-karpathy-skills'
@@ -286,6 +287,7 @@ UPGRADE=0
 VERIFY_ONLY=0
 SKIP_PLATFORM_CHECK=0
 REMOVE_APT_NODE=0
+REPAIR_CLAUDE=0
 REPAIR_CODEX=0
 PROJECT_PATH=""
 
@@ -305,6 +307,11 @@ XDG_CONFIG_HOME="${XDG_CONFIG_HOME%/}"
 MISE_BIN="${MISE_BIN:-$HOME/.local/bin/mise}"
 MISE_TOOLCHAIN_CONFIG="${MISE_TOOLCHAIN_CONFIG:-$XDG_CONFIG_HOME/mise/conf.d/agentic-dev-toolkit.toml}"
 OPENCODE_CONFIG="${OPENCODE_CONFIG:-$XDG_CONFIG_HOME/opencode/opencode.json}"
+# The native installer's launcher is $HOME/.local/bin/claude, a symlink into
+# this versions directory. Its configuration and credentials live in ~/.claude
+# and ~/.claude.json, which nothing here touches.
+CLAUDE_NATIVE_ROOT="${CLAUDE_NATIVE_ROOT:-$HOME/.local/share/claude}"
+MISE_SHIMS_DIR="${MISE_DATA_DIR:-$HOME/.local/share/mise}/shims"
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 CODEX_STANDALONE_ROOT="$CODEX_HOME/packages/standalone"
 GCM_WINDOWS_PATH="${ADT_GCM_PATH:-/mnt/c/Program Files/Git/mingw64/bin/git-credential-manager.exe}"
@@ -348,6 +355,8 @@ General options:
                                direnv configuration in a Git repository.
   --skip-platform-check        Skip the distribution family check (unsupported distributions only).
   --remove-apt-node            Remove APT-managed nodejs/npm before mise Node.
+  --repair-claude              Remove recognized Claude Code install conflicts
+                               and reinstall the official native Claude Code.
   --repair-codex               Remove recognized Codex install conflicts and
                                reinstall the official standalone Codex CLI.
 
@@ -410,6 +419,7 @@ Examples:
   ./$SCRIPT_NAME --upgrade
   ./$SCRIPT_NAME --project ~/code/my-project
   ./$SCRIPT_NAME --verify-only
+  ./$SCRIPT_NAME --repair-claude
   ./$SCRIPT_NAME --repair-codex
 EOF_USAGE
 }
@@ -443,6 +453,7 @@ parse_args() {
       --verify-only) VERIFY_ONLY=1 ;;
       --skip-platform-check) SKIP_PLATFORM_CHECK=1 ;;
       --remove-apt-node) REMOVE_APT_NODE=1 ;;
+      --repair-claude) REPAIR_CLAUDE=1 ;;
       --repair-codex) REPAIR_CODEX=1 ;;
       --skip-runtimes) SKIP_RUNTIMES=1 ;;
       --skip-opencode) SKIP_OPENCODE=1 ;;
@@ -582,6 +593,7 @@ parse_args() {
     shift
   done
 
+  (( REPAIR_CLAUDE == 0 || SKIP_CLAUDE == 0 )) || die "--repair-claude cannot be combined with --skip-claude"
   (( REPAIR_CODEX == 0 || SKIP_CODEX == 0 )) || die "--repair-codex cannot be combined with --skip-codex"
 }
 
@@ -960,35 +972,146 @@ install_opencode() {
   command -v opencode >/dev/null 2>&1 || die "OpenCode installation completed but 'opencode' is not on PATH"
 }
 
+# A mise shim is a symlink to mise itself, so it says nothing about how the
+# tool behind it was installed. Resolve it to the real binary first.
+claude_visible_path() {
+  local path
+  path="$(command -v claude 2>/dev/null || true)"
+  if [[ "$path" == "$MISE_SHIMS_DIR/claude" && -x "$MISE_BIN" ]]; then
+    path="$("$MISE_BIN" which claude 2>/dev/null || true)"
+  fi
+  printf '%s' "$path"
+}
+
+claude_npm_binary_for_path() {
+  npm_binary_for_path "$1" claude @anthropic-ai/claude-code
+}
+
+claude_install_kind() {
+  local path="$1"
+  local resolved=""
+
+  [[ -n "$path" ]] || { printf 'none\n'; return; }
+  resolved="$(readlink -f -- "$path" 2>/dev/null || printf '%s' "$path")"
+
+  if [[ "$resolved" == "$CLAUDE_NATIVE_ROOT/versions/"* ]]; then
+    printf 'native\n'
+    return
+  fi
+
+  if claude_npm_binary_for_path "$path" >/dev/null 2>&1; then
+    printf 'npm\n'
+    return
+  fi
+
+  printf 'unknown\n'
+}
+
+# Leaves ~/.claude and ~/.claude.json alone: they hold settings, sessions and
+# credentials, and the native install reads the same files the npm one wrote.
+repair_claude_installations() {
+  local attempts=0 path kind npm_bin
+
+  log "Repairing Claude Code installation state"
+
+  while (( attempts < 4 )); do
+    hash -r
+    path="$(claude_visible_path)"
+    kind="$(claude_install_kind "$path")"
+
+    case "$kind" in
+      none)
+        return
+        ;;
+      native)
+        info "Removing native Claude Code binaries while preserving ~/.claude configuration and credentials."
+        run rm -f "$HOME/.local/bin/claude"
+        run rm -rf "$CLAUDE_NATIVE_ROOT/versions"
+        ;;
+      npm)
+        npm_bin="$(claude_npm_binary_for_path "$path")" || \
+          die "Claude Code at '$path' looks npm-managed, but the owning npm executable could not be resolved."
+        info "Removing npm-managed @anthropic-ai/claude-code at $path using $npm_bin."
+        if (( DRY_RUN == 1 )); then
+          quote_command "$npm_bin" uninstall -g @anthropic-ai/claude-code
+        else
+          "$npm_bin" uninstall -g @anthropic-ai/claude-code
+          # Otherwise a stale shim keeps answering `command -v claude`.
+          [[ -x "$MISE_BIN" ]] && "$MISE_BIN" reshim >/dev/null 2>&1 || true
+        fi
+        ;;
+      unknown)
+        die "Claude Code is available at '$path', but its install method is not recognized. Remove it manually or adjust PATH before using --repair-claude."
+        ;;
+    esac
+
+    (( attempts += 1 ))
+    if (( DRY_RUN == 1 )); then
+      return
+    fi
+  done
+
+  die "Claude Code repair could not reach a clean installation state"
+}
+
+# The native installer, not npm: an npm install belongs to one mise Node
+# version and vanishes from PATH when Node moves, and it does not self-update.
+# `mise activate` puts Node's bin ahead of ~/.local/bin, so a leftover npm copy
+# would shadow the native one; that is why an npm install is refused rather
+# than installed alongside.
 install_claude() {
   if (( SKIP_CLAUDE == 1 )); then
     log "Skipping Claude Code installation"
     return
   fi
 
-  if command -v claude >/dev/null 2>&1 && (( UPGRADE == 0 )); then
-    log "Claude Code is already installed: $(command -v claude)"
+  local path kind installer
+  path="$(claude_visible_path)"
+  kind="$(claude_install_kind "$path")"
+
+  if (( REPAIR_CLAUDE == 1 )); then
+    repair_claude_installations
+    path=""
+    kind="none"
+  elif [[ "$kind" == "npm" || "$kind" == "unknown" ]]; then
+    die "A non-native Claude Code installation is active at '$path'. Re-run with --repair-claude to migrate a recognized npm installation safely."
+  fi
+
+  if [[ "$kind" == "native" && $UPGRADE -eq 0 ]]; then
+    log "Claude Code native is already installed: $path"
     return
   fi
 
-  log "Installing or updating Claude Code with the official npm package"
+  log "Installing or updating Claude Code with the official native installer"
   if (( DRY_RUN == 1 )); then
-    quote_command npm install -g @anthropic-ai/claude-code@latest
+    info "Would install Claude Code into $HOME/.local/bin from $CLAUDE_INSTALL_URL."
     return
   fi
 
-  command -v npm >/dev/null 2>&1 || die "npm is required to install Claude Code; install runtimes or remove --skip-runtimes"
-  npm install -g @anthropic-ai/claude-code@latest
+  download_installer "$CLAUDE_INSTALL_URL"
+  installer="$DOWNLOADED_INSTALLER"
+  mkdir -p "$HOME/.local/bin"
+  # latest, not the installer's default stable channel: it matches the
+  # @latest the npm install used to take.
+  bash "$installer" latest
   hash -r
-  command -v claude >/dev/null 2>&1 || die "Claude Code installation completed but 'claude' is not on PATH"
+
+  path="$(claude_visible_path)"
+  kind="$(claude_install_kind "$path")"
+  [[ "$kind" == "native" ]] || die "Claude Code installation did not resolve to the expected native layout (found '$path')"
 }
 
 codex_visible_path() {
   command -v codex 2>/dev/null || true
 }
 
-codex_npm_binary_for_path() {
+# Prints the npm executable that owns the global package behind a binary on
+# PATH, so the uninstall runs against the right prefix. Under mise that is the
+# npm of the Node version that installed it, not whichever npm is current.
+npm_binary_for_path() {
   local path="$1"
+  local bin_name="$2"
+  local package="$3"
   local prefix=""
   local candidate=""
   local resolved=""
@@ -997,13 +1120,13 @@ codex_npm_binary_for_path() {
   [[ -n "$path" ]] || return 1
   resolved="$(readlink -f -- "$path" 2>/dev/null || printf '%s' "$path")"
 
-  if [[ "$path" == */bin/codex ]]; then
-    prefix="${path%/bin/codex}"
+  if [[ "$path" == */bin/"$bin_name" ]]; then
+    prefix="${path%/bin/"$bin_name"}"
     candidate="$prefix/bin/npm"
 
     if [[ -x "$candidate" ]]; then
-      if "$candidate" ls -g --depth=0 @openai/codex >/dev/null 2>&1 || \
-         [[ "$resolved" == "$prefix/lib/node_modules/@openai/codex/"* ]]; then
+      if "$candidate" ls -g --depth=0 "$package" >/dev/null 2>&1 || \
+         [[ "$resolved" == "$prefix/lib/node_modules/$package/"* ]]; then
         printf '%s\n' "$candidate"
         return 0
       fi
@@ -1013,13 +1136,17 @@ codex_npm_binary_for_path() {
   if command -v npm >/dev/null 2>&1; then
     npm_prefix="$(npm prefix -g 2>/dev/null || true)"
     if [[ -n "$npm_prefix" && "$path" == "$npm_prefix/bin/"* ]] && \
-       npm ls -g --depth=0 @openai/codex >/dev/null 2>&1; then
+       npm ls -g --depth=0 "$package" >/dev/null 2>&1; then
       command -v npm
       return 0
     fi
   fi
 
   return 1
+}
+
+codex_npm_binary_for_path() {
+  npm_binary_for_path "$1" codex @openai/codex
 }
 
 codex_install_kind() {
@@ -2219,6 +2346,7 @@ $karpathy_note
 Useful maintenance commands:
   ./$SCRIPT_NAME --verify-only
   ./$SCRIPT_NAME --upgrade
+  ./$SCRIPT_NAME --repair-claude
   ./$SCRIPT_NAME --repair-codex
 
 Useful checks:

@@ -164,6 +164,15 @@ Version overrides are available via `--node-version`, `--python-version`, etc., 
 `ADT_NODE_VERSION`, `ADT_PYTHON_VERSION`, and similar environment variables. See
 `./environments/linux/install.sh --help` for the full list.
 
+For global OpenCode Superpowers configuration, the installer preserves whichever
+single config exists under `~/.config/opencode`: `opencode.json` or
+`opencode.jsonc`. A fresh setup creates `opencode.jsonc`. If both exist, the
+installer stops before changing the machine; remove or rename one, set
+`OPENCODE_CONFIG` explicitly, or use `--skip-superpowers`. Comment-bearing JSONC
+is not rewritten automatically and must already contain the pinned plugin as a
+standalone entry on its own line without a trailing comment. Remove stale
+additional Superpowers entries manually; the installer does not normalize JSONC.
+
 ### Project environments
 
 The installer adds direnv's Bash hook and installs its Debian/Ubuntu package. When invoked with

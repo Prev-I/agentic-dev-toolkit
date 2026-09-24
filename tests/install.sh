@@ -40,6 +40,178 @@ test_claude_template_resolves_after_copying_to_project_root() {
   [[ -f "$project_root/$import_path" ]] || fail "copied Claude adapter must resolve the root AGENTS.md"
 }
 
+test_opencode_config_selection() {
+  local root="$TEMP_DIR/opencode-config-selection"
+  local output status
+
+  rm -rf "$root"
+  mkdir -p "$root"
+  assert_equal "$(select_opencode_config "$root")" "$root/opencode.jsonc" \
+    "an empty config directory must default to opencode.jsonc"
+
+  touch "$root/opencode.json"
+  assert_equal "$(select_opencode_config "$root")" "$root/opencode.json" \
+    "an existing JSON config must be preserved"
+
+  rm "$root/opencode.json"
+  touch "$root/opencode.jsonc"
+  assert_equal "$(select_opencode_config "$root")" "$root/opencode.jsonc" \
+    "an existing JSONC config must be preserved"
+
+  touch "$root/opencode.json"
+  status=0
+  output="$(select_opencode_config "$root" 2>&1)" || status=$?
+  assert_equal "$status" "1" "dual OpenCode config files must fail selection"
+  assert_equal "$output" "" "the pure selector must leave diagnostics to the resolver"
+}
+
+test_opencode_superpowers_uses_the_selected_config() {
+  local root="$TEMP_DIR/opencode-superpowers-config"
+  local plugin="$SUPERPOWERS_PLUGIN_BASE#$SUPERPOWERS_REF"
+  local output status
+
+  (
+    XDG_CONFIG_HOME="$root/fresh"
+    OPENCODE_CONFIG=""
+    SKIP_SUPERPOWERS=0
+    DRY_RUN=0
+    resolve_opencode_config
+    configure_opencode_superpowers >/dev/null
+    [[ -f "$XDG_CONFIG_HOME/opencode/opencode.jsonc" ]] \
+      || fail "fresh Superpowers configuration must create opencode.jsonc"
+    [[ ! -e "$XDG_CONFIG_HOME/opencode/opencode.json" ]] \
+      || fail "fresh Superpowers configuration must not create opencode.json"
+    jq -e --arg plugin "$plugin" '.plugin == [$plugin]' \
+      "$XDG_CONFIG_HOME/opencode/opencode.jsonc" >/dev/null \
+      || fail "fresh JSONC config must contain the pinned Superpowers plugin"
+  )
+
+  (
+    XDG_CONFIG_HOME="$root/existing"
+    OPENCODE_CONFIG=""
+    SKIP_SUPERPOWERS=0
+    DRY_RUN=0
+    mkdir -p "$XDG_CONFIG_HOME/opencode"
+    cat > "$XDG_CONFIG_HOME/opencode/opencode.jsonc" <<EOF
+// generated JSONC fixture
+{
+  "plugin": [
+    "$plugin"
+  ]
+}
+EOF
+    local before
+    before="$(sha256sum "$XDG_CONFIG_HOME/opencode/opencode.jsonc")"
+    resolve_opencode_config
+    configure_opencode_superpowers >/dev/null
+    [[ ! -e "$XDG_CONFIG_HOME/opencode/opencode.json" ]] \
+      || fail "existing JSONC must never be shadowed by a new JSON config"
+    assert_equal "$(sha256sum "$XDG_CONFIG_HOME/opencode/opencode.jsonc")" "$before" \
+      "existing commented JSONC with the pinned plugin must remain byte-identical"
+    [[ ! -e "$XDG_CONFIG_HOME/opencode/opencode.jsonc.pre-agentic-dev-toolkit" ]] \
+      || fail "an unchanged commented JSONC must not create a backup"
+  )
+
+  (
+    XDG_CONFIG_HOME="$root/existing-json"
+    OPENCODE_CONFIG=""
+    SKIP_SUPERPOWERS=0
+    DRY_RUN=0
+    mkdir -p "$XDG_CONFIG_HOME/opencode"
+    cat > "$XDG_CONFIG_HOME/opencode/opencode.json" <<'EOF'
+{"plugin":["superpowers@git+https://github.com/obra/superpowers.git#old"]}
+EOF
+    resolve_opencode_config
+    configure_opencode_superpowers >/dev/null
+    [[ ! -e "$XDG_CONFIG_HOME/opencode/opencode.jsonc" ]] \
+      || fail "existing JSON must not create a competing JSONC config"
+    [[ -f "$XDG_CONFIG_HOME/opencode/opencode.json.pre-agentic-dev-toolkit" ]] \
+      || fail "updating existing JSON must preserve a backup"
+    jq -e --arg plugin "$plugin" '.plugin == [$plugin]' \
+      "$XDG_CONFIG_HOME/opencode/opencode.json" >/dev/null \
+      || fail "existing JSON must replace an old Superpowers pin"
+  )
+
+  status=0
+  output="$( (
+    XDG_CONFIG_HOME="$root/missing-plugin"
+    OPENCODE_CONFIG=""
+    SKIP_SUPERPOWERS=0
+    DRY_RUN=0
+    mkdir -p "$XDG_CONFIG_HOME/opencode"
+    printf '%s\n' '// no plugin here' '{}' > "$XDG_CONFIG_HOME/opencode/opencode.jsonc"
+    resolve_opencode_config
+    configure_opencode_superpowers
+  ) 2>&1)" || status=$?
+  assert_equal "$status" "1" "commented JSONC without Superpowers must fail closed"
+  [[ "$output" == *"Could not confirm Superpowers"* ]] \
+    || fail "commented JSONC failure must explain the missing plugin: $output"
+
+  status=0
+  output="$( (
+    XDG_CONFIG_HOME="$root/commented-out-plugin"
+    OPENCODE_CONFIG=""
+    SKIP_SUPERPOWERS=0
+    DRY_RUN=0
+    mkdir -p "$XDG_CONFIG_HOME/opencode"
+    cat > "$XDG_CONFIG_HOME/opencode/opencode.jsonc" <<EOF
+{
+  "plugin": [
+    // "$plugin"
+  ]
+}
+EOF
+    resolve_opencode_config
+    configure_opencode_superpowers
+  ) 2>&1)" || status=$?
+  assert_equal "$status" "1" "commented-out Superpowers entry must not count as configured"
+  [[ "$output" == *"Could not confirm Superpowers"* ]] \
+    || fail "commented-out plugin failure must explain the missing plugin: $output"
+}
+
+test_opencode_superpowers_preflight_and_verification() {
+  local root="$TEMP_DIR/opencode-superpowers-preflight"
+  local plugin="$SUPERPOWERS_PLUGIN_BASE#$SUPERPOWERS_REF"
+  local output status=0
+
+  (
+    XDG_CONFIG_HOME="$root/valid"
+    OPENCODE_CONFIG=""
+    SKIP_SUPERPOWERS=0
+    DRY_RUN=0
+    VERIFY_ONLY=1
+    mkdir -p "$XDG_CONFIG_HOME/opencode"
+    cat > "$XDG_CONFIG_HOME/opencode/opencode.jsonc" <<EOF
+// generated JSONC fixture
+{
+  "plugin": [
+    "$plugin"
+  ]
+}
+EOF
+    resolve_opencode_config
+    preflight_opencode_superpowers
+    verify_opencode_superpowers
+  )
+
+  output="$( (
+    XDG_CONFIG_HOME="$root/invalid"
+    OPENCODE_CONFIG=""
+    SKIP_SUPERPOWERS=0
+    DRY_RUN=0
+    # Read indirectly by preflight_opencode_superpowers from the sourced installer.
+    # shellcheck disable=SC2034
+    VERIFY_ONLY=0
+    mkdir -p "$XDG_CONFIG_HOME/opencode"
+    printf '%s\n' '// missing plugin' '{}' > "$XDG_CONFIG_HOME/opencode/opencode.jsonc"
+    resolve_opencode_config
+    preflight_opencode_superpowers
+  ) 2>&1)" || status=$?
+  assert_equal "$status" "1" "preflight must fail for JSONC without the pinned plugin"
+  [[ "$output" == *"Could not confirm Superpowers"* ]] \
+    || fail "preflight failure must explain the standalone plugin contract: $output"
+}
+
 load_installer_functions() {
   local -a installer_lines
   local last_line
@@ -1581,7 +1753,7 @@ test_installer_version_flag() {
   status=$?
   set -e
   assert_equal "$status" "0" "--version must exit 0"
-  assert_equal "$output" "0.2.0" "--version must print exactly the version"
+  assert_equal "$output" "0.2.1" "--version must print exactly the version"
   [[ "$output" != *"Unknown option"* ]] \
     || fail "--version must be parsed before the generic unknown-option arm"
 }
@@ -1590,6 +1762,65 @@ test_installer_version_flag_performs_no_installation() {
   local output
   output="$(bash "$INSTALLER" --version 2>&1)"
   [[ "$output" != *"=="* ]] || fail "--version must print no installation log"
+}
+
+test_installer_version_ignores_ambiguous_opencode_config() {
+  local home="$TEMP_DIR/version-with-dual-opencode-config"
+  local output status
+  mkdir -p "$home/.config/opencode"
+  touch "$home/.config/opencode/opencode.json" "$home/.config/opencode/opencode.jsonc"
+
+  set +e
+  output="$(env -u OPENCODE_CONFIG HOME="$home" XDG_CONFIG_HOME="$home/.config" \
+    bash "$INSTALLER" --version 2>&1)"
+  status=$?
+  set -e
+
+  assert_equal "$status" "0" "--version must not resolve the OpenCode config"
+  assert_equal "$output" "0.2.1" "--version with dual configs must print exactly the version"
+}
+
+test_opencode_config_resolution_honors_skip_and_explicit_override() {
+  local root="$TEMP_DIR/resolve-opencode-config"
+  local explicit="$TEMP_DIR/explicit-opencode-config.json"
+  (
+    mkdir -p "$root/opencode"
+    touch "$root/opencode/opencode.json" "$root/opencode/opencode.jsonc"
+
+    # Read indirectly by resolve_opencode_config from the sourced installer.
+    # shellcheck disable=SC2034
+    XDG_CONFIG_HOME="$root"
+    # shellcheck disable=SC2034
+    SKIP_SUPERPOWERS=1
+    OPENCODE_CONFIG=""
+    resolve_opencode_config
+    assert_equal "$OPENCODE_CONFIG" "" \
+      "skipping Superpowers must leave the OpenCode config unresolved"
+
+    # shellcheck disable=SC2034
+    SKIP_SUPERPOWERS=0
+    OPENCODE_CONFIG="$explicit"
+    resolve_opencode_config
+    assert_equal "$OPENCODE_CONFIG" "$explicit" \
+      "an explicit OpenCode config must override canonical ambiguity"
+  )
+}
+
+test_installer_rejects_ambiguous_opencode_config_before_installing() {
+  local home="$TEMP_DIR/installer-with-dual-opencode-config"
+  local output status=0
+  mkdir -p "$home/.config/opencode"
+  touch "$home/.config/opencode/opencode.json" "$home/.config/opencode/opencode.jsonc"
+
+  output="$(env -u OPENCODE_CONFIG HOME="$home" XDG_CONFIG_HOME="$home/.config" \
+    bash "$INSTALLER" --dry-run 2>&1)" || status=$?
+
+  assert_equal "$status" "1" "dual OpenCode configs must fail before installation"
+  [[ "$output" == *"contains both opencode.json and opencode.jsonc"* && \
+    "$output" == *"remove or rename one, or set OPENCODE_CONFIG"* ]] \
+    || fail "dual-config failure must explain the ambiguity: $output"
+  [[ "$output" != *"Installing Debian/Ubuntu prerequisites"* ]] \
+    || fail "dual-config ambiguity must fail before installation starts"
 }
 
 test_installer_rejects_an_ungrammatical_override() {
@@ -2267,6 +2498,9 @@ fi
 # Runs here, not down in the list below, because the many tests that follow
 # reassign the pin globals; by then the loaded values would be gone.
 test_every_pin_is_wired_to_its_own_catalog_key
+test_opencode_config_selection
+test_opencode_superpowers_uses_the_selected_config
+test_opencode_superpowers_preflight_and_verification
 
 test_lttng_selector_prefers_time64_package_when_available
 test_lttng_selector_falls_back_to_legacy_package
@@ -2343,6 +2577,9 @@ test_installer_dies_on_a_malformed_catalog_key
 test_installer_dies_on_a_missing_required_catalog_key
 test_installer_version_flag
 test_installer_version_flag_performs_no_installation
+test_installer_version_ignores_ambiguous_opencode_config
+test_opencode_config_resolution_honors_skip_and_explicit_override
+test_installer_rejects_ambiguous_opencode_config_before_installing
 test_installer_rejects_an_ungrammatical_override
 test_installer_rejects_an_empty_inline_override
 test_installer_rejects_an_ungrammatical_environment_override

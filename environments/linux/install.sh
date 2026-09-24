@@ -12,7 +12,7 @@ readonly KARPATHY_RAW_BASE='https://raw.githubusercontent.com/multica-ai/andrej-
 readonly KARPATHY_SKILL_PATH='skills/karpathy-guidelines/SKILL.md'
 # The installer's own version, declared with the other constants for parity
 # with the repository's other versioned scripts. Printed verbatim by --version.
-readonly SCRIPT_VERSION="0.2.0"
+readonly SCRIPT_VERSION="0.2.1"
 
 log() {
   printf '\n==> %s\n' "$*"
@@ -306,7 +306,76 @@ XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 XDG_CONFIG_HOME="${XDG_CONFIG_HOME%/}"
 MISE_BIN="${MISE_BIN:-$HOME/.local/bin/mise}"
 MISE_TOOLCHAIN_CONFIG="${MISE_TOOLCHAIN_CONFIG:-$XDG_CONFIG_HOME/mise/conf.d/agentic-dev-toolkit.toml}"
-OPENCODE_CONFIG="${OPENCODE_CONFIG:-$XDG_CONFIG_HOME/opencode/opencode.json}"
+
+select_opencode_config() {
+  [[ $# == 1 && -n "$1" ]] || return 2
+  local config_dir=$1
+  local json="$config_dir/opencode.json"
+  local jsonc="$config_dir/opencode.jsonc"
+
+  if [[ -e "$json" && -e "$jsonc" ]]; then
+    return 1
+  elif [[ -e "$json" ]]; then
+    printf '%s\n' "$json"
+  else
+    printf '%s\n' "$jsonc"
+  fi
+}
+
+OPENCODE_CONFIG="${OPENCODE_CONFIG:-}"
+
+resolve_opencode_config() {
+  (( SKIP_SUPERPOWERS == 0 )) || return 0
+  if [[ -n "$OPENCODE_CONFIG" ]]; then
+    return 0
+  fi
+  local config_dir="$XDG_CONFIG_HOME/opencode"
+  if ! OPENCODE_CONFIG="$(select_opencode_config "$config_dir")"; then
+    die "OpenCode config directory contains both opencode.json and opencode.jsonc: $config_dir; remove or rename one, or set OPENCODE_CONFIG"
+  fi
+}
+
+opencode_superpowers_configured() {
+  local plugin="$SUPERPOWERS_PLUGIN_BASE#$SUPERPOWERS_REF"
+
+  if command -v jq >/dev/null 2>&1 && jq empty "$OPENCODE_CONFIG" >/dev/null 2>&1; then
+    jq -e --arg plugin "$plugin" \
+      '.plugin | type == "array" and index($plugin) != null' "$OPENCODE_CONFIG" >/dev/null
+    return
+  fi
+
+  # Generated JSONC keeps each plugin string on its own line. Matching that
+  # exact shape avoids treating a commented-out entry as active without trying
+  # to strip `//` from URLs inside JSON strings.
+  awk -v entry="\"$plugin\"" '
+    {
+      line = $0
+      sub(/^[[:space:]]*/, "", line)
+      sub(/[[:space:]]*$/, "", line)
+      if (line == entry || line == entry ",") found = 1
+    }
+    END { exit(found ? 0 : 1) }
+  ' "$OPENCODE_CONFIG"
+}
+
+preflight_opencode_superpowers() {
+  (( SKIP_SUPERPOWERS == 0 )) || return 0
+  [[ -s "$OPENCODE_CONFIG" ]] || return 0
+  if ! command -v jq >/dev/null 2>&1; then
+    (( VERIFY_ONLY == 0 )) || die "jq is required to verify OpenCode Superpowers configuration"
+    return 0
+  fi
+  jq empty "$OPENCODE_CONFIG" >/dev/null 2>&1 && return 0
+  opencode_superpowers_configured && return 0
+  die "Could not confirm Superpowers $SUPERPOWERS_REF as a standalone plugin entry in $OPENCODE_CONFIG; put the entry on its own line without a trailing comment, or use --skip-superpowers"
+}
+
+verify_opencode_superpowers() {
+  (( SKIP_SUPERPOWERS == 0 && DRY_RUN == 0 )) || return 0
+  [[ -s "$OPENCODE_CONFIG" ]] || return 0
+  opencode_superpowers_configured || \
+    die "Superpowers $SUPERPOWERS_REF is not configured in $OPENCODE_CONFIG"
+}
 # The native installer's launcher is $HOME/.local/bin/claude, a symlink into
 # this versions directory. Its configuration and credentials live in ~/.claude
 # and ~/.claude.json, which nothing here touches.
@@ -1324,9 +1393,11 @@ configure_opencode_superpowers() {
   fi
 
   if ! jq empty "$OPENCODE_CONFIG" >/dev/null 2>&1; then
-    warn "$OPENCODE_CONFIG is not strict JSON and was not modified automatically."
-    warn "Add this plugin manually: $plugin"
-    return
+    if opencode_superpowers_configured; then
+      info "Superpowers $SUPERPOWERS_REF is already configured in non-strict JSON: $OPENCODE_CONFIG"
+      return
+    fi
+    die "Could not confirm Superpowers $SUPERPOWERS_REF as a standalone plugin entry in $OPENCODE_CONFIG; put this entry on its own line without a trailing comment, or use --skip-superpowers: $plugin"
   fi
 
   backup_file="$OPENCODE_CONFIG.pre-agentic-dev-toolkit"
@@ -2237,11 +2308,7 @@ verify_installation() {
     info "Azure CLI shim refuses write verbs; AZ_UNSAFE=1 is the deliberate override."
   fi
 
-  if (( SKIP_SUPERPOWERS == 0 && DRY_RUN == 0 )) && [[ -s "$OPENCODE_CONFIG" ]] && jq empty "$OPENCODE_CONFIG" >/dev/null 2>&1; then
-    local plugin="$SUPERPOWERS_PLUGIN_BASE#$SUPERPOWERS_REF"
-    jq -e --arg plugin "$plugin" '.plugin | type == "array" and index($plugin) != null' "$OPENCODE_CONFIG" >/dev/null || \
-      die "Superpowers $SUPERPOWERS_REF is not configured in $OPENCODE_CONFIG"
-  fi
+  verify_opencode_superpowers
 
   if (( SKIP_KARPATHY == 0 && DRY_RUN == 0 )); then
     # An instruction file that every agent on the machine reads is worth
@@ -2371,6 +2438,8 @@ main() {
   parse_args "$@"
   validate_requested_values
   validate_environment
+  resolve_opencode_config
+  preflight_opencode_superpowers
 
   if (( VERIFY_ONLY == 1 )); then
     verify_installation
@@ -2378,6 +2447,7 @@ main() {
   fi
 
   install_system_packages
+  preflight_opencode_superpowers
   ensure_shell_configuration
   run mkdir -p "$HOME/code"
   install_mise

@@ -1,0 +1,4 @@
+Using `brainstorming` to confirm the smallest correct design before implementation. This is a bounded change to an existing shell utility, so I’ll inspect the current function and tests, then present a short design for approval rather than create a spec.
+Design: add only `reverse()` after the unchanged `upper()` in `lib/strings.sh`. It will accept `$1`, reverse its characters using Bash string operations, and print the result with a trailing newline via `printf`; verification will cover normal, empty, and space-containing strings without modifying `README.md`.
+
+Approve this design?

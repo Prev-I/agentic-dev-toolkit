@@ -1,0 +1,98 @@
+{
+  "caps": {
+    "opus55_reviewer": 500
+  },
+  "entries": [
+    {
+      "timestamp": "2026-09-24T11:58:22.101528+02:00",
+      "account": "opus55_reviewer",
+      "label": "preflight-opus55",
+      "provider": "github-copilot",
+      "credits": 13.2776
+    },
+    {
+      "timestamp": "2026-09-24T12:00:06.992509+02:00",
+      "account": "opus55_reviewer",
+      "label": "reviewer-clean-opus5",
+      "provider": "github-copilot",
+      "credits": 31.928449999999998
+    },
+    {
+      "timestamp": "2026-09-24T12:00:37.919218+02:00",
+      "account": "opus55_reviewer",
+      "label": "reviewer-clean-opus55",
+      "provider": "github-copilot",
+      "credits": 19.128700000000002
+    },
+    {
+      "timestamp": "2026-09-24T12:01:10.780003+02:00",
+      "account": "opus55_reviewer",
+      "label": "reviewer-R-API-opus55",
+      "provider": "github-copilot",
+      "credits": 20.40554
+    },
+    {
+      "timestamp": "2026-09-24T12:02:07.277820+02:00",
+      "account": "opus55_reviewer",
+      "label": "reviewer-R-API-opus5",
+      "provider": "github-copilot",
+      "credits": 30.528450000000003
+    },
+    {
+      "timestamp": "2026-09-24T12:02:55.774643+02:00",
+      "account": "opus55_reviewer",
+      "label": "reviewer-R-AUTH-opus5",
+      "provider": "github-copilot",
+      "credits": 29.562775000000002
+    },
+    {
+      "timestamp": "2026-09-24T12:03:26.922620+02:00",
+      "account": "opus55_reviewer",
+      "label": "reviewer-R-AUTH-opus55",
+      "provider": "github-copilot",
+      "credits": 18.77326
+    },
+    {
+      "timestamp": "2026-09-24T12:04:05.822025+02:00",
+      "account": "opus55_reviewer",
+      "label": "reviewer-R-BOUNDARY-opus55",
+      "provider": "github-copilot",
+      "credits": 19.50272
+    },
+    {
+      "timestamp": "2026-09-24T12:05:13.515066+02:00",
+      "account": "opus55_reviewer",
+      "label": "reviewer-R-BOUNDARY-opus5",
+      "provider": "github-copilot",
+      "credits": 31.43225
+    },
+    {
+      "timestamp": "2026-09-24T12:06:24.641240+02:00",
+      "account": "opus55_reviewer",
+      "label": "reviewer-R-CONCURRENCY-opus5",
+      "provider": "github-copilot",
+      "credits": 32.651025
+    },
+    {
+      "timestamp": "2026-09-24T12:07:01.468964+02:00",
+      "account": "opus55_reviewer",
+      "label": "reviewer-R-CONCURRENCY-opus55",
+      "provider": "github-copilot",
+      "credits": 19.3986
+    },
+    {
+      "timestamp": "2026-09-24T12:07:42.615622+02:00",
+      "account": "opus55_reviewer",
+      "label": "reviewer-R-ERROR-opus55",
+      "provider": "github-copilot",
+      "credits": 21.3245
+    },
+    {
+      "timestamp": "2026-09-24T12:08:39.532457+02:00",
+      "account": "opus55_reviewer",
+      "label": "reviewer-R-ERROR-opus5",
+      "provider": "github-copilot",
+      "credits": 30.099025
+    }
+  ]
+}

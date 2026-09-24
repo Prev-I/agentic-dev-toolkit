@@ -1,0 +1,10 @@
+{
+  "findings": [
+    {
+      "file": "api_contract.sh",
+      "severity": "suggestion",
+      "summary": "The contract assertion only checks that displayName is present and does not constrain the full key set, so it would not catch additional fields added to the response later.",
+      "evidence": "sys.exit(0 if \"displayName\" in d else 1)"
+    }
+  ]
+}

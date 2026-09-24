@@ -1,0 +1,35 @@
+{
+  "timestamp": "2026-09-24T12:00:06.884023+02:00",
+  "label": "reviewer-clean-opus5",
+  "attempt": 1,
+  "routing_profile_id": "v1-restored-2026-09",
+  "routing_profile_commit": "d22c8d81aa5e7360f305a3347cb940d35d7fe06a",
+  "runtime_version": "1.18.31",
+  "eval_runner_version": "phase-r-dispatch-v1",
+  "environment": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+  "dispatch_target": "agent:reviewer-opus5",
+  "variant": "resolved",
+  "timeout_seconds": 480,
+  "exit_status": 0,
+  "classification": "OK",
+  "failure_class": null,
+  "provider_error_text": null,
+  "provider_status_code": null,
+  "observed_cost": 0.31928449999999997,
+  "derived_credits": 31.928449999999998,
+  "normalized_steady_state_cost": null,
+  "tokens": {
+    "total": 31905,
+    "input": 2,
+    "output": 874,
+    "reasoning": 2933,
+    "cache": {
+      "write": 2033,
+      "read": 26063
+    }
+  },
+  "wall_clock_ms": 62079,
+  "retry_count": 0,
+  "raw_evidence": "raw.jsonl",
+  "decides_gate_outcome": false
+}

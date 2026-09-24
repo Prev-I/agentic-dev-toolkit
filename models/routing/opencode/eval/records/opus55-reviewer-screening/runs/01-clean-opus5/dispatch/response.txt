@@ -1,0 +1,22 @@
+I'll review the shell scripts in the current directory.
+I reviewed all six shell scripts in the sandbox directory.
+
+## Review Summary
+
+**`api.sh`** — Builds JSON via `json.dumps` with the value passed as `argv[1]` rather than interpolated into the program text. No injection surface, and quoted `"$1"` always yields an argument word so `argv[1]` cannot `IndexError`. Correct.
+
+**`counter.sh`** — Uses a separate `.lock` file (created by `flock` via `O_CREAT`), and `flock` holds the descriptor for the entire lifetime of the child `bash`, so the read-modify-write is genuinely atomic against concurrent callers. The value is passed positionally (`_ "$1"`) rather than interpolated into the `bash -c` string. Correct.
+
+**`authorization.sh`** — The right-hand operand of `==` is quoted inside `[[ ]]`, so it is a literal string comparison rather than a glob pattern; a caller-supplied `owner` of `*` cannot match everything. Fail-closed via `|| return 3` before any output. Correct.
+
+**`storage.sh`** — Direct invocation of the delegate with no `eval`; the delegate's exit status propagates as the function's status, matching the `_or_fail` name. Correct.
+
+**`pagination.sh`** — The digit-only regex rejects signs and whitespace, the 18-character length bound keeps the value below the 64-bit arithmetic limit before any `(( ))` evaluation, and `10#` prevents leading zeros being read as octal. The trailing `(( ))` correctly supplies the return status. Correct.
+
+**`api_contract.sh`** — Correctly separates `local response` from the assignment so the command substitution's exit status is not masked by `local`'s. One non-consequential observation below.
+
+### Suggestions
+
+The contract assertion is presence-only: it confirms `displayName` exists but places no constraint on what else the response may contain. Today `api.sh` emits exactly one field, so nothing leaks. But as an ongoing regression guard the assertion would continue to pass if a future revision of `public_response` added further fields. Tightening it to an exact key-set comparison would make it a real contract test rather than a smoke check. This is not a current defect — there is no extra field to leak — which is why I have scored it as a suggestion and not as material.
+
+{"findings":[{"file":"api_contract.sh","severity":"suggestion","summary":"The contract assertion only checks that displayName is present and does not constrain the full key set, so it would not catch additional fields added to the response later.","evidence":"sys.exit(0 if \"displayName\" in d else 1)"}]}

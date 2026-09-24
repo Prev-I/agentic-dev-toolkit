@@ -1,0 +1,13 @@
+Using systematic-debugging to reproduce the predicate error and isolate its validation rule; then I will add a regression test before the minimal fix.
+`tests/acceptance.sh` already contains the required regression case and fails as expected. The root cause is `(( $1 >= 0 ))`, which includes zero despite the function's strictly-positive contract. I will change that comparison only.
+Changed `lib/validate.sh:is_positive` to require an integer strictly greater than zero.
+
+The existing acceptance test already covered `is_positive 0` and failed before the change; it now passes.
+
+Verified:
+- `bash tests/acceptance.sh`
+- `bash tests/regression.sh`
+- `bash -n lib/validate.sh`
+- `git diff --check`
+
+`README.md` and `is_blank` were not modified.

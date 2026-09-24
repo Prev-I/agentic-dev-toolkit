@@ -1,0 +1,10 @@
+{
+  "findings": [
+    {
+      "file": "api.sh",
+      "severity": "material",
+      "summary": "The public response emits the key \"name\" while the contract assertion in api_contract.sh requires \"displayName\", so the documented API contract is never satisfied.",
+      "evidence": "print(json.dumps({\"name\": sys.argv[1]}))"
+    }
+  ]
+}

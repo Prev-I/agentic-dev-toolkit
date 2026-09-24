@@ -1,0 +1,17 @@
+Using systematic-debugging to reproduce the acceptance of zero and isolate the faulty predicate before changing it.
+Using test-driven-development to add or identify the smallest regression test, observe it fail on `0`, then make only the predicate change needed.
+The existing acceptance test reproduces the defect exactly. The root cause is the non-strict `>= 0` arithmetic comparison at `lib/validate.sh:7`; the integer syntax guard is already separate, so the minimal fix is changing only that boundary comparison and leaving `is_blank` untouched.
+Using verification-before-completion to run both behavior suites, syntax-check the changed script, and inspect the final diff for forbidden-scope changes.
+Updated `lib/validate.sh:7` so `is_positive` requires an integer strictly greater than zero:
+
+```bash
+(( $1 > 0 ))
+```
+
+Verified:
+
+- `bash tests/acceptance.sh`
+- `bash tests/regression.sh`
+- Bash syntax checks
+
+`README.md` and `is_blank` were not modified.

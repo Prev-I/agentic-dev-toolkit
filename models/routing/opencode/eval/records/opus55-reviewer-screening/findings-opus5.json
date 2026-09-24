@@ -1,0 +1,138 @@
+{
+  "model_key": "opus5",
+  "seeded": [
+    {
+      "id": "R-API",
+      "severity": "material",
+      "files": [
+        "api.sh"
+      ],
+      "summary": "The public response emits the key \"name\" while the contract assertion in api_contract.sh requires \"displayName\", so the documented API contract is never satisfied.",
+      "all_reported": [
+        {
+          "file": "api.sh",
+          "severity": "material",
+          "summary": "The public response emits the key \"name\" while the contract assertion in api_contract.sh requires \"displayName\", so the documented API contract is never satisfied.",
+          "evidence": "print(json.dumps({\"name\": sys.argv[1]}))"
+        }
+      ]
+    },
+    {
+      "id": "R-AUTH",
+      "severity": "blocking",
+      "files": [
+        "authorization.sh"
+      ],
+      "summary": "read_resource accepts caller and owner but never compares them, returning the resource value to any caller regardless of ownership.",
+      "all_reported": [
+        {
+          "file": "authorization.sh",
+          "severity": "blocking",
+          "summary": "read_resource accepts caller and owner but never compares them, returning the resource value to any caller regardless of ownership.",
+          "evidence": "read_resource() { local caller=$1 owner=$2 value=$3; printf '%s\\n' \"$value\"; }"
+        },
+        {
+          "file": "api_contract.sh",
+          "severity": "suggestion",
+          "summary": "The contract assertion only checks that displayName is present, so it would not catch a regression that adds sensitive extra fields to the public response.",
+          "evidence": "sys.exit(0 if \"displayName\" in d else 1)"
+        },
+        {
+          "file": "counter.sh",
+          "severity": "suggestion",
+          "summary": "A missing or non-numeric counter file yields an empty n, so the arithmetic silently resets the sequence to 1 instead of failing.",
+          "evidence": "n=$(<\"$1\"); printf \"%s\\n\" \"$((n+1))\" >\"$1\""
+        },
+        {
+          "file": "storage.sh",
+          "severity": "suggestion",
+          "summary": "The _or_fail name promises explicit failure handling that the body does not implement, relying only on implicit exit-status propagation.",
+          "evidence": "load_items_or_fail() { local storage=$1; \"$storage\" list; }"
+        }
+      ]
+    },
+    {
+      "id": "R-BOUNDARY",
+      "severity": "none",
+      "files": [
+        "pagination.sh"
+      ],
+      "summary": "",
+      "all_reported": []
+    },
+    {
+      "id": "R-CONCURRENCY",
+      "severity": "blocking",
+      "files": [
+        "counter.sh"
+      ],
+      "summary": "increment_counter performs a read-modify-write with no locking or atomic replacement, so concurrent callers lose increments and a crash mid-write leaves the counter truncated.",
+      "all_reported": [
+        {
+          "file": "counter.sh",
+          "severity": "blocking",
+          "summary": "increment_counter performs a read-modify-write with no locking or atomic replacement, so concurrent callers lose increments and a crash mid-write leaves the counter truncated.",
+          "evidence": "n=$(<\"$1\"); printf '%s\\n' \"$((n+1))\" >\"$1\""
+        },
+        {
+          "file": "counter.sh",
+          "severity": "material",
+          "summary": "Unvalidated file content is expanded in bash arithmetic context, where an array-subscript payload triggers command substitution and thus code execution.",
+          "evidence": "\"$((n+1))\""
+        },
+        {
+          "file": "api_contract.sh",
+          "severity": "suggestion",
+          "summary": "The contract assertion only checks that the displayName key exists, so it passes on a null or wrong value and cannot detect extra leaked fields.",
+          "evidence": "sys.exit(0 if \"displayName\" in d else 1)"
+        },
+        {
+          "file": "authorization.sh",
+          "severity": "suggestion",
+          "summary": "The equality check grants access when both caller and owner are empty strings, so an unresolved identity against an unowned resource passes authorization.",
+          "evidence": "[[ \"$caller\" == \"$owner\" ]] || return 3"
+        },
+        {
+          "file": "storage.sh",
+          "severity": "suggestion",
+          "summary": "Despite its name the function adds no failure handling, so a caller using command substitution can consume partial output as a valid item list.",
+          "evidence": "local storage=$1; \"$storage\" list;"
+        }
+      ]
+    },
+    {
+      "id": "R-ERROR",
+      "severity": "material",
+      "files": [
+        "storage.sh"
+      ],
+      "summary": "Despite its name, load_items_or_fail never fails: any storage error is silenced and converted into an empty JSON array, so a backend outage is indistinguishable from a genuinely empty result and downstream reconciliation could delete live data.",
+      "all_reported": [
+        {
+          "file": "storage.sh",
+          "severity": "material",
+          "summary": "Despite its name, load_items_or_fail never fails: any storage error is silenced and converted into an empty JSON array, so a backend outage is indistinguishable from a genuinely empty result and downstream reconciliation could delete live data.",
+          "evidence": "\"$storage\" list 2>/dev/null || printf '[]\\n'"
+        },
+        {
+          "file": "api_contract.sh",
+          "severity": "suggestion",
+          "summary": "The contract assertion only checks that displayName is present and cannot catch a regression that adds extra or sensitive fields to the public response.",
+          "evidence": "sys.exit(0 if \"displayName\" in d else 1)"
+        }
+      ]
+    }
+  ],
+  "clean": [
+    {
+      "severity": "suggestion",
+      "file": "api_contract.sh",
+      "summary": "The contract assertion only checks that displayName is present and does not constrain the full key set, so it would not catch additional fields added to the response later."
+    }
+  ],
+  "normalization": "unchanged Reviewer adapter shape; scorer determines detection from all_reported, files, and fixture witnesses",
+  "runner_decides_gate_outcome": false,
+  "scorer": "eval/scoring/reviewer.sh::reviewer_structured_gate",
+  "fixture_revision": "74feae6a11b7bd8765cca4ce33369578de4cd3eb",
+  "fixture_integrity_checked": true
+}

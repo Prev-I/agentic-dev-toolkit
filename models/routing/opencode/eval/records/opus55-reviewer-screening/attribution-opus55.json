@@ -1,0 +1,7 @@
+{
+  "R-API": "detected",
+  "R-AUTH": "detected",
+  "R-BOUNDARY": "missed",
+  "R-CONCURRENCY": "ambiguous",
+  "R-ERROR": "detected"
+}

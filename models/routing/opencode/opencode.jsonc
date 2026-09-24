@@ -5,7 +5,7 @@
   // Do not replace unrelated configuration, and append to an existing
   // instructions array rather than replacing it.
   //
-  // User-approved selection: docs/decisions/2026-09-07-routing-selection.md.
+  // User-approved selection: docs/decisions/2026-09-24-cost-optimized-routing.md.
   // Targets: eval/manifests/current-routing-targets.json.
   // Historical Phase-R profile remains in profiles/v1-restored-2026-09.jsonc.
   //
@@ -19,7 +19,7 @@
   ],
 
   // Baseline model applied when no agent override matches.
-  "model": "github-copilot/gpt-5.6-sol",
+  "model": "github-copilot/gpt-6-sol",
 
   "permission": {
     // Web search via Exa AI — requires OPENCODE_ENABLE_EXA=true in the environment.
@@ -56,7 +56,7 @@
     "build": {
       // Hands-on code generation and modification; the user-selected controller.
       "mode": "primary",
-      "model": "github-copilot/gpt-5.6-sol",
+      "model": "github-copilot/gpt-6-sol",
       "variant": "high",
       "permission": {
         "edit": "allow",
@@ -73,7 +73,7 @@
 
     "general": {
       // Catch-all delegated worker for bounded tasks.
-      "model": "github-copilot/gpt-5.6-terra",
+      "model": "github-copilot/gpt-6-luna",
       "variant": "high",
       "permission": {
         "task": {
@@ -103,7 +103,7 @@
       // Independent read-only review. Copilot-hosted, deliberately a
       // different family from the GPT implementers (Build and General).
       "mode": "subagent",
-      "model": "github-copilot/claude-opus-5",
+      "model": "github-copilot/claude-opus-5.5",
       "variant": "high",
       "temperature": 0.1,
       "permission": {

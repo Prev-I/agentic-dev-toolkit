@@ -1,0 +1,28 @@
+{
+  "findings": [
+    {
+      "file": "authorization.sh",
+      "severity": "blocking",
+      "summary": "read_resource accepts caller and owner but never compares them, returning the resource value to any caller regardless of ownership.",
+      "evidence": "read_resource() { local caller=$1 owner=$2 value=$3; printf '%s\\n' \"$value\"; }"
+    },
+    {
+      "file": "api_contract.sh",
+      "severity": "suggestion",
+      "summary": "The contract assertion only checks that displayName is present, so it would not catch a regression that adds sensitive extra fields to the public response.",
+      "evidence": "sys.exit(0 if \"displayName\" in d else 1)"
+    },
+    {
+      "file": "counter.sh",
+      "severity": "suggestion",
+      "summary": "A missing or non-numeric counter file yields an empty n, so the arithmetic silently resets the sequence to 1 instead of failing.",
+      "evidence": "n=$(<\"$1\"); printf \"%s\\n\" \"$((n+1))\" >\"$1\""
+    },
+    {
+      "file": "storage.sh",
+      "severity": "suggestion",
+      "summary": "The _or_fail name promises explicit failure handling that the body does not implement, relying only on implicit exit-status propagation.",
+      "evidence": "load_items_or_fail() { local storage=$1; \"$storage\" list; }"
+    }
+  ]
+}

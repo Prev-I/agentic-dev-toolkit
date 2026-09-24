@@ -14,11 +14,11 @@ The routing policy is loaded through OpenCode's `instructions` setting; it does 
 | Role | OpenCode agent | Model | Variant |
 |---|---|---|---|
 | Planning/design | `plan` | `github-copilot/claude-opus-5` | `max` |
-| Primary build/controller | `build` | `github-copilot/gpt-5.6-sol` | `high` |
-| Delegated implementation/debugging | `general` | `github-copilot/gpt-5.6-terra` | `high` |
+| Primary build/controller | `build` | `github-copilot/gpt-6-sol` | `high` |
+| Delegated implementation/debugging | `general` | `github-copilot/gpt-6-luna` | `high` |
 | Local codebase exploration | `explore` | `github-copilot/gpt-5.6-luna` | `medium` |
 | External/upstream research | `scout` | `github-copilot/gpt-5.6-luna` | `low` |
-| Independent review | `reviewer` | `github-copilot/claude-opus-5` | `high` |
+| Independent review | `reviewer` | `github-copilot/claude-opus-5.5` | `high` |
 | Escalation-only expert | `expert` | `openai/gpt-6-astra` | `xhigh` |
 | Human-only breakglass | `breakglass` | `openai/gpt-5.6-sol` | `max` |
 | Context compaction | `compaction` | `github-copilot/gpt-5.6-terra` | `medium` |
@@ -36,15 +36,17 @@ bundle.
 
 Build and Reviewer use different model families. Expert stays on the existing
 direct OpenAI subscription connection; normal work stays on Copilot. Plan still
-shares Opus with Reviewer. All permissions and Breakglass remain unchanged.
+shares the Opus family with Reviewer. All permissions and Breakglass remain
+unchanged.
 
-The [2026-09-07 user selection](docs/decisions/2026-09-07-routing-selection.md)
-supersedes the restored role assignments for current use. It is an explicit
-preference, not a benchmark promotion. `eval/manifests/current-routing-targets.json`
-declares the current targets; the default model follows Build (Copilot Sol).
-This selection explicitly uses configuration-only activation with no new paid
-calls. Direct OpenAI Astra inference and Expert-role fitness remain unverified;
-this is an exception to the usual capability-probe prerequisite below.
+The [2026-09-24 cost-optimized selection](docs/decisions/2026-09-24-cost-optimized-routing.md)
+supersedes the 2026-09-07 selection for current use. It is a monitored cost-first
+choice, not a claim of general model superiority.
+`eval/manifests/current-routing-targets.json` declares the current targets; the
+default model follows Build (Copilot GPT-6 Sol).
+The three changed targets have fresh capability and role-screening evidence;
+Direct OpenAI Astra inference and Expert-role fitness remain unverified, an
+exception to the usual capability-probe prerequisite below.
 
 ## Routing migration
 
@@ -230,9 +232,11 @@ call:
 
 ```text
 github-copilot/claude-opus-5
-github-copilot/gpt-5.6-terra
+github-copilot/claude-opus-5.5
+github-copilot/gpt-6-luna
 github-copilot/gpt-5.6-luna
-github-copilot/gpt-5.6-sol
+github-copilot/gpt-5.6-terra
+github-copilot/gpt-6-sol
 openai/gpt-5.6-sol
 openai/gpt-6-astra
 ```
@@ -273,9 +277,9 @@ alignment check inspects:
 .opencode/model-routing.md   -> ~/.config/opencode/model-routing.md
 ```
 
-`reviewer` is independent and read-only on Copilot Opus 5/high. `expert` uses
+`reviewer` is independent and read-only on Copilot Opus 5.5/high. `expert` uses
 direct OpenAI Astra/xhigh, is hidden, read-only, cannot spawn subagents, and is
-capped at six agentic steps. Build uses Copilot Sol/high; Breakglass retains
+capped at six agentic steps. Build uses Copilot GPT-6 Sol/high; Breakglass retains
 direct OpenAI Sol/max as a human-selected primary.
 
 These are copies. After installing them — and after any later change to
@@ -292,11 +296,11 @@ The fragment pins all eleven roles as follows:
 
 ```text
 plan       -> Claude Opus 5 (Copilot)     max
-build      -> GPT-5.6 Sol (Copilot)       high
-general    -> GPT-5.6 Terra (Copilot)     high
+build      -> GPT-6 Sol (Copilot)         high
+general    -> GPT-6 Luna (Copilot)        high
 explore    -> GPT-5.6 Luna (Copilot)      medium
 scout      -> GPT-5.6 Luna (Copilot)      low
-reviewer   -> Claude Opus 5 (Copilot)     high
+reviewer   -> Claude Opus 5.5 (Copilot)   high
 expert     -> GPT-6 Astra (direct OpenAI) xhigh
 breakglass -> GPT-5.6 Sol (direct OpenAI) max
 compaction -> GPT-5.6 Terra (Copilot)     medium
@@ -313,8 +317,8 @@ permission blocks and at the top level.
 `.opencode/model-routing.md` provides the semantic mapping:
 
 ```text
-Superpowers implementation subagent -> general    -> GPT-5.6 Terra high (Copilot)
-Superpowers review / re-review       -> reviewer   -> Claude Opus 5 high (Copilot)
+Superpowers implementation subagent -> general    -> GPT-6 Luna high (Copilot)
+Superpowers review / re-review       -> reviewer   -> Claude Opus 5.5 high (Copilot)
 high-risk / disputed judgment        -> expert     -> GPT-6 Astra xhigh (direct OpenAI)
 ```
 

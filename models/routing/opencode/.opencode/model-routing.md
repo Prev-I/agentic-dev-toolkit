@@ -23,15 +23,17 @@ state, not runtime capability state.
 
 ## Model Family Assignments
 
-The user-selected profile of 2026-09-07 assigns these roles. These assignments
-are preferences, not claims of benchmark superiority:
+The cost-optimized profile of 2026-09-24 assigns these roles. The Build,
+General, and Reviewer updates are monitored cost-first choices informed by
+role-specific screening, not claims of general model superiority:
 
 | Family | Strengths | Assigned Roles |
 |--------|-----------|----------------|
-| **Claude Opus 5** | Planning and independent review | plan, reviewer (Copilot) |
-| **GPT-5.6 Terra** | Efficient bounded execution and summarization | general, compaction |
+| **Claude Opus 5 / 5.5** | Planning and independent review | plan (Opus 5), reviewer (Opus 5.5, Copilot) |
+| **GPT-5.6 Terra** | Context summarization | compaction |
 | **GPT-5.6 Luna** | Fast retrieval and broad pattern matching | explore, scout, title, summary |
-| **GPT-5.6 Sol** | Implementation and human-only recovery | build (Copilot), breakglass (direct OpenAI) |
+| **GPT-6 Luna** | Cost-efficient bounded execution | general (Copilot) |
+| **GPT-6 Sol / GPT-5.6 Sol** | Implementation and human-only recovery | build (GPT-6, Copilot), breakglass (GPT-5.6, direct OpenAI) |
 | **GPT-6 Astra** | Escalation-only advice | expert (direct OpenAI subscription) |
 
 Role-to-model assignment lives in `opencode.jsonc`. This document assigns work
@@ -44,7 +46,7 @@ heuristic intended to introduce a more independent analytical perspective. It ma
 shared blind spots, but it does not guarantee better review quality.
 
 Build and General use GPT models; Reviewer uses Claude. Plan and Reviewer still
-share Opus, so this does not provide independent-family review of planning.
+share the Opus family, so this does not provide independent-family review of planning.
 Expert uses Astra through direct OpenAI, preserving provider/quota separation
 from Copilot. Build and Expert remain within the broader GPT family; provider
 diversity does not guarantee cognitive independence.
@@ -96,7 +98,7 @@ When Superpowers skills dispatch sub-agents, the following mapping applies:
 | Skill context | Dispatched role |
 |---------------|-----------------|
 | Implementation work (brainstorming, TDD, parallel agents) | **general** |
-| Code review (requesting-code-review, receiving-code-review) | **reviewer** (Copilot Opus 5 high) |
+| Code review (requesting-code-review, receiving-code-review) | **reviewer** (Copilot Opus 5.5 high) |
 | Escalation beyond reviewer confidence | **expert** (direct OpenAI Astra xhigh) |
 
 ## Escalation to Expert

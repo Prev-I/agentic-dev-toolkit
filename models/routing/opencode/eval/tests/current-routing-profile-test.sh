@@ -12,17 +12,18 @@ import sys
 
 current = json.loads(os.environ["CURRENT"])
 expected = json.loads(os.environ["RESTORED"])
-expected["model"] = "github-copilot/gpt-5.6-sol"
+expected["model"] = "github-copilot/gpt-6-sol"
 for role, model in {
-    "build": "github-copilot/gpt-5.6-sol",
-    "reviewer": "github-copilot/claude-opus-5",
+    "build": "github-copilot/gpt-6-sol",
+    "general": "github-copilot/gpt-6-luna",
+    "reviewer": "github-copilot/claude-opus-5.5",
     "expert": "openai/gpt-6-astra",
 }.items():
     expected["agent"][role]["model"] = model
 assert current == expected, "Only approved models/default may change; preserve all permissions and other roles"
 targets = json.load(open(sys.argv[1], encoding="utf-8"))
-assert targets["profile_id"] == "v1-user-selected-2026-09-07"
-assert targets["decision_reference"] == "docs/decisions/2026-09-07-routing-selection.md"
+assert targets["profile_id"] == "v2-cost-optimized-2026-09-24"
+assert targets["decision_reference"] == "docs/decisions/2026-09-24-cost-optimized-routing.md"
 assert targets["routing_authority"] == "opencode.jsonc agent block"
 assert targets["markdown_agents_carry_routing_fields"] is False
 assert targets["default_model"] == current["model"]

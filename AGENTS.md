@@ -215,6 +215,17 @@ requires its own `--karpathy-sha256`. **No input installs this file unverified**
 it is standing instruction to every agent on the machine. Bump the ref and the
 digest together.
 
+OpenCode Superpowers configuration preserves the sole existing global config
+filename: JSON or JSONC. With neither present it creates `opencode.jsonc`; with
+both present it fails before mutation unless `OPENCODE_CONFIG` explicitly names
+the target. Never restore a hard-coded `opencode.json` default: it creates a
+second routing authority beside the managed JSONC profile. Non-strict JSONC is
+never rewritten; the installer accepts it only when the exact pinned plugin is
+already present as a standalone generated entry, otherwise it fails closed and
+requires a manual edit or `--skip-superpowers`. Unlike strict JSON, JSONC is not
+normalized, so the operator must also remove any stale additional Superpowers
+entries manually.
+
 ## Repository policy
 
 `repository-policy/` defines `.repository-policy.yaml`, a small versioned format

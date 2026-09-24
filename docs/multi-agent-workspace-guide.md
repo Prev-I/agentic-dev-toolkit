@@ -365,7 +365,7 @@ Each agent has a mechanism for machine-specific settings that should not be comm
 |---|---|---|
 | Claude Code | `.claude/settings.local.json` | Permissions, personal MCP servers |
 | Codex | User-level `~/.codex/` config | Personal preferences |
-| OpenCode | `~/.config/opencode/opencode.json` | Global user preferences, API keys |
+| OpenCode | `~/.config/opencode/opencode.json` or `opencode.jsonc` | Global user preferences, API keys |
 
 ## Verification Checklist
 

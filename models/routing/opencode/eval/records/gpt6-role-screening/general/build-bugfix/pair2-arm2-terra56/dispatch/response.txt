@@ -1,0 +1,10 @@
+Using systematic debugging to confirm the root cause, then test-driven development to capture the `0` regression before changing `is_positive`.
+The acceptance test reproduces the bug while the `is_blank` regression test passes. The root cause is the non-strict `>= 0` arithmetic comparison; I’ll make the minimal strict comparison change and leave tests, README, and `is_blank` untouched.
+Updated `lib/validate.sh` so `is_positive` uses a strict `> 0` comparison.
+
+Verified:
+- `bash tests/acceptance.sh`
+- `bash tests/regression.sh`
+- Bash syntax checks
+
+`README.md` and `is_blank` were not modified.

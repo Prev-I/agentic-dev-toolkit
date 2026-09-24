@@ -1,0 +1,4 @@
+Using the brainstorming skill to confirm the smallest compatible design. This is a bounded one-file addition, so I’ll inspect the existing shell function and tests, then present a short design for approval before implementation.
+Design: add only a `reverse()` function to `lib/strings.sh`, using Bash substring expansion to iterate from the final character to the first, then print one newline-terminated result. Leave `upper()` and `README.md` byte-for-byte unchanged; verify with the existing acceptance and regression scripts.
+
+Approve this design so I can implement it.

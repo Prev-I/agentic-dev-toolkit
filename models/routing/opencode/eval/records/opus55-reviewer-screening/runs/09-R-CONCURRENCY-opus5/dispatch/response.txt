@@ -1,0 +1,21 @@
+I'll review the shell scripts in the current directory.
+## Review Summary
+
+Six single-function shell files. Most are defensively written; one has a genuine concurrency defect.
+
+### Blocking
+
+**`counter.sh` — unsynchronized read-modify-write.** `increment_counter` reads the file, computes `n+1` in a separate step, then writes back with no lock, no `flock`, and no atomic rename. Two concurrent callers both read the same `n` and both write `n+1`, silently losing an increment. This is the textbook lost-update race, and for a counter it is data loss, not a theoretical hazard. The truncating redirect `>"$1"` also destroys the prior value before the new one is durably written, so a crash mid-write leaves the counter empty (which the next call then reads as `""` and turns into `1`, silently resetting). A correct form takes an exclusive `flock` across read and write, or writes to a temp file and `mv`s it into place.
+
+### Material
+
+**`counter.sh` — arithmetic evaluation of untrusted file content.** `$((n+1))` puts the file's contents into bash arithmetic context. Bash resolves array subscripts recursively there, so content like `a[$(command)]` causes command execution during expansion. If the counter file is writable by anything less trusted than the script, this is code execution, not just a bad parse. The value should be validated against `^[0-9]+$` before it reaches `$(( ))` — exactly the discipline `pagination.sh` already applies.
+
+### Suggestions
+
+- **`api_contract.sh`** — the contract assertion only checks for key *presence*. It passes if `displayName` is `null`, wrong, or if the response has gained extra fields that leak internal data. A response-shape contract should assert the value and the absence of unexpected keys, otherwise it will not catch the regression it exists to catch.
+- **`authorization.sh`** — equality grants access when both sides are the empty string. An unresolved caller identity plus an unowned resource both degrade to `""` and the check returns success. Rejecting empty `caller`/`owner` before comparing would close that. (The `[[ ]]` comparison itself is correctly quoted, so there is no glob-pattern bypass.)
+- **`storage.sh`** — named `load_items_or_fail` but it only propagates the delegate's exit status; it adds no failure detection. Under command substitution a caller that ignores `$?` receives partial stdout as if it were a valid list. Either check the status explicitly or rename to reflect what it does.
+- **`pagination.sh`** and **`api.sh`** — no defects found. `pagination.sh` correctly regex-gates, length-caps against overflow, and forces base 10; `api.sh` passes data via `argv` rather than string interpolation.
+
+{"findings":[{"file":"counter.sh","severity":"blocking","summary":"increment_counter performs a read-modify-write with no locking or atomic replacement, so concurrent callers lose increments and a crash mid-write leaves the counter truncated.","evidence":"n=$(<\"$1\"); printf '%s\\n' \"$((n+1))\" >\"$1\""},{"file":"counter.sh","severity":"material","summary":"Unvalidated file content is expanded in bash arithmetic context, where an array-subscript payload triggers command substitution and thus code execution.","evidence":"\"$((n+1))\""},{"file":"api_contract.sh","severity":"suggestion","summary":"The contract assertion only checks that the displayName key exists, so it passes on a null or wrong value and cannot detect extra leaked fields.","evidence":"sys.exit(0 if \"displayName\" in d else 1)"},{"file":"authorization.sh","severity":"suggestion","summary":"The equality check grants access when both caller and owner are empty strings, so an unresolved identity against an unowned resource passes authorization.","evidence":"[[ \"$caller\" == \"$owner\" ]] || return 3"},{"file":"storage.sh","severity":"suggestion","summary":"Despite its name the function adds no failure handling, so a caller using command substitution can consume partial output as a valid item list.","evidence":"local storage=$1; \"$storage\" list;"}]}

@@ -1,0 +1,46 @@
+{
+  "experiment": "opus55-reviewer-screening",
+  "status": "COMPLETE",
+  "budget_cap_credits": 500,
+  "spent_credits": 318.012895,
+  "unused_credits": 181.987105,
+  "routing_changed": false,
+  "incumbent": {"model": "github-copilot/claude-opus-5", "variant": "high"},
+  "challenger": {"model": "github-copilot/claude-opus-5.5", "variant": "high"},
+  "decision": "KEEP_OPUS_5",
+  "decision_basis": "Neither model cleared the frozen 5/5 seeded-defect plus clean-zero threshold. Both had identical deterministic attribution: three detected, one missed, one ambiguous, and zero clean material findings. KEEP_OPUS_5 preserves the status quo; it is not evidence that the incumbent is adequate. Efficiency cannot decide after a functional block.",
+  "quality": {
+    "opus5": {
+      "gate": "block",
+      "detected": ["R-API", "R-AUTH", "R-ERROR"],
+      "missed": ["R-BOUNDARY"],
+      "ambiguous": ["R-CONCURRENCY"],
+      "clean_material_findings": 0
+    },
+    "opus55": {
+      "gate": "block",
+      "detected": ["R-API", "R-AUTH", "R-ERROR"],
+      "missed": ["R-BOUNDARY"],
+      "ambiguous": ["R-CONCURRENCY"],
+      "clean_material_findings": 0
+    }
+  },
+  "efficiency": {
+    "opus5": {"workload_wall_clock_ms": 356017, "workload_credits": 186.201975, "aggregate_final_tokens": 189325},
+    "opus55": {"workload_wall_clock_ms": 203634, "workload_credits": 118.53332, "aggregate_final_tokens": 175981},
+    "opus55_wall_clock_reduction_percent": 42.802169,
+    "opus55_credit_reduction_percent": 36.341535,
+    "opus55_aggregate_final_token_reduction_percent": 7.048198
+  },
+  "limitations": [
+    "One dispatch per model per case does not establish reliability.",
+    "R-CONCURRENCY has no witness and the scorer fails closed when multiple material findings target its override file; both models were ambiguous for that reason.",
+    "R-BOUNDARY was missed by both models on this run.",
+    "Both models escalated a second counter.sh concern to material only in R-CONCURRENCY, producing the scorer's fail-closed ambiguity; the same concern was a suggestion in other cases.",
+    "Temporary experiment agents were primary-mode copies of the Reviewer prompt and permissions because OpenCode 1.18.31 cannot directly invoke subagents.",
+    "Opus 5 added prose before JSON in all six responses while Opus 5.5 returned bare JSON in five of six, so the wall-clock comparison includes a prompt-compliance and verbosity difference.",
+    "Most of the observed credit reduction follows Opus 5.5's lower catalog rates; aggregate final tokens were only 7.0% lower.",
+    "Credits are observed runtime accounting, vary with cache state, and are not reconciled against the GitHub billing interface.",
+    "Every dispatch carries a stale historical routing_profile_id from a pre-existing runner constant; resolved configs and concrete experiment agent targets establish model identity."
+  ]
+}

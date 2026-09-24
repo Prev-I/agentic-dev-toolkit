@@ -1,0 +1,59 @@
+{
+  "experiment": "gpt6-role-screening",
+  "status": "COMPLETE_WITH_INVALIDATED_CALLS",
+  "budget_cap_credits": 400,
+  "spent_credits": 205.639885,
+  "valid_call_credits": 94.144985,
+  "invalid_call_credits": 111.4949,
+  "unused_credits": 194.360115,
+  "routing_changed": false,
+  "results": {
+    "build": {
+      "incumbent": {"model": "github-copilot/gpt-5.6-sol", "variant": "high"},
+      "challenger": {"model": "github-copilot/gpt-6-sol", "variant": "high"},
+      "decision": "KEEP_INCUMBENT",
+      "reason": "Both arms stopped for required design approval on build-feature and both passed build-bugfix. GPT-6 Sol was more efficient on the completed workload, but neither model satisfied both frozen workloads.",
+      "workloads": [
+        {"fixture": "build-feature", "model": "gpt-5.6-sol", "oracle_passed": false, "regression_passed": true, "wall_clock_ms": 47051, "credits": 19.33272},
+        {"fixture": "build-feature", "model": "gpt-6-sol", "oracle_passed": false, "regression_passed": true, "wall_clock_ms": 33345, "credits": 9.52515},
+        {"fixture": "build-bugfix", "model": "gpt-6-sol", "oracle_passed": true, "regression_passed": true, "wall_clock_ms": 36924, "credits": 10.58388},
+        {"fixture": "build-bugfix", "model": "gpt-5.6-sol", "oracle_passed": true, "regression_passed": true, "wall_clock_ms": 61510, "credits": 25.967}
+      ]
+    },
+    "explore": {
+      "incumbent": {"model": "github-copilot/gpt-5.6-luna", "variant": "medium"},
+      "challenger": {"model": "github-copilot/gpt-6-luna", "variant": "medium"},
+      "decision": "KEEP_INCUMBENT",
+      "reason": "Both direct-model recovery arms returned the exact dependency chain. GPT-5.6 Luna was faster while GPT-6 Luna was cheaper in the observed cache state; one fixture provides no replacement signal.",
+      "workloads": [
+        {"fixture": "explore-dependency-chain", "model": "gpt-5.6-luna", "gate_passed": true, "wall_clock_ms": 13370, "credits": 0.686128},
+        {"fixture": "explore-dependency-chain", "model": "gpt-6-luna", "gate_passed": true, "wall_clock_ms": 18010, "credits": 0.355114}
+      ]
+    },
+    "general": {
+      "incumbent": {"model": "github-copilot/gpt-5.6-terra", "variant": "high"},
+      "challenger": {"model": "github-copilot/gpt-6-luna", "variant": "high"},
+      "decision": "KEEP_INCUMBENT",
+      "reason": "Both direct-model recovery arms stopped for required design approval on build-feature and both passed build-bugfix. GPT-6 Luna was slightly faster and much cheaper on the completed workload, but neither model satisfied both frozen workloads.",
+      "workloads": [
+        {"fixture": "build-feature", "model": "gpt-5.6-terra", "oracle_passed": false, "regression_passed": true, "wall_clock_ms": 22587, "credits": 9.79683},
+        {"fixture": "build-feature", "model": "gpt-6-luna", "oracle_passed": false, "regression_passed": true, "wall_clock_ms": 33306, "credits": 0.540634},
+        {"fixture": "build-bugfix", "model": "gpt-6-luna", "oracle_passed": true, "regression_passed": true, "wall_clock_ms": 37612, "credits": 0.6284675},
+        {"fixture": "build-bugfix", "model": "gpt-5.6-terra", "oracle_passed": true, "regression_passed": true, "wall_clock_ms": 39299, "credits": 13.23191}
+      ]
+    }
+  },
+  "invalidated_calls": {
+    "count": 6,
+    "credits": 111.4949,
+    "reason": "OpenCode rejected direct execution of explore/general subagents and fell back to the default Build agent. These calls support no model comparison."
+  },
+  "limitations": [
+    "One attempt per model per workload does not establish reliability.",
+    "The feature fixture measures the unattended Superpowers approval contract as well as coding ability.",
+    "General uses direct model dispatch because OpenCode 1.18.31 cannot directly run the general subagent and that agent has no role-specific prompt.",
+    "The fixture checks are silent. Original Build verdicts rely on attempt-recorded exit statuses after sandbox deletion; recovery General verdicts retain both explicit exit records and final sandboxes.",
+    "Every dispatch carries a stale historical routing_profile_id from a pre-existing runner constant; direct model and variant targets establish valid-call identity.",
+    "Observed harness credits vary materially with cache state and are not reconciled against the GitHub billing interface."
+  ]
+}

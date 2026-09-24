@@ -1,0 +1,24 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "reviewer-opus55": {
+      "mode": "primary",
+      "model": "github-copilot/claude-opus-5.5",
+      "variant": "high",
+      "temperature": 0.1,
+      "prompt": "{file:./reviewer-prompt.md}",
+      "permission": {
+        "edit": "deny",
+        "task": "deny",
+        "skill": "allow",
+        "bash": {
+          "*": "deny",
+          "git status*": "allow",
+          "git diff*": "allow",
+          "git log*": "allow",
+          "git show*": "allow"
+        }
+      }
+    }
+  }
+}

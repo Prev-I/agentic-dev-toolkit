@@ -1,0 +1,17 @@
+I'll review the shell scripts in the current directory.
+## Review Summary
+
+Six single-function shell scripts reviewed.
+
+**Blocking**
+
+- **`authorization.sh`** — `read_resource` accepts `caller` and `owner` parameters, declares them, and then never compares them before returning the resource value. Every caller receives the data regardless of ownership. Both parameters are pure dead stores, so the function presents an authorization interface that enforces nothing — an IDOR/broken-access-control exposure. It must compare `caller` against `owner` (or an equivalent policy check) and return non-zero without emitting `$value` when the check fails. Note that a `local` declaration of an unused variable is also invisible to `shellcheck`'s unused-variable checks in this form, so tooling will not catch it.
+
+**Suggestions**
+
+- **`api_contract.sh`** — the contract assertion only tests `"displayName" in d`. It is a presence-only check with no negative assertion, so a future regression in `public_response` that adds a sensitive field (email, internal id, token) to the public payload would still pass. Consider asserting the exact key set instead.
+- **`counter.sh`** — `flock "$1.lock" bash -c ...` is correct mutual exclusion, but `n=$(<"$1")` silently yields an empty string on a missing or non-numeric file, which `$((n+1))` then treats as `0`. A corrupt counter file resets the sequence rather than failing.
+- **`storage.sh`** — the `_or_fail` suffix promises explicit failure handling that the body does not implement; it relies solely on implicit exit-status propagation from `"$storage" list`. The behavior is acceptable, but the name overstates it, and callers that capture stdout may consume partial output.
+- **`api.sh`**, **`pagination.sh`** — no defects found. `pagination.sh` in particular correctly anchors its digit regex, bounds input length to 18 characters to prevent 64-bit arithmetic overflow, and forces base 10 to neutralize leading-zero octal interpretation.
+
+{"findings":[{"file":"authorization.sh","severity":"blocking","summary":"read_resource accepts caller and owner but never compares them, returning the resource value to any caller regardless of ownership.","evidence":"read_resource() { local caller=$1 owner=$2 value=$3; printf '%s\\n' \"$value\"; }"},{"file":"api_contract.sh","severity":"suggestion","summary":"The contract assertion only checks that displayName is present, so it would not catch a regression that adds sensitive extra fields to the public response.","evidence":"sys.exit(0 if \"displayName\" in d else 1)"},{"file":"counter.sh","severity":"suggestion","summary":"A missing or non-numeric counter file yields an empty n, so the arithmetic silently resets the sequence to 1 instead of failing.","evidence":"n=$(<\"$1\"); printf \"%s\\n\" \"$((n+1))\" >\"$1\""},{"file":"storage.sh","severity":"suggestion","summary":"The _or_fail name promises explicit failure handling that the body does not implement, relying only on implicit exit-status propagation.","evidence":"load_items_or_fail() { local storage=$1; \"$storage\" list; }"}]}

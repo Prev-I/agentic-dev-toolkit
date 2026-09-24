@@ -1,0 +1,4 @@
+Using systematic-debugging to trace why `0` passes, then test the smallest fix.
+Updated `lib/validate.sh` so `is_positive` accepts only integers greater than zero. Left `README.md` and `is_blank` unchanged.
+
+Verified that `tests/acceptance.sh`, `tests/regression.sh`, `bash -n`, and `git diff --check` pass.

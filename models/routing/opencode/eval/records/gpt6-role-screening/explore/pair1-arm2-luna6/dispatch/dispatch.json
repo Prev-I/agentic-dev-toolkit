@@ -1,0 +1,35 @@
+{
+  "timestamp": "2026-09-23T21:50:53.333729+02:00",
+  "label": "explore-dependency-chain",
+  "attempt": 1,
+  "routing_profile_id": "v1-restored-2026-09",
+  "routing_profile_commit": "93c666a80030c4ed3512940c8df840ed2135f474",
+  "runtime_version": "1.18.31",
+  "eval_runner_version": "phase-r-dispatch-v1",
+  "environment": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+  "dispatch_target": "agent:explore",
+  "variant": "resolved",
+  "timeout_seconds": 480,
+  "exit_status": 0,
+  "classification": "OK",
+  "failure_class": null,
+  "provider_error_text": null,
+  "provider_status_code": null,
+  "observed_cost": 0.1373108,
+  "derived_credits": 13.73108,
+  "normalized_steady_state_cost": null,
+  "tokens": {
+    "total": 17484,
+    "input": 164,
+    "output": 39,
+    "reasoning": 0,
+    "cache": {
+      "write": 0,
+      "read": 17281
+    }
+  },
+  "wall_clock_ms": 29217,
+  "retry_count": 0,
+  "raw_evidence": "raw.jsonl",
+  "decides_gate_outcome": false
+}

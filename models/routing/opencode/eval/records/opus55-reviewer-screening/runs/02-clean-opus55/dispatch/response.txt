@@ -1,0 +1,1 @@
+{"findings":[{"file":"counter.sh","severity":"suggestion","summary":"The counter file's contents go straight into Bash arithmetic without being checked, so a file that is not a plain integer can be run as an expression; this only matters if someone untrusted can write the file, so checking for digits first would be a cheap safeguard.","evidence":"printf \"%s\\n\" \"$((n+1))\""}]}

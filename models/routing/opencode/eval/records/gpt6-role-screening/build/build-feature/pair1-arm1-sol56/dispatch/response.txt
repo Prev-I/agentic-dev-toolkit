@@ -1,0 +1,4 @@
+Using the brainstorming skill to confirm the smallest correct design before implementation. This is a bounded one-file change, so I’ll inspect the existing shell function and tests, then present a short design for approval rather than create a spec.
+The change is bounded and fully specified. Design: add only a `reverse()` function to `lib/strings.sh`, using Bash substring expansion to emit the argument character-by-character from end to start, followed by a newline. Leave `upper()` and `README.md` byte-for-byte unchanged, then run `tests/acceptance.sh` and `tests/regression.sh`.
+
+Approve this design so I can implement it.

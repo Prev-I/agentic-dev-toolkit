@@ -1,0 +1,3 @@
+Using brainstorming to confirm the small API boundary, then test-driven development to add and verify the function without touching `README.md` or `upper`.
+This is a bounded change: `lib/strings.sh` has only `upper`, and `tests/acceptance.sh` already checks `reverse abc → cba`. I’ll add `reverse` after `upper`, building the result by iterating over Bash’s character-indexed string slices and printing it with a newline; this also returns an empty line for an empty argument. I’ll leave `README.md` and `upper` untouched and run both existing tests. Does that design look right?
+I’ll wait for your approval of that design before making the change.

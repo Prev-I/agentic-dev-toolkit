@@ -1,0 +1,140 @@
+{
+  "caps": {
+    "gpt6_role_screening": 400
+  },
+  "entries": [
+    {
+      "timestamp": "2026-09-23T21:44:36.735187+02:00",
+      "account": "gpt6_role_screening",
+      "label": "preflight-sol6-high",
+      "provider": "github-copilot",
+      "credits": 3.31435
+    },
+    {
+      "timestamp": "2026-09-23T21:44:54.622816+02:00",
+      "account": "gpt6_role_screening",
+      "label": "preflight-luna6-medium",
+      "provider": "github-copilot",
+      "credits": 0.16704249999999998
+    },
+    {
+      "timestamp": "2026-09-23T21:45:09.146027+02:00",
+      "account": "gpt6_role_screening",
+      "label": "preflight-luna6-high",
+      "provider": "github-copilot",
+      "credits": 0.015759
+    },
+    {
+      "timestamp": "2026-09-23T21:46:16.236428+02:00",
+      "account": "gpt6_role_screening",
+      "label": "build-feature-sol56",
+      "provider": "github-copilot",
+      "credits": 19.332720000000002
+    },
+    {
+      "timestamp": "2026-09-23T21:47:04.287487+02:00",
+      "account": "gpt6_role_screening",
+      "label": "build-feature-sol6",
+      "provider": "github-copilot",
+      "credits": 9.52515
+    },
+    {
+      "timestamp": "2026-09-23T21:48:00.493083+02:00",
+      "account": "gpt6_role_screening",
+      "label": "build-bugfix-sol6",
+      "provider": "github-copilot",
+      "credits": 10.583879999999999
+    },
+    {
+      "timestamp": "2026-09-23T21:49:15.263767+02:00",
+      "account": "gpt6_role_screening",
+      "label": "build-bugfix-sol56",
+      "provider": "github-copilot",
+      "credits": 25.967000000000002
+    },
+    {
+      "timestamp": "2026-09-23T21:50:11.886935+02:00",
+      "account": "gpt6_role_screening",
+      "label": "explore-luna56",
+      "provider": "github-copilot",
+      "credits": 10.752199999999998
+    },
+    {
+      "timestamp": "2026-09-23T21:50:53.453415+02:00",
+      "account": "gpt6_role_screening",
+      "label": "explore-luna6",
+      "provider": "github-copilot",
+      "credits": 13.73108
+    },
+    {
+      "timestamp": "2026-09-23T21:52:49.667906+02:00",
+      "account": "gpt6_role_screening",
+      "label": "general-feature-terra56",
+      "provider": "github-copilot",
+      "credits": 18.808860000000006
+    },
+    {
+      "timestamp": "2026-09-23T21:53:47.207156+02:00",
+      "account": "gpt6_role_screening",
+      "label": "general-feature-luna6",
+      "provider": "github-copilot",
+      "credits": 15.753619999999998
+    },
+    {
+      "timestamp": "2026-09-23T21:55:44.343231+02:00",
+      "account": "gpt6_role_screening",
+      "label": "general-bugfix-luna6",
+      "provider": "github-copilot",
+      "credits": 30.4228
+    },
+    {
+      "timestamp": "2026-09-23T21:56:45.599580+02:00",
+      "account": "gpt6_role_screening",
+      "label": "general-bugfix-terra56",
+      "provider": "github-copilot",
+      "credits": 22.026339999999998
+    },
+    {
+      "timestamp": "2026-09-23T22:37:22.697448+02:00",
+      "account": "gpt6_role_screening",
+      "label": "recovery-explore-luna56",
+      "provider": "github-copilot",
+      "credits": 0.686128
+    },
+    {
+      "timestamp": "2026-09-23T22:37:55.544444+02:00",
+      "account": "gpt6_role_screening",
+      "label": "recovery-explore-luna6",
+      "provider": "github-copilot",
+      "credits": 0.35511399999999993
+    },
+    {
+      "timestamp": "2026-09-23T22:38:41.608694+02:00",
+      "account": "gpt6_role_screening",
+      "label": "recovery-general-feature-terra56",
+      "provider": "github-copilot",
+      "credits": 9.79683
+    },
+    {
+      "timestamp": "2026-09-23T22:39:37.270059+02:00",
+      "account": "gpt6_role_screening",
+      "label": "recovery-general-feature-luna6",
+      "provider": "github-copilot",
+      "credits": 0.540634
+    },
+    {
+      "timestamp": "2026-09-23T22:40:35.128044+02:00",
+      "account": "gpt6_role_screening",
+      "label": "recovery-general-bugfix-luna6",
+      "provider": "github-copilot",
+      "credits": 0.6284675
+    },
+    {
+      "timestamp": "2026-09-23T22:41:34.281105+02:00",
+      "account": "gpt6_role_screening",
+      "label": "recovery-general-bugfix-terra56",
+      "provider": "github-copilot",
+      "credits": 13.23191
+    }
+  ]
+}

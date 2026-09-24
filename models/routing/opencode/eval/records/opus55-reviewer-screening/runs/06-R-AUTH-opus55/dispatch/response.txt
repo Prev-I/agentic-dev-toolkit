@@ -1,0 +1,1 @@
+{"findings":[{"file":"authorization.sh","severity":"blocking","summary":"read_resource accepts caller and owner but never compares them, so it returns the resource value to any caller and authorization is bypassed entirely.","evidence":"local caller=$1 owner=$2 value=$3; printf '%s\\n' \"$value\";"}]}

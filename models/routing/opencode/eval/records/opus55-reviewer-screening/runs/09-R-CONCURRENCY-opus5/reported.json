@@ -1,0 +1,34 @@
+{
+  "findings": [
+    {
+      "file": "counter.sh",
+      "severity": "blocking",
+      "summary": "increment_counter performs a read-modify-write with no locking or atomic replacement, so concurrent callers lose increments and a crash mid-write leaves the counter truncated.",
+      "evidence": "n=$(<\"$1\"); printf '%s\\n' \"$((n+1))\" >\"$1\""
+    },
+    {
+      "file": "counter.sh",
+      "severity": "material",
+      "summary": "Unvalidated file content is expanded in bash arithmetic context, where an array-subscript payload triggers command substitution and thus code execution.",
+      "evidence": "\"$((n+1))\""
+    },
+    {
+      "file": "api_contract.sh",
+      "severity": "suggestion",
+      "summary": "The contract assertion only checks that the displayName key exists, so it passes on a null or wrong value and cannot detect extra leaked fields.",
+      "evidence": "sys.exit(0 if \"displayName\" in d else 1)"
+    },
+    {
+      "file": "authorization.sh",
+      "severity": "suggestion",
+      "summary": "The equality check grants access when both caller and owner are empty strings, so an unresolved identity against an unowned resource passes authorization.",
+      "evidence": "[[ \"$caller\" == \"$owner\" ]] || return 3"
+    },
+    {
+      "file": "storage.sh",
+      "severity": "suggestion",
+      "summary": "Despite its name the function adds no failure handling, so a caller using command substitution can consume partial output as a valid item list.",
+      "evidence": "local storage=$1; \"$storage\" list;"
+    }
+  ]
+}

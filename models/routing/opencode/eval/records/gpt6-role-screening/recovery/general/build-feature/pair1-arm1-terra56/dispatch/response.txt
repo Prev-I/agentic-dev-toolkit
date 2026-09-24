@@ -1,0 +1,6 @@
+Using brainstorming to scope this bounded change and TDD to drive its implementation. I will inspect the existing shell utility and its tests, then propose the minimal addition and wait for your approval before editing.
+This is a bounded change. `lib/strings.sh` currently contains only `upper`, and there is no existing string-specific test suite.
+
+Design: add a `reverse()` sibling that accepts `$1` and prints the reversed string followed by a newline, preserving `upper` and `README.md` unchanged. I will first add a focused shell test that fails because `reverse` is absent, then implement the minimal function and run that test.
+
+Assumption: reversing means character-order reversal, including spaces and punctuation. Approve this design to proceed.

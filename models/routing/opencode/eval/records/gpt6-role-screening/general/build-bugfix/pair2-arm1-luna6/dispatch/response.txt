@@ -1,0 +1,16 @@
+Using systematic debugging to reproduce and identify the predicate error, then test-driven development to add the smallest regression test before changing `is_positive`.
+The existing acceptance test already provides the required regression case and fails specifically because line 7 uses `>= 0`. I’ll make the single-character boundary correction; `README.md` and `is_blank` remain untouched.
+Using verification-before-completion to run both test scripts, a syntax check, and a scoped diff confirming no protected content changed.
+Updated `lib/validate.sh:7` to require integers strictly greater than zero:
+
+```bash
+(( $1 > 0 ))
+```
+
+Verified successfully with:
+
+- `bash tests/acceptance.sh`
+- `bash tests/regression.sh`
+- Bash syntax checks
+
+`README.md` and `is_blank` were not modified.

@@ -1,0 +1,3 @@
+Using systematic debugging to confirm why `0` passes, then I’ll make the smallest fix and verify the boundary cases.
+The existing acceptance test reproduces the bug: `is_positive 0` succeeds because the arithmetic check uses `>= 0`. I’ll change that comparison to `> 0`.
+Changed `is_positive` in `lib/validate.sh` to require a value greater than zero. The acceptance and regression tests pass, and `bash -n` reports no syntax errors. `README.md` and `is_blank` were left unchanged.

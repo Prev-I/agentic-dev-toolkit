@@ -1,0 +1,10 @@
+{
+  "findings": [
+    {
+      "file": "api.sh",
+      "severity": "material",
+      "summary": "`public_response` returns the field `name`, but the public response contract in api_contract.sh requires `displayName`, so every response breaks the contract and any consumer that reads `displayName`.",
+      "evidence": "print(json.dumps({\"name\": sys.argv[1]}))"
+    }
+  ]
+}

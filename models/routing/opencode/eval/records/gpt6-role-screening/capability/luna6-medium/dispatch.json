@@ -1,0 +1,35 @@
+{
+  "timestamp": "2026-09-23T21:44:54.693449+02:00",
+  "label": "preflight-luna6-medium",
+  "attempt": 1,
+  "routing_profile_id": "v1-restored-2026-09",
+  "routing_profile_commit": "93c666a80030c4ed3512940c8df840ed2135f474",
+  "runtime_version": "1.18.31",
+  "eval_runner_version": "phase-r-dispatch-v1",
+  "environment": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+  "dispatch_target": "github-copilot/gpt-6-luna",
+  "variant": "medium",
+  "timeout_seconds": 120,
+  "exit_status": 0,
+  "classification": "OK",
+  "failure_class": null,
+  "provider_error_text": null,
+  "provider_status_code": null,
+  "observed_cost": 0.001670425,
+  "derived_credits": 0.16704249999999998,
+  "normalized_steady_state_cost": null,
+  "tokens": {
+    "total": 13265,
+    "input": 13232,
+    "output": 9,
+    "reasoning": 24,
+    "cache": {
+      "write": 0,
+      "read": 0
+    }
+  },
+  "wall_clock_ms": 4942,
+  "retry_count": 0,
+  "raw_evidence": "raw.jsonl",
+  "decides_gate_outcome": false
+}

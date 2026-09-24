@@ -1,0 +1,2 @@
+Using the exploration workflow to trace the shell-source dependency chain.
+{"ordered_path":["entry","facade","service","adapter","protocol"],"reported_hops":4,"terminal_symbol":"PROTOCOL_VERSION","terminal_value":"v3"}

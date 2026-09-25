@@ -190,8 +190,8 @@ requested.uv=latest
 requested.shellcheck=latest
 requested.gitleaks=latest
 requested.pyyaml=latest
-requested.openspec=1.9.0
-requested.superpowers=v6.3.0
+requested.openspec=1.13.2
+requested.superpowers=v6.4.2
 requested.karpathy-ref=2c606141936f1eeef17fa3043a72095b4765b9c2
 installed.java-17=17.0.13
 installed.java-21=21.0.5
@@ -206,7 +206,7 @@ installed.uv=0.5.11
 installed.shellcheck=0.10.0
 installed.gitleaks=8.21.2
 installed.pyyaml=6.0.2
-installed.openspec=1.9.0
+installed.openspec=1.13.2
 installed.karpathy-sha256=6e22cc54cb02a5e98ae42d06d9d7292db0c1b43894831b32879beb0166b2aea7
 RECEIPT
 }
@@ -325,7 +325,7 @@ write_baseline_openspec_stub() {
   cat > "$dest" <<STUB
 #!/usr/bin/env bash
 printf '%s\n' "\$*" >> "$log"
-printf 'openspec version 1.9.0\n'
+printf 'openspec version 1.13.2\n'
 STUB
   chmod +x "$dest"
 }

@@ -1753,7 +1753,7 @@ test_installer_version_flag() {
   status=$?
   set -e
   assert_equal "$status" "0" "--version must exit 0"
-  assert_equal "$output" "0.2.1" "--version must print exactly the version"
+  assert_equal "$output" "0.2.2" "--version must print exactly the version"
   [[ "$output" != *"Unknown option"* ]] \
     || fail "--version must be parsed before the generic unknown-option arm"
 }
@@ -1777,7 +1777,7 @@ test_installer_version_ignores_ambiguous_opencode_config() {
   set -e
 
   assert_equal "$status" "0" "--version must not resolve the OpenCode config"
-  assert_equal "$output" "0.2.1" "--version with dual configs must print exactly the version"
+  assert_equal "$output" "0.2.2" "--version with dual configs must print exactly the version"
 }
 
 test_opencode_config_resolution_honors_skip_and_explicit_override() {
@@ -2074,7 +2074,7 @@ EOF_FAKE_MISE
 
   local fake_bin="$TEMP_DIR/fake-bin-probe"
   mkdir -p "$fake_bin"
-  printf '#!/usr/bin/env bash\nprintf "OpenSpec CLI v1.9.0\\n"\n' > "$fake_bin/openspec"
+  printf '#!/usr/bin/env bash\nprintf "OpenSpec CLI v1.13.2\\n"\n' > "$fake_bin/openspec"
   chmod +x "$fake_bin/openspec"
 
   local output
@@ -2110,7 +2110,7 @@ EOF_FAKE_MISE
     || fail "gitleaks: first line, first field, leading v stripped: $output"
   [[ "$output" == *$'\ninstalled.pyyaml=6.0.1\n'* ]] \
     || fail "pyyaml: first line, first field: $output"
-  [[ "$output" == *$'\ninstalled.openspec=1.9.0\n'* ]] \
+  [[ "$output" == *$'\ninstalled.openspec=1.13.2\n'* ]] \
     || fail "openspec: first X.Y.Z match: $output"
 }
 

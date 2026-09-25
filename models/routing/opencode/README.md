@@ -179,7 +179,9 @@ It reports two severities, deliberately kept apart:
 | `DRIFT` | Routing-owned configuration keys — the top-level `model`, the top-level `permission.task`, and the declared agent rows *including their permission blocks* — plus the `permission:` frontmatter of each agent markdown this bundle ships | yes |
 | `STALE` | A support file whose prose differs while its permissions still match | no |
 
-Scope of "routing-owned" is taken verbatim from `activate-profile.sh`.
+Scope of "routing-owned" matches the profile keys copied by
+`activate-profile.sh`; activation also normalizes the legacy relative routing
+policy entry in `instructions` to its absolute user-global support-file path.
 **Everything else in your configuration is yours and is never reported** —
 your own `plugin` list, theme, or a custom agent row the targets manifest
 does not declare. A check that flagged those would cry wolf, and a check
@@ -197,13 +199,13 @@ whether the *runtime* resolves each role as declared. Alignment asks whether
 the *files on disk* still match this repository. Both are useful; neither
 subsumes the other.
 
-**`ALIGNED` is not "fully verified".** The check is bounded by the same
-routing-owned scope `activate-profile.sh` writes, so some things this bundle
-ships are deliberately outside it — notably the top-level `instructions`
-array and `permission.websearch`. A configuration that dropped its
-`instructions` entry would still report the routing policy perfectly in sync
-while the runtime never loads it. Widening the scope means widening what
-counts as "yours vs. the bundle's", which is a decision, not a bug fix.
+**`ALIGNED` is not "fully verified".** The check is bounded by the profile keys
+`activate-profile.sh` writes. The activation script's targeted normalization of
+the legacy `instructions` entry is outside that alignment scope, as is
+`permission.websearch`. A configuration that later dropped its `instructions`
+entry would still report the routing policy perfectly in sync while the runtime
+never loads it. Widening the scope means widening what counts as "yours vs. the
+bundle's", which is a decision, not a bug fix.
 
 ## 1. Verify model IDs and variants
 
@@ -289,7 +291,13 @@ tells you whether they still match this bundle.
 
 Merge `opencode.jsonc` into your existing project or global OpenCode configuration. Treat it as a fragment and do not replace unrelated configuration.
 
-If your existing configuration already has an `instructions` array, append `.opencode/model-routing.md` to it rather than replacing the existing entries.
+If your existing configuration already has an `instructions` array, append the
+routing policy without replacing the existing entries. In a project-local
+installation use `.opencode/model-routing.md`. In a user-global installation
+use the absolute path to `~/.config/opencode/model-routing.md` (expanded to the
+actual home directory): the project-relative path does not resolve to the
+user-global support file. `activate-profile.sh` converts the legacy relative
+entry in an existing global config to the absolute installed path.
 
 The fragment pins all eleven roles as follows:
 

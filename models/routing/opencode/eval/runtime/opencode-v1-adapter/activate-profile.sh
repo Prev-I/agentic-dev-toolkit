@@ -46,6 +46,7 @@ activate_profile() {
   if ! REPO_JSON=$(load_routing_profile "$repo_profile") \
   GLOBAL_JSON=$(load_routing_profile "$target") \
   TARGETS="$targets" COMMIT="$commit" STAMP="$stamp" SOURCE_HASH="$source_hash" \
+  CONFIG_ROOT="$config_root" \
     python3 - "$merged" <<'PY'
 import datetime
 import json
@@ -65,6 +66,17 @@ document.setdefault("agent", {})
 for role in roles:
     document["agent"][role] = repo["agent"][role]
 
+# Global support files live beside the global config, not in each project.
+# Normalize only this bundle's legacy relative path; preserve other entries.
+legacy_policy = ".opencode/model-routing.md"
+instructions = document.get("instructions", [])
+if legacy_policy in instructions:
+    document["instructions"] = [
+        os.path.abspath(os.path.join(os.environ["CONFIG_ROOT"], "model-routing.md"))
+        if item == legacy_policy else item
+        for item in instructions
+    ]
+
 undeclared = sorted(set(document["agent"]) - set(roles))
 header = [
     "// OpenCode V1 routing - activated profile. Generated file.",
@@ -77,9 +89,10 @@ header = [
     f"// activation_stamp: {os.environ['STAMP']}",
     "//",
     "// Routing-owned keys (model, permission.task, and the eleven agent rows)",
-    "// come from the repository profile. Every other setting was preserved from",
-    "// the previous user-global configuration. The pre-activation file, with its",
-    "// original comments, is retained verbatim in the routing backup directory.",
+    "// come from the repository profile. The legacy relative routing-policy path",
+    "// is normalized for the global install; every other setting was preserved.",
+    "// The pre-activation file, with its original comments, is retained verbatim",
+    "// in the routing backup directory.",
 ]
 if undeclared:
     header += ["//", f"// NOTE: undeclared agent rows preserved unchanged: {', '.join(undeclared)}"]

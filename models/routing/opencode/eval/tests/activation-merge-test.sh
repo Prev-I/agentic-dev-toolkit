@@ -52,6 +52,7 @@ PY
 python3 - "$config_root/opencode.jsonc" "$root/manifests/current-routing-targets.json" \
          "$backup_dir/opencode.jsonc" "$root/runtime/opencode-v1-adapter/load-routing-profile.sh" <<'PY'
 import json
+from pathlib import Path
 import re
 import subprocess
 import sys
@@ -79,7 +80,11 @@ assert activated["plugin"] == ["superpowers@git+https://github.com/obra/superpow
 assert activated["mcp"]["example"]["url"] == "https://example.invalid/mcp"
 assert activated["theme"] == "opencode"
 assert activated["permission"]["websearch"] == "allow"
-assert activated["instructions"] == [".opencode/model-routing.md", "docs/house-style.md"]
+assert activated["instructions"] == [
+    str(Path(activated_path).parent / 'model-routing.md'),
+    "docs/house-style.md",
+]
+assert Path(activated["instructions"][0]).is_absolute()
 
 # An agent row NOT among the eleven declared roles survives byte-for-byte.
 assert activated["agent"]["custom-agent"] == {
@@ -117,6 +122,29 @@ activate_profile --repo-profile "$root/../opencode.jsonc" \
                  --targets "$root/manifests/current-routing-targets.json" \
                  --config-root "$config_root" --backup-root "$backup_root" --dry-run >/dev/null
 assert_eq "$before" "$(sha256sum "$config_root/opencode.jsonc" | cut -d' ' -f1)"
+
+# A relative config root must still install an absolute support-file path.
+relative_root="$workspace/relative-root"
+mkdir -p "$relative_root/config" "$relative_root/backups"
+cp "$backup_dir/opencode.jsonc" "$relative_root/config/opencode.jsonc"
+(
+  cd "$relative_root"
+  activate_profile --repo-profile "$root/../opencode.jsonc" \
+                   --targets "$root/manifests/current-routing-targets.json" \
+                   --config-root config --backup-root backups >/dev/null
+)
+python3 - "$relative_root/config/opencode.jsonc" <<'PY'
+import json
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+payload = re.sub(r'^\s*//.*$', '', path.read_text(), flags=re.MULTILINE)
+activated = json.loads(payload)
+assert activated["instructions"][0] == str(path.parent / "model-routing.md")
+assert Path(activated["instructions"][0]).is_absolute()
+PY
 
 # source_commit resolves relative to the repository owning --repo-profile,
 # not the caller's cwd. Prove it by invoking from inside an unrelated git

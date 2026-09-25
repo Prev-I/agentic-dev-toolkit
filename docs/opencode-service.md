@@ -11,7 +11,6 @@ device genuinely needs to reach the server.
 Placeholders used throughout: `<USER>` the Linux account, `<PORT>` the server
 port (`4096` below), `<HOSTNAME>` the DNS name the LAN resolves to the
 workstation, `<LAN_SUBNET>` the home or office subnet in CIDR form,
-`<NODE_DIR>` the directory containing the pinned Node binary, and
 `<BOT_VERSION>` the pinned `@grinev/opencode-telegram-bot` version.
 
 ## Policy
@@ -468,11 +467,12 @@ install -d -m 700 ~/.config/opencode-runtime
 install -m 600 /dev/null ~/.config/opencode-runtime/secrets.env
 ```
 
-It holds the server's Basic-auth username and password. A sidecar may read the
-same file for those credentials and for its own token, but the server does not
-need a channel token. `EnvironmentFile` keeps every secret out of `ExecStart` —
-a process argument list is world-readable via `/proc`, an environment file is
-not.
+It holds only the server's Basic-auth username and password. The Telegram
+sidecar reads the same file for Basic auth and keeps its own token in its
+dedicated environment file. Do not put channel tokens in this common file:
+server-spawned tools inherit its environment. `EnvironmentFile` keeps every
+secret out of `ExecStart` — a process argument list is world-readable via
+`/proc`, an environment file is not.
 
 Verify the file never became readable to others, and that auth is actually on:
 
@@ -549,14 +549,23 @@ install -m 600 /dev/null \
   ~/.config/opencode-runtime/opencode-telegram-bot.env
 ```
 
-The common `secrets.env` supplies `TELEGRAM_BOT_TOKEN` and the OpenCode Basic
-credentials. The second, non-secret environment file supplies deployment
+The common `secrets.env` supplies only the OpenCode Basic credentials. The
+second, bot-only environment file supplies `TELEGRAM_BOT_TOKEN` and deployment
 settings such as `TELEGRAM_ALLOWED_USER_ID`,
 `OPENCODE_API_URL=http://127.0.0.1:4096`, and
 `OPENCODE_AUTO_RESTART_ENABLED=false`. The last setting is load-bearing:
 systemd owns the server, so the bot must not try to replace it. Keep both files
-mode `600`; an allowlisted user ID is not a token, but there is no reason to
-publish it.
+mode `600`; the bot-only file contains a live token.
+
+For an existing installation that kept `TELEGRAM_BOT_TOKEN` in the common file,
+move the assignment to `opencode-telegram-bot.env`, remove it from
+`secrets.env`, and restart both services so the server drops the inherited
+token. Verify absence without printing the value:
+
+```bash
+grep -c '^TELEGRAM_BOT_TOKEN=' ~/.config/opencode-runtime/secrets.env  # expect: 0
+systemctl --user restart opencode.service opencode-telegram-bot.service
+```
 
 `~/.config/systemd/user/opencode-telegram-bot.service`:
 
@@ -574,13 +583,13 @@ WorkingDirectory=%h/.config/opencode-telegram-bot
 RuntimeDirectory=opencode-telegram-bot
 UMask=0077
 
-Environment="PATH=<NODE_DIR>:%h/.opencode/bin:%h/.local/bin:/usr/bin:/bin"
+Environment="PATH=%h/.local/share/mise/installs/node/24/bin:%h/.opencode/bin:%h/.local/bin:/usr/bin:/bin"
 Environment="TELEGRAM_READY_TIMEOUT=60"
 EnvironmentFile=%h/.config/opencode-runtime/secrets.env
 EnvironmentFile=%h/.config/opencode-runtime/opencode-telegram-bot.env
 
 # The direct entrypoint exits on startup errors. --no-fork keeps Node as MainPID.
-ExecStart=/usr/bin/flock --nonblock --no-fork %t/opencode-telegram-bot/instance.lock <NODE_DIR>/node %h/.local/share/opencode-telegram-bot/releases/<BOT_VERSION>/node_modules/@grinev/opencode-telegram-bot/dist/index.js --mode installed
+ExecStart=/usr/bin/flock --nonblock --no-fork %t/opencode-telegram-bot/instance.lock %h/.local/share/mise/installs/node/24/bin/node %h/.local/share/opencode-telegram-bot/releases/<BOT_VERSION>/node_modules/@grinev/opencode-telegram-bot/dist/index.js --mode installed
 ExecStartPost=%h/.local/libexec/opencode/opencode-telegram-ready
 
 Restart=on-failure
@@ -594,13 +603,15 @@ WantedBy=default.target
 
 `Wants=` is deliberately weaker than `Requires=`: an OpenCode failure does not
 tear down the bot, and systemd can recover either service independently.
+The mise major-version link follows updates within Node 24; verify it resolves
+before starting the sidecar, and update the unit when changing Node majors.
 `flock --no-fork` keeps Node as the service's main process and guards starts that
 use the same lock. It cannot stop the old gateway or an arbitrary manual client;
 operationally, singleton polling still depends on disabling every other poller.
 The readiness helper requires both authenticated OpenCode health and a
 `Bot @… started!` journal marker from the current systemd invocation. That marker
-is vendor output, so verify it when upgrading the bot. A bot or Node upgrade also
-requires updating the two pinned paths in the unit.
+is vendor output, so verify it when upgrading the bot. A bot release or Node
+major upgrade requires updating its pinned path in the unit.
 
 The bot owns `~/.config/opencode-telegram-bot/settings.json`, including scheduled
 tasks and a directory cache. Back it up, but do not use the cache as declarative
@@ -618,9 +629,10 @@ rm ~/.config/systemd/user/opencode-telegram-bot.service
 systemctl --user daemon-reload
 ```
 
-Keep the versioned release, environment file, settings and readiness helper
-until the rollback window closes; they are harmless while the unit is absent
-and make restoration deterministic.
+Keep the versioned release, bot-only environment file, settings and readiness
+helper until the rollback window closes to make restoration deterministic.
+The disabled environment file still contains a live token and remains a
+credential until it is retired.
 
 ```bash
 systemctl --user daemon-reload

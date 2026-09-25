@@ -5,7 +5,7 @@
   // Do not replace unrelated configuration, and append to an existing
   // instructions array rather than replacing it.
   //
-  // User-approved selection: docs/decisions/2026-09-25-plan-breakglass-alignment.md.
+  // User-approved selection: docs/decisions/2026-09-25-navigation-model-alignment.md.
   // Targets: eval/manifests/current-routing-targets.json.
   // Historical Phase-R profile remains in profiles/v1-restored-2026-09.jsonc.
   //
@@ -87,13 +87,13 @@
 
     "explore": {
       // Codebase discovery, search, and context gathering.
-      "model": "github-copilot/gpt-5.6-luna",
+      "model": "github-copilot/gpt-6-luna",
       "variant": "medium"
     },
 
     "scout": {
       // Targeted lookup and fact-finding across repositories.
-      "model": "github-copilot/gpt-5.6-luna",
+      "model": "github-copilot/gpt-6-luna",
       "variant": "low"
     },
 

@@ -24,7 +24,7 @@ cat >"$config_root/opencode.jsonc" <<'JSONC'
     "scout": { "model": "github-copilot/gpt-5.3-codex", "variant": "high" },
     "custom-agent": { "model": "some-vendor/some-model", "note": "not one of the eleven declared roles" }
   },
-  "plugin": ["superpowers@git+https://github.com/obra/superpowers.git#v6.3.0"],
+  "plugin": ["superpowers@git+https://github.com/obra/superpowers.git#v6.4.2"],
   "mcp": { "example": { "type": "remote", "url": "https://example.invalid/mcp" } },
   "theme": "opencode"
 }
@@ -76,7 +76,7 @@ for role, target in targets["agents"].items():
 assert activated["permission"]["task"]["breakglass"] == "deny", activated["permission"]
 
 # Everything unrelated is preserved verbatim.
-assert activated["plugin"] == ["superpowers@git+https://github.com/obra/superpowers.git#v6.3.0"]
+assert activated["plugin"] == ["superpowers@git+https://github.com/obra/superpowers.git#v6.4.2"]
 assert activated["mcp"]["example"]["url"] == "https://example.invalid/mcp"
 assert activated["theme"] == "opencode"
 assert activated["permission"]["websearch"] == "allow"

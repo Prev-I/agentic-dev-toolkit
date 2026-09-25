@@ -26,10 +26,11 @@ source "$alignment_root/load-routing-profile.sh"
 # different question (does the RUNTIME resolve roles as declared?); this one
 # asks whether the FILES on disk still match the repository.
 #
-# Scope of "routing-owned" is taken verbatim from activate-profile.sh:
-# the top-level `model`, the top-level `permission.task`, and the declared
-# agent rows -- whole objects, including their permission blocks. Every
-# other key in the live configuration is user-owned and is never reported.
+# Scope of "routing-owned" covers the profile keys copied by
+# activate-profile.sh: the top-level `model`, the top-level `permission.task`,
+# and the declared agent rows -- whole objects, including their permission
+# blocks. The script's targeted normalization of the legacy `instructions`
+# entry is outside this check; every other key is user-owned and unreported.
 
 check_alignment() {
   local profile="" targets="" bundle_root="" live_config="" live_support="" json_out=""
@@ -84,8 +85,8 @@ def render(value):
     return json.dumps(value, indent=2, sort_keys=True)
 
 # --- routing-owned configuration keys -------------------------------------
-# activate-profile.sh writes exactly these from the repository profile;
-# everything else in the live file is user-owned and deliberately ignored.
+# activate-profile.sh copies these from the repository profile; everything
+# else in the live file is deliberately ignored by the alignment check.
 
 if repo.get("model") != live.get("model"):
     drift.append({

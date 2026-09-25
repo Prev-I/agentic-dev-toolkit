@@ -23,17 +23,17 @@ state, not runtime capability state.
 
 ## Model Family Assignments
 
-The Plan and Breakglass alignment profile of 2026-09-25 assigns these roles.
-The Plan, Build, General, Reviewer, and Breakglass updates are monitored choices
-informed by capability or role-specific screening, not claims of general model
-superiority:
+The navigation alignment profile of 2026-09-25 assigns these roles. The Plan,
+Build, General, Explore, Scout, Reviewer, and Breakglass updates are monitored
+choices informed by capability or role-specific screening, not claims of general
+model superiority:
 
 | Family | Strengths | Assigned Roles |
 |--------|-----------|----------------|
 | **Claude Opus 5.5** | Planning and independent review | plan, reviewer (Copilot) |
 | **GPT-5.6 Terra** | Context summarization | compaction |
-| **GPT-5.6 Luna** | Fast retrieval and broad pattern matching | explore, scout, title, summary |
-| **GPT-6 Luna** | Cost-efficient bounded execution | general (Copilot) |
+| **GPT-5.6 Luna** | Lightweight session metadata | title, summary |
+| **GPT-6 Luna** | Cost-efficient bounded execution and navigation | general, explore, scout (Copilot) |
 | **GPT-6 Sol** | Implementation and human-only recovery | build (Copilot), breakglass (direct OpenAI) |
 | **GPT-6 Astra** | Escalation-only advice | expert (direct OpenAI subscription) |
 

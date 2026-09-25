@@ -13,14 +13,14 @@ The routing policy is loaded through OpenCode's `instructions` setting; it does 
 
 | Role | OpenCode agent | Model | Variant |
 |---|---|---|---|
-| Planning/design | `plan` | `github-copilot/claude-opus-5` | `max` |
+| Planning/design | `plan` | `github-copilot/claude-opus-5.5` | `max` |
 | Primary build/controller | `build` | `github-copilot/gpt-6-sol` | `high` |
 | Delegated implementation/debugging | `general` | `github-copilot/gpt-6-luna` | `high` |
 | Local codebase exploration | `explore` | `github-copilot/gpt-5.6-luna` | `medium` |
 | External/upstream research | `scout` | `github-copilot/gpt-5.6-luna` | `low` |
 | Independent review | `reviewer` | `github-copilot/claude-opus-5.5` | `high` |
 | Escalation-only expert | `expert` | `openai/gpt-6-astra` | `xhigh` |
-| Human-only breakglass | `breakglass` | `openai/gpt-5.6-sol` | `max` |
+| Human-only breakglass | `breakglass` | `openai/gpt-6-sol` | `max` |
 | Context compaction | `compaction` | `github-copilot/gpt-5.6-terra` | `medium` |
 | Session title | `title` | `github-copilot/gpt-5.6-luna` | `low` |
 | Session summary | `summary` | `github-copilot/gpt-5.6-luna` | `low` |
@@ -35,17 +35,17 @@ can delegate. `hidden` is not treated as a security property anywhere in this
 bundle.
 
 Build and Reviewer use different model families. Expert stays on the existing
-direct OpenAI subscription connection; normal work stays on Copilot. Plan still
-shares the Opus family with Reviewer. All permissions and Breakglass remain
+direct OpenAI subscription connection; normal work stays on Copilot. Plan now
+shares Opus 5.5 with Reviewer. All permissions and Breakglass boundaries remain
 unchanged.
 
-The [2026-09-24 cost-optimized selection](docs/decisions/2026-09-24-cost-optimized-routing.md)
-supersedes the 2026-09-07 selection for current use. It is a monitored cost-first
+The [2026-09-25 Plan and Breakglass alignment](docs/decisions/2026-09-25-plan-breakglass-alignment.md)
+extends the cost-optimized selection for current use. It is a monitored routing
 choice, not a claim of general model superiority.
 `eval/manifests/current-routing-targets.json` declares the current targets; the
 default model follows Build (Copilot GPT-6 Sol).
-The three changed targets have fresh capability and role-screening evidence;
-Direct OpenAI Astra inference and Expert-role fitness remain unverified, an
+Five of the six current-profile role substitutions have fresh capability or
+role-screening evidence; direct OpenAI Astra inference and Expert-role fitness remain unverified, an
 exception to the usual capability-probe prerequisite below.
 
 ## Routing migration
@@ -231,13 +231,12 @@ installed runtime and then confirm usable capability with a trivial successful
 call:
 
 ```text
-github-copilot/claude-opus-5
 github-copilot/claude-opus-5.5
 github-copilot/gpt-6-luna
 github-copilot/gpt-5.6-luna
 github-copilot/gpt-5.6-terra
 github-copilot/gpt-6-sol
-openai/gpt-5.6-sol
+openai/gpt-6-sol
 openai/gpt-6-astra
 ```
 
@@ -279,8 +278,8 @@ alignment check inspects:
 
 `reviewer` is independent and read-only on Copilot Opus 5.5/high. `expert` uses
 direct OpenAI Astra/xhigh, is hidden, read-only, cannot spawn subagents, and is
-capped at six agentic steps. Build uses Copilot GPT-6 Sol/high; Breakglass retains
-direct OpenAI Sol/max as a human-selected primary.
+capped at six agentic steps. Build uses Copilot GPT-6 Sol/high; Breakglass uses
+direct OpenAI GPT-6 Sol/max as a human-selected primary.
 
 These are copies. After installing them — and after any later change to
 either side — [the alignment check](#alignment-check--is-the-installed-configuration-still-this-bundle)
@@ -295,14 +294,14 @@ If your existing configuration already has an `instructions` array, append `.ope
 The fragment pins all eleven roles as follows:
 
 ```text
-plan       -> Claude Opus 5 (Copilot)     max
+plan       -> Claude Opus 5.5 (Copilot)   max
 build      -> GPT-6 Sol (Copilot)         high
 general    -> GPT-6 Luna (Copilot)        high
 explore    -> GPT-5.6 Luna (Copilot)      medium
 scout      -> GPT-5.6 Luna (Copilot)      low
 reviewer   -> Claude Opus 5.5 (Copilot)   high
 expert     -> GPT-6 Astra (direct OpenAI) xhigh
-breakglass -> GPT-5.6 Sol (direct OpenAI) max
+breakglass -> GPT-6 Sol (direct OpenAI)   max
 compaction -> GPT-5.6 Terra (Copilot)     medium
 title      -> GPT-5.6 Luna (Copilot)      low
 summary    -> GPT-5.6 Luna (Copilot)      low

@@ -5,7 +5,7 @@
   // Do not replace unrelated configuration, and append to an existing
   // instructions array rather than replacing it.
   //
-  // User-approved selection: docs/decisions/2026-09-24-cost-optimized-routing.md.
+  // User-approved selection: docs/decisions/2026-09-25-plan-breakglass-alignment.md.
   // Targets: eval/manifests/current-routing-targets.json.
   // Historical Phase-R profile remains in profiles/v1-restored-2026-09.jsonc.
   //
@@ -38,10 +38,10 @@
 
     "plan": {
       // Architectural planning and task decomposition.
-      // Variant `max` is the Phase-0 verified highest supported Opus effort
-      // (eval/records/claude-opus-5-max.json, classification USABLE).
+      // Variant `max` is capability-verified for Opus 5.5 in
+      // eval/records/plan-breakglass-alignment/.
       "mode": "primary",
-      "model": "github-copilot/claude-opus-5",
+      "model": "github-copilot/claude-opus-5.5",
       "variant": "max",
       "permission": {
         "edit": "deny",
@@ -145,7 +145,7 @@
       // Human-selected primary only. Never Task-routable; the deny rules
       // above are the control. `hidden` is not a security property.
       "mode": "primary",
-      "model": "openai/gpt-5.6-sol",
+      "model": "openai/gpt-6-sol",
       "variant": "max",
       "permission": {
         "edit": "deny",

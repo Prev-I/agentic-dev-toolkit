@@ -17,6 +17,8 @@ for role, model in {
     "plan": "github-copilot/claude-opus-5.5",
     "build": "github-copilot/gpt-6-sol",
     "general": "github-copilot/gpt-6-luna",
+    "explore": "github-copilot/gpt-6-luna",
+    "scout": "github-copilot/gpt-6-luna",
     "reviewer": "github-copilot/claude-opus-5.5",
     "expert": "openai/gpt-6-astra",
     "breakglass": "openai/gpt-6-sol",
@@ -24,8 +26,8 @@ for role, model in {
     expected["agent"][role]["model"] = model
 assert current == expected, "Only approved models/default may change; preserve all permissions and other roles"
 targets = json.load(open(sys.argv[1], encoding="utf-8"))
-assert targets["profile_id"] == "v3-aligned-plan-breakglass-2026-09-25"
-assert targets["decision_reference"] == "docs/decisions/2026-09-25-plan-breakglass-alignment.md"
+assert targets["profile_id"] == "v4-aligned-navigation-2026-09-25"
+assert targets["decision_reference"] == "docs/decisions/2026-09-25-navigation-model-alignment.md"
 assert targets["routing_authority"] == "opencode.jsonc agent block"
 assert targets["markdown_agents_carry_routing_fields"] is False
 assert targets["default_model"] == current["model"]
@@ -37,6 +39,8 @@ for role, target in targets["agents"].items():
             assert row.get(field) == target[field], (role, field)
 records = {
     "plan": "plan-breakglass-alignment/capability/plan-opus55-max/dispatch.json",
+    "explore": "gpt6-role-screening/recovery/explore/pair1-arm2-luna6/dispatch/dispatch.json",
+    "scout": "navigation-model-alignment/capability/scout-luna6-low/dispatch.json",
     "breakglass": "plan-breakglass-alignment/capability/breakglass-sol6-max/dispatch.json",
 }
 records_root = os.path.join(os.path.dirname(sys.argv[1]), "..", "records")
@@ -47,5 +51,11 @@ for role, relative in records.items():
     assert record["variant"] == target["variant"], role
     assert record["classification"] == "OK", role
     assert record["provider_error_text"] is None, role
+adjudication = json.load(open(os.path.join(records_root, "gpt6-role-screening", "adjudication.json"), encoding="utf-8"))
+explore_result = next(
+    item for item in adjudication["results"]["explore"]["workloads"]
+    if item["model"] == "gpt-6-luna"
+)
+assert explore_result["gate_passed"] is True
 print("PASS: current routing changes only approved models/default")
 PY

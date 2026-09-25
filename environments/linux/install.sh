@@ -12,7 +12,7 @@ readonly KARPATHY_RAW_BASE='https://raw.githubusercontent.com/multica-ai/andrej-
 readonly KARPATHY_SKILL_PATH='skills/karpathy-guidelines/SKILL.md'
 # The installer's own version, declared with the other constants for parity
 # with the repository's other versioned scripts. Printed verbatim by --version.
-readonly SCRIPT_VERSION="0.2.1"
+readonly SCRIPT_VERSION="0.2.2"
 
 log() {
   printf '\n==> %s\n' "$*"
@@ -2403,7 +2403,7 @@ Manual steps after installation:
   5. Install Superpowers separately in Claude Code and Codex using each
      harness's plugin/skill installation mechanism.
 $karpathy_note
-  6. For the streamlined OpenSpec 1.9.0 workflow, run once:
+  6. For the streamlined OpenSpec workflow, run once:
        openspec config profile core
    7. To initialize or update OpenSpec for a specific Git project, run:
         ./$SCRIPT_NAME --project <path>

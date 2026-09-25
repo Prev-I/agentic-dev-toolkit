@@ -1,0 +1,35 @@
+{
+  "timestamp": "2026-09-25T12:11:00.869666+02:00",
+  "label": "breakglass-sol6-max",
+  "attempt": 1,
+  "routing_profile_id": "v1-restored-2026-09",
+  "routing_profile_commit": "897fb34228983d22843e10ef0d4849828ca866e1",
+  "runtime_version": "1.18.32",
+  "eval_runner_version": "phase-r-dispatch-v1",
+  "environment": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+  "dispatch_target": "openai/gpt-6-sol",
+  "variant": "max",
+  "timeout_seconds": 120,
+  "exit_status": 0,
+  "classification": "OK",
+  "failure_class": null,
+  "provider_error_text": null,
+  "provider_status_code": null,
+  "observed_cost": 0,
+  "derived_credits": null,
+  "normalized_steady_state_cost": null,
+  "tokens": {
+    "total": 15200,
+    "input": 15170,
+    "output": 9,
+    "reasoning": 21,
+    "cache": {
+      "write": 0,
+      "read": 0
+    }
+  },
+  "wall_clock_ms": 10732,
+  "retry_count": 0,
+  "raw_evidence": "raw.jsonl",
+  "decides_gate_outcome": false
+}

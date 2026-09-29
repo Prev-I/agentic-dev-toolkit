@@ -14,7 +14,7 @@ The routing policy is loaded through OpenCode's `instructions` setting; it does 
 | Role | OpenCode agent | Model | Variant |
 |---|---|---|---|
 | Planning/design | `plan` | `github-copilot/claude-opus-5.5` | `max` |
-| Primary build/controller | `build` | `github-copilot/gpt-6-sol` | `high` |
+| Primary build/controller | `build` | `github-copilot/gpt-5.6-sol` | `high` |
 | Delegated implementation/debugging | `general` | `github-copilot/gpt-6-luna` | `high` |
 | Local codebase exploration | `explore` | `github-copilot/gpt-6-luna` | `medium` |
 | External/upstream research | `scout` | `github-copilot/gpt-6-luna` | `low` |
@@ -39,11 +39,11 @@ direct OpenAI subscription connection; normal work stays on Copilot. Plan now
 shares Opus 5.5 with Reviewer. All permissions and Breakglass boundaries remain
 unchanged.
 
-The [2026-09-25 navigation alignment](docs/decisions/2026-09-25-navigation-model-alignment.md)
-extends the Plan and Breakglass alignment for current use. It is a monitored routing
+The [2026-09-29 Build rollback](docs/decisions/2026-09-29-build-model-rollback.md)
+extends the navigation alignment for current use. It is a monitored routing
 choice, not a claim of general model superiority.
 `eval/manifests/current-routing-targets.json` declares the current targets; the
-default model follows Build (Copilot GPT-6 Sol).
+default model follows Build (Copilot GPT-5.6 Sol).
 Seven of the eight current-profile role substitutions have fresh capability or
 role-screening evidence; direct OpenAI Astra inference and Expert-role fitness remain unverified, an
 exception to the usual capability-probe prerequisite below.
@@ -237,7 +237,7 @@ github-copilot/claude-opus-5.5
 github-copilot/gpt-6-luna
 github-copilot/gpt-5.6-luna
 github-copilot/gpt-5.6-terra
-github-copilot/gpt-6-sol
+github-copilot/gpt-5.6-sol
 openai/gpt-6-sol
 openai/gpt-6-astra
 ```
@@ -280,7 +280,7 @@ alignment check inspects:
 
 `reviewer` is independent and read-only on Copilot Opus 5.5/high. `expert` uses
 direct OpenAI Astra/xhigh, is hidden, read-only, cannot spawn subagents, and is
-capped at six agentic steps. Build uses Copilot GPT-6 Sol/high; Breakglass uses
+capped at six agentic steps. Build uses Copilot GPT-5.6 Sol/high; Breakglass uses
 direct OpenAI GPT-6 Sol/max as a human-selected primary.
 
 These are copies. After installing them — and after any later change to
@@ -303,7 +303,7 @@ The fragment pins all eleven roles as follows:
 
 ```text
 plan       -> Claude Opus 5.5 (Copilot)   max
-build      -> GPT-6 Sol (Copilot)         high
+build      -> GPT-5.6 Sol (Copilot)       high
 general    -> GPT-6 Luna (Copilot)        high
 explore    -> GPT-6 Luna (Copilot)        medium
 scout      -> GPT-6 Luna (Copilot)        low

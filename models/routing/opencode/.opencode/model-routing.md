@@ -23,7 +23,7 @@ state, not runtime capability state.
 
 ## Model Family Assignments
 
-The navigation alignment profile of 2026-09-25 assigns these roles. The Plan,
+The build quality rollback profile of 2026-09-29 assigns these roles. The Plan,
 Build, General, Explore, Scout, Reviewer, and Breakglass updates are monitored
 choices informed by capability or role-specific screening, not claims of general
 model superiority:
@@ -34,7 +34,8 @@ model superiority:
 | **GPT-5.6 Terra** | Context summarization | compaction |
 | **GPT-5.6 Luna** | Lightweight session metadata | title, summary |
 | **GPT-6 Luna** | Cost-efficient bounded execution and navigation | general, explore, scout (Copilot) |
-| **GPT-6 Sol** | Implementation and human-only recovery | build (Copilot), breakglass (direct OpenAI) |
+| **GPT-5.6 Sol** | Primary implementation | build (Copilot) |
+| **GPT-6 Sol** | Human-only recovery | breakglass (direct OpenAI) |
 | **GPT-6 Astra** | Escalation-only advice | expert (direct OpenAI subscription) |
 
 Role-to-model assignment lives in `opencode.jsonc`. This document assigns work
@@ -51,8 +52,9 @@ share the Opus family, so this does not provide independent-family review of pla
 Expert uses Astra through direct OpenAI, preserving provider/quota separation
 from Copilot. Build and Expert remain within the broader GPT family; provider
 diversity does not guarantee cognitive independence.
-Breakglass and Build both use GPT-6 Sol, so Breakglass provides provider and
-credential isolation rather than model-generation independence.
+Breakglass and Build use different Sol generations and providers, providing
+model-generation, provider, and credential separation, though both remain in
+the broader GPT family.
 
 ## Role Descriptions
 

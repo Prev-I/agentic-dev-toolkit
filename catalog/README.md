@@ -80,4 +80,6 @@ not vary between runs of the same input.
 optional enhancement, and there is no fallback to literal defaults. The
 catalog file ships as part of this repository and is bundled with
 `install.sh` wherever the installer is distributed — the two are not meant to
-be separated.
+be separated. In a repository checkout the installer loads
+`catalog/software-catalog.env`; in a standalone two-file bundle it loads
+`software-catalog.env` beside the script. `ADT_CATALOG_FILE` overrides both.

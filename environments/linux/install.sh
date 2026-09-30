@@ -12,7 +12,7 @@ readonly KARPATHY_RAW_BASE='https://raw.githubusercontent.com/multica-ai/andrej-
 readonly KARPATHY_SKILL_PATH='skills/karpathy-guidelines/SKILL.md'
 # The installer's own version, declared with the other constants for parity
 # with the repository's other versioned scripts. Printed verbatim by --version.
-readonly SCRIPT_VERSION="0.2.2"
+readonly SCRIPT_VERSION="0.2.3"
 
 log() {
   printf '\n==> %s\n' "$*"
@@ -78,10 +78,24 @@ trap on_error ERR
 
 # Diagnostics and traps are defined above this point on purpose: resolving the
 # root is I/O and can fail, and a failure there must be reportable.
-ADT_INSTALL_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)" ||
+ADT_INSTALL_ROOT="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)" ||
   die "cannot resolve the toolkit root from ${BASH_SOURCE[0]}"
 readonly ADT_INSTALL_ROOT
-ADT_CATALOG_FILE="${ADT_CATALOG_FILE:-$ADT_INSTALL_ROOT/catalog/software-catalog.env}"
+ADT_INSTALL_SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)" ||
+  die "cannot resolve the installer directory from ${BASH_SOURCE[0]}"
+readonly ADT_INSTALL_SCRIPT_DIR
+ADT_REPOSITORY_LAYOUT=0
+if [[ "$ADT_INSTALL_SCRIPT_DIR" == "$ADT_INSTALL_ROOT/environments/linux" ]]; then
+  ADT_REPOSITORY_LAYOUT=1
+fi
+readonly ADT_REPOSITORY_LAYOUT
+if [[ -z "${ADT_CATALOG_FILE:-}" ]]; then
+  ADT_CATALOG_FILE="$ADT_INSTALL_SCRIPT_DIR/software-catalog.env"
+  if (( ADT_REPOSITORY_LAYOUT == 1 )) &&
+    [[ -r "$ADT_INSTALL_ROOT/catalog/software-catalog.env" ]]; then
+    ADT_CATALOG_FILE="$ADT_INSTALL_ROOT/catalog/software-catalog.env"
+  fi
+fi
 
 # CATALOG_LINES, CATALOG_ORDER and CATALOG_ERROR are populated by name
 # through load_kv_file's namerefs; shellcheck cannot trace that indirection.
@@ -1028,7 +1042,7 @@ install_opencode() {
 
   log "Installing or updating OpenCode with the official installer"
   if (( DRY_RUN == 1 )); then
-    info "Would install OpenCode into $HOME/.local/bin from $OPENCODE_INSTALL_URL."
+    info "Would install OpenCode from $OPENCODE_INSTALL_URL."
     return
   fi
 
@@ -1036,7 +1050,12 @@ install_opencode() {
   download_installer "$OPENCODE_INSTALL_URL"
   installer="$DOWNLOADED_INSTALLER"
   mkdir -p "$HOME/.local/bin"
+  # Current releases use ~/.opencode/bin; keep XDG_BIN_DIR for releases that
+  # honor the requested shared binary directory.
   XDG_BIN_DIR="$HOME/.local/bin" bash "$installer" --no-modify-path
+  prepend_path "$HOME/.opencode/bin"
+  prepend_path "$HOME/.local/bin"
+  export PATH
   hash -r
   command -v opencode >/dev/null 2>&1 || die "OpenCode installation completed but 'opencode' is not on PATH"
 }
@@ -2139,13 +2158,26 @@ write_installed_versions() {
 # it is integrity provenance, never a requested value), then installed.* in
 # catalog order. Called directly by tests and, in production, only through
 # write_install_receipt, which redirects it into the atomic temp file.
-write_receipt_body() {
+source_commit_for_root() {
+  local root=$1
   local source_commit="unknown"
-  if git -C "$ADT_INSTALL_ROOT" rev-parse HEAD >/dev/null 2>&1; then
-    source_commit="$(git -C "$ADT_INSTALL_ROOT" rev-parse HEAD)"
-    if [[ -n "$(git -C "$ADT_INSTALL_ROOT" status --porcelain 2>/dev/null)" ]]; then
+  local git_root
+  git_root="$(git -C "$root" rev-parse --show-toplevel 2>/dev/null || true)"
+  if [[ "$git_root" == "$root" ]] &&
+    git -C "$root" rev-parse HEAD >/dev/null 2>&1; then
+    source_commit="$(git -C "$root" rev-parse HEAD)"
+    if [[ -n "$(git -C "$root" status --porcelain 2>/dev/null)" ]]; then
       source_commit="$source_commit-dirty"
     fi
+  fi
+
+  printf '%s\n' "$source_commit"
+}
+
+write_receipt_body() {
+  local source_commit="unknown"
+  if (( ADT_REPOSITORY_LAYOUT == 1 )); then
+    source_commit="$(source_commit_for_root "$ADT_INSTALL_ROOT")"
   fi
 
   printf 'script-version=%s\n' "$SCRIPT_VERSION"

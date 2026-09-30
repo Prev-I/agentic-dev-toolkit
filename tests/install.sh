@@ -223,8 +223,7 @@ load_installer_functions() {
   printf '%s\n' "${installer_lines[@]}" > "$TEMP_DIR/install-functions.sh"
 
   # The installer resolves its catalog relative to its own location. The copied
-  # body sits in the temporary directory, so ../.. lands in the system temporary
-  # tree rather than the repository; the seam names the repository's catalog.
+  # body has no adjacent catalog, so the seam names the repository's catalog.
   ADT_CATALOG_FILE="${ADT_CATALOG_FILE:-$REPOSITORY_ROOT/catalog/software-catalog.env}"
   export ADT_CATALOG_FILE
 
@@ -1732,6 +1731,110 @@ test_installer_dies_on_a_missing_catalog() {
   [[ "$output" == *"cannot read "* ]] || fail "unexpected output: $output"
 }
 
+test_installer_loads_catalog_beside_a_standalone_copy() {
+  local bundle="$TEMP_DIR/standalone-parent/downloads/standalone-bundle"
+  local output status
+  mkdir -p "$bundle" "$TEMP_DIR/standalone-parent/catalog"
+  cp "$INSTALLER" "$bundle/install.sh"
+  cp "$CATALOG_FILE" "$bundle/software-catalog.env"
+  printf '%s\n' 'not a valid catalog' \
+    > "$TEMP_DIR/standalone-parent/catalog/software-catalog.env"
+
+  if output="$(env -u ADT_CATALOG_FILE bash "$bundle/install.sh" --version 2>&1)"; then
+    status=0
+  else
+    status=$?
+  fi
+
+  assert_equal "$status" "0" "a standalone two-file bundle must find its adjacent catalog"
+  assert_equal "$output" "0.2.3" "the standalone bundle must run the copied installer"
+}
+
+test_installer_prefers_explicit_then_repository_catalog() {
+  local root="$TEMP_DIR/catalog-precedence"
+  local bundle="$root/standalone"
+  local checkout="$root/checkout"
+  local output status
+
+  mkdir -p "$bundle" "$checkout/environments/linux" "$checkout/catalog"
+  cp "$INSTALLER" "$bundle/install.sh"
+  printf '%s\n' 'not a valid catalog' > "$bundle/software-catalog.env"
+  if output="$(ADT_CATALOG_FILE="$CATALOG_FILE" bash "$bundle/install.sh" --version 2>&1)"; then
+    status=0
+  else
+    status=$?
+  fi
+  assert_equal "$status" "0" "an explicit catalog must override an adjacent catalog"
+  assert_equal "$output" "0.2.3" "an explicit valid catalog must let a standalone bundle run"
+
+  cp "$INSTALLER" "$checkout/environments/linux/install.sh"
+  cp "$CATALOG_FILE" "$checkout/catalog/software-catalog.env"
+  printf '%s\n' 'not a valid catalog' \
+    > "$checkout/environments/linux/software-catalog.env"
+  if output="$(env -u ADT_CATALOG_FILE bash "$checkout/environments/linux/install.sh" --version 2>&1)"; then
+    status=0
+  else
+    status=$?
+  fi
+  assert_equal "$status" "0" "a recognized repository catalog must override an adjacent catalog"
+  assert_equal "$output" "0.2.3" "a repository-layout copy must run with its repository catalog"
+}
+
+test_source_commit_requires_the_exact_repository_root() {
+  local outer="$TEMP_DIR/source-commit-outer"
+  local nested="$outer/vendor/toolkit"
+  local expected
+  mkdir -p "$nested"
+  git -C "$outer" init -q
+  git -C "$outer" config user.name test
+  git -C "$outer" config user.email test@example.invalid
+  printf '%s\n' 'vendor/' > "$outer/.gitignore"
+  git -C "$outer" add .gitignore
+  git -C "$outer" commit -q -m fixture
+  expected="$(git -C "$outer" rev-parse HEAD)"
+
+  assert_equal "$(source_commit_for_root "$outer")" "$expected" \
+    "the exact repository root must provide receipt provenance"
+  assert_equal "$(source_commit_for_root "$nested")" "unknown" \
+    "an enclosing repository must not provide standalone bundle provenance"
+}
+
+# The test changes shell globals only inside its subshell, and its installer
+# double is invoked indirectly by install_opencode.
+# shellcheck disable=SC2030,SC2031,SC2329
+test_opencode_install_refreshes_path_for_the_official_destination() {
+  local sandbox="$TEMP_DIR/opencode-first-install"
+  mkdir -p "$sandbox/home" "$sandbox/bin"
+
+  (
+    HOME="$sandbox/home"
+    PATH="/usr/bin:/bin"
+    # Read indirectly by install_opencode from the sourced installer.
+    # shellcheck disable=SC2034
+    SKIP_OPENCODE=0
+    UPGRADE=0
+    DRY_RUN=0
+
+    download_installer() {
+      DOWNLOADED_INSTALLER="$sandbox/bin/opencode-installer"
+      # These are literal lines of the installer fixture, not expansions here.
+      # shellcheck disable=SC2016
+      printf '%s\n' \
+        '#!/usr/bin/env bash' \
+        'set -eu' \
+        'mkdir -p "$HOME/.opencode/bin"' \
+        'printf '\''#!/usr/bin/env bash\nprintf "opencode test\\n"\n'\'' > "$HOME/.opencode/bin/opencode"' \
+        'chmod 755 "$HOME/.opencode/bin/opencode"' \
+        > "$DOWNLOADED_INSTALLER"
+      chmod 755 "$DOWNLOADED_INSTALLER"
+    }
+
+    install_opencode >/dev/null
+    assert_equal "$(command -v opencode)" "$HOME/.opencode/bin/opencode" \
+      "a first OpenCode install must be available to the current installer process"
+  )
+}
+
 test_installer_dies_on_a_malformed_catalog_key() {
   local output
   output="$(run_installer_with_catalog 'Bad Key=1
@@ -1753,7 +1856,7 @@ test_installer_version_flag() {
   status=$?
   set -e
   assert_equal "$status" "0" "--version must exit 0"
-  assert_equal "$output" "0.2.2" "--version must print exactly the version"
+  assert_equal "$output" "0.2.3" "--version must print exactly the version"
   [[ "$output" != *"Unknown option"* ]] \
     || fail "--version must be parsed before the generic unknown-option arm"
 }
@@ -1777,7 +1880,7 @@ test_installer_version_ignores_ambiguous_opencode_config() {
   set -e
 
   assert_equal "$status" "0" "--version must not resolve the OpenCode config"
-  assert_equal "$output" "0.2.2" "--version with dual configs must print exactly the version"
+  assert_equal "$output" "0.2.3" "--version with dual configs must print exactly the version"
 }
 
 test_opencode_config_resolution_honors_skip_and_explicit_override() {
@@ -2078,6 +2181,8 @@ EOF_FAKE_MISE
   chmod +x "$fake_bin/openspec"
 
   local output
+  # PATH was intentionally changed only in the earlier OpenCode test subshell.
+  # shellcheck disable=SC2031
   output="$(MISE_BIN="$fake_mise" PATH="$fake_bin:$PATH" write_installed_versions 2>&1)"
   # Synthetic leading and trailing newlines let every assertion below use the
   # same "\nkey=value\n" shape: the first key has no newline before it, and
@@ -2210,7 +2315,10 @@ setup_claude_sandbox() {
   local sandbox="$TEMP_DIR/$1"
 
   unset -f download_installer || true
+  # HOME and PATH were intentionally changed only in the earlier OpenCode test subshell.
+  # shellcheck disable=SC2031
   CLAUDE_SANDBOX_ORIGINAL_HOME="$HOME"
+  # shellcheck disable=SC2031
   CLAUDE_SANDBOX_ORIGINAL_PATH="$PATH"
   CLAUDE_SANDBOX_ORIGINAL_MISE_BIN="$MISE_BIN"
   HOME="$sandbox/home"
@@ -2573,6 +2681,10 @@ test_validator_rejects_an_empty_and_a_malformed_scalar_with_line_numbers
 test_validator_enforces_list_syntax_duplicates_and_membership
 test_validator_reports_the_first_defect_in_source_order
 test_installer_dies_on_a_missing_catalog
+test_installer_loads_catalog_beside_a_standalone_copy
+test_installer_prefers_explicit_then_repository_catalog
+test_source_commit_requires_the_exact_repository_root
+test_opencode_install_refreshes_path_for_the_official_destination
 test_installer_dies_on_a_malformed_catalog_key
 test_installer_dies_on_a_missing_required_catalog_key
 test_installer_version_flag

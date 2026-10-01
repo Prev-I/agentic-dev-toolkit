@@ -156,6 +156,7 @@ Key flags:
 | `--skip-karpathy` | Skip the Karpathy guidelines skill |
 | `--skip-quality-tools` | Skip shellcheck, gitleaks, and PyYAML |
 | `--skip-git-credential` | Skip the WSL Git credential wrapper (WSL only) |
+| `--skip-docker-wincred` | Skip the Rancher Desktop Docker credential shim (WSL only) |
 | `--skip-az-shim` | Skip the WSL Azure CLI shim (WSL only) |
 | `--repair-claude` | Remove conflicting Claude Code installs (npm) and reinstall native |
 | `--repair-codex` | Remove conflicting Codex installs and reinstall standalone |
@@ -375,6 +376,32 @@ None of this depends on the Windows `PATH`, so it is unaffected by setting
 `interop.appendWindowsPath=false` — the policy `wsl-toolchain-doctor` audits. The
 helper is named by absolute path, and interop, not `PATH`, is what launches a
 Windows executable.
+
+### Docker credentials on WSL
+
+Rancher Desktop can configure Docker with `"credsStore":"wincred.exe"`. Docker
+expands that setting to the command `docker-credential-wincred.exe`, but the
+real helper lives in Rancher's Windows tooling directory. Adding that directory
+to WSL's `PATH` would also expose `docker.exe`, `kubectl.exe`, `rdctl.exe`, and
+other Windows tools that can shadow the Linux-first toolchain.
+
+On WSL the installer instead generates exactly one command:
+`~/.local/bin/docker-credential-wincred.exe`. The `.exe` suffix is part of
+Docker's helper lookup contract; the generated file itself is a Linux Bash shim.
+It delegates unchanged arguments, stdin, stdout, stderr, and exit status to the
+real Rancher helper by absolute path. Rancher's `win32/bin` directory therefore
+stays off `PATH`.
+
+The default delegate is
+`/mnt/c/Program Files/Rancher Desktop/resources/resources/win32/bin/docker-credential-wincred.exe`.
+Use `--docker-wincred-path` or `ADT_DOCKER_WINCRED_PATH` for another installation
+location, or `--skip-docker-wincred` to leave the component unmanaged. The
+installer refuses to replace an existing command at the shim path unless that
+file carries its generated-file marker.
+
+`--verify-only` exercises the helper protocol against a stub delegate rather
+than reading a real credential. It confirms that arguments, standard streams,
+and the delegate's nonzero exit status survive the shim.
 
 For GitHub specifically, routing to the GitHub CLI avoids the Windows round trip
 altogether. This installer does not install `gh`, so it does not configure this;

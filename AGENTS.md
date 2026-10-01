@@ -165,9 +165,10 @@ component documentation and configurator.
 Targets Debian/Ubuntu. Ubuntu under WSL2 is the reference and tested platform.
 
 Key flags: `--dry-run`, `--upgrade`, `--verify-only`, `--project PATH`,
-`--repair-claude`, `--repair-codex`, `--gcm-path PATH`, `--az-path PATH`, and `--skip-*` for each
+`--repair-claude`, `--repair-codex`, `--gcm-path PATH`, `--docker-wincred-path PATH`,
+`--az-path PATH`, and `--skip-*` for each
 component (`runtimes`, `opencode`, `claude`, `codex`, `openspec`, `superpowers`,
-`karpathy`, `quality-tools`, `git-credential`, `az-shim`).
+`karpathy`, `quality-tools`, `git-credential`, `docker-wincred`, `az-shim`).
 
 Claude Code and Codex both come from their vendors' native installers into
 `~/.local/bin`, never from npm. An npm copy lives inside one mise Node version,
@@ -305,6 +306,21 @@ covers only Claude Code — so do not "simplify" it into either.
 Verification runs the wrapper against a stub delegate and asserts the decision,
 rather than checking that a file exists: the failure being prevented is a hang,
 and a file that is present but deciding wrongly hangs just as badly.
+
+## Docker credentials on WSL
+
+`configure_docker_wincred_shim` generates the Linux Bash script
+`~/.local/bin/docker-credential-wincred.exe`, which delegates to Rancher
+Desktop's Windows credential helper by absolute path. The `.exe` suffix is
+required by Docker's `credsStore: wincred.exe` command lookup; it does not make
+the generated file a PE executable.
+
+Keep this as an exact-command shim. Never add Rancher's `resources/resources/win32/bin`
+directory to WSL `PATH`: doing so also exposes Windows container CLIs and breaks
+the Linux-first boundary enforced by the doctor. The installer may update only
+its own marked shim and must refuse to overwrite an unrelated existing command.
+Verification uses a stub delegate and must prove arguments, stdin/stdout, and
+the delegate's exit status survive without touching a real credential.
 
 ## The Azure CLI on WSL
 

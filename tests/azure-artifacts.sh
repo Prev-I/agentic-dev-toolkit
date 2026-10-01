@@ -271,25 +271,27 @@ load_configurator_functions() {
 
 write_fake_mise() {
   MISE_BIN="$TEMP_DIR/mise"
-  cat > "$MISE_BIN" <<'EOF_MISE'
+  cat > "$MISE_BIN" <<EOF_MISE
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-[[ "$1" == "exec" && "$2" == "--" ]] || exit 2
+TEST_PYTHON=$(printf '%q' "$TEST_PYTHON")
+
+[[ "\$1" == "exec" && "\$2" == "--" ]] || exit 2
 shift 2
 
-secret_file="$HOME/.config/mise/secrets/azure-artifacts.env"
-if [[ -f "$secret_file" ]]; then
+secret_file="\$HOME/.config/mise/secrets/azure-artifacts.env"
+if [[ -f "\$secret_file" ]]; then
   # The fixture models mise's dotenv loader without exposing its values.
-  source "$secret_file"
+  source "\$secret_file"
   export AZDO_ARTIFACTS_PAT
-  export AZDO_MAVEN_PAT="$AZDO_ARTIFACTS_PAT"
-  export AZDO_NUGET_PAT="$AZDO_ARTIFACTS_PAT"
-  export NuGetPackageSourceCredentials_JoinOn="Username=gewiss-resel;Password=$AZDO_ARTIFACTS_PAT;ValidAuthenticationTypes=Basic"
-  export NuGetPackageSourceCredentials_Foundation="Username=gewiss-resel;Password=$AZDO_ARTIFACTS_PAT;ValidAuthenticationTypes=Basic"
+  export AZDO_MAVEN_PAT="\$AZDO_ARTIFACTS_PAT"
+  export AZDO_NUGET_PAT="\$AZDO_ARTIFACTS_PAT"
+  export NuGetPackageSourceCredentials_JoinOn="Username=gewiss-resel;Password=\$AZDO_ARTIFACTS_PAT;ValidAuthenticationTypes=Basic"
+  export NuGetPackageSourceCredentials_Foundation="Username=gewiss-resel;Password=\$AZDO_ARTIFACTS_PAT;ValidAuthenticationTypes=Basic"
 fi
 
-case "${MISE_TEST_BREAK:-}" in
+case "\${MISE_TEST_BREAK:-}" in
   artifacts) unset AZDO_ARTIFACTS_PAT ;;
   maven) AZDO_MAVEN_PAT=incorrect ;;
   nuget) AZDO_NUGET_PAT=incorrect ;;
@@ -297,11 +299,11 @@ case "${MISE_TEST_BREAK:-}" in
   foundation) NuGetPackageSourceCredentials_Foundation=incorrect ;;
 esac
 
-if [[ "$1" == "python" ]]; then
+if [[ "\$1" == "python" ]]; then
   shift
-  command python3 "$@"
+  "\$TEST_PYTHON" "\$@"
 else
-  "$@"
+  "\$@"
 fi
 EOF_MISE
   chmod 700 "$MISE_BIN"
@@ -376,7 +378,7 @@ assert_xml_has_server() {
   local expected_id=$1
   local expected_password=$2
 
-  python3 - "$AZDO_AUTH_MAVEN_SETTINGS" "$expected_id" "$expected_password" <<'PY'
+  "$TEST_PYTHON" - "$AZDO_AUTH_MAVEN_SETTINGS" "$expected_id" "$expected_password" <<'PY'
 import sys
 import xml.etree.ElementTree as ET
 
@@ -406,7 +408,7 @@ PY
 assert_xml_has_mirror() {
   local expected_id=$1
 
-  python3 - "$AZDO_AUTH_MAVEN_SETTINGS" "$expected_id" <<'PY'
+  "$TEST_PYTHON" - "$AZDO_AUTH_MAVEN_SETTINGS" "$expected_id" <<'PY'
 import sys
 import xml.etree.ElementTree as ET
 
@@ -633,7 +635,7 @@ EOF_SETTINGS
     || fail "Maven migration must preserve a leading fake root tag comment"
   assert_equal "$(sha256sum "$AZDO_AUTH_MAVEN_SETTINGS")" "$first" \
     "fake-root envelope migration must be idempotent"
-  python3 - "$AZDO_AUTH_MAVEN_SETTINGS" <<'PY'
+  "$TEST_PYTHON" - "$AZDO_AUTH_MAVEN_SETTINGS" <<'PY'
 import sys
 import xml.etree.ElementTree as ET
 
@@ -993,7 +995,7 @@ test_rendered_mise_config_loads_secret_and_rejects_missing_secret_with_actual_mi
     XDG_DATA_HOME="$actual_data" XDG_STATE_HOME="$actual_state" MISE_DATA_DIR="$actual_data" \
     MISE_CACHE_DIR="$actual_cache" bash -c "cd \"\$1\"; shift; exec \"\$@\"" _ "$actual_home" \
     "$REAL_MISE" env --quiet --json > "$actual_home/env.json"
-  python3 - "$actual_home/env.json" <<'PY'
+  "$TEST_PYTHON" - "$actual_home/env.json" <<'PY'
 import json
 import sys
 
@@ -1277,6 +1279,10 @@ test_cli_rejects_a_noncanonical_secret_override_before_writing_or_verifying() {
 
 TEMP_DIR="$(mktemp -d)"
 resolve_real_mise
+TEST_PYTHON="$("$REAL_MISE" which python 2>/dev/null || true)"
+[[ -n "$TEST_PYTHON" && -x "$TEST_PYTHON" ]] ||
+  fail "real Mise Python executable is unavailable: ${TEST_PYTHON:-unset}"
+readonly TEST_PYTHON
 HOME="$TEMP_DIR/home"
 AZDO_AUTH_SECRET_FILE="$HOME/.config/mise/secrets/azure-artifacts.env"
 AZDO_AUTH_MISE_CONFIG="$HOME/.config/mise/conf.d/azure-artifacts.toml"

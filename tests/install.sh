@@ -858,7 +858,7 @@ test_karpathy_verification_rejects_a_tampered_installed_skill() {
     > "$HOME/.claude/skills/karpathy-guidelines/SKILL.md"
 
   # shellcheck disable=SC2034
-  { SKIP_RUNTIMES=1; SKIP_OPENCODE=1; SKIP_CLAUDE=1; SKIP_CODEX=1; SKIP_OPENSPEC=1; SKIP_SUPERPOWERS=1; SKIP_QUALITY_TOOLS=1; }
+  { SKIP_RUNTIMES=1; SKIP_OPENCODE=1; SKIP_CLAUDE=1; SKIP_CODEX=1; SKIP_OPENSPEC=1; SKIP_SUPERPOWERS=1; SKIP_QUALITY_TOOLS=1; SKIP_DOCKER_WINCRED=1; }
   # shellcheck disable=SC2329
   verify_command() { :; }
 
@@ -873,7 +873,7 @@ test_karpathy_verification_reports_a_missing_skill() {
   local original_home="$HOME"
   setup_karpathy_sandbox karpathy-verify-missing
   # shellcheck disable=SC2034
-  { SKIP_RUNTIMES=1; SKIP_OPENCODE=1; SKIP_CLAUDE=1; SKIP_CODEX=1; SKIP_OPENSPEC=1; SKIP_SUPERPOWERS=1; SKIP_QUALITY_TOOLS=1; }
+  { SKIP_RUNTIMES=1; SKIP_OPENCODE=1; SKIP_CLAUDE=1; SKIP_CODEX=1; SKIP_OPENSPEC=1; SKIP_SUPERPOWERS=1; SKIP_QUALITY_TOOLS=1; SKIP_DOCKER_WINCRED=1; }
   # shellcheck disable=SC2329
   verify_command() { :; }
 
@@ -1187,6 +1187,279 @@ test_git_credential_wrapper_is_valid_shell_and_rewritten_on_change() {
   teardown_credential_sandbox "$original_home"
 }
 
+# Isolates $HOME so Docker resolves only the generated command from
+# ~/.local/bin. The delegate is a stub: these tests exercise the credential
+# helper protocol without reading or writing any real registry credential.
+setup_docker_wincred_sandbox() {
+  local sandbox="$TEMP_DIR/$1"
+
+  HOME="$sandbox/home"
+  DOCKER_WINCRED_SHIM="$HOME/.local/bin/docker-credential-wincred.exe"
+  DOCKER_WINCRED_WINDOWS_PATH="$sandbox/docker-credential-wincred.exe"
+  DRY_RUN=0
+  SKIP_DOCKER_WINCRED=0
+  ADT_FORCE_WSL=1
+
+  mkdir -p "$HOME/.local/bin"
+  cat > "$DOCKER_WINCRED_WINDOWS_PATH" <<'EOF'
+#!/usr/bin/env bash
+input="$(cat)"
+printf 'args=%s\ninput=%s\n' "$*" "$input"
+printf 'delegate-stderr\n' >&2
+exit 23
+EOF
+  chmod 755 "$DOCKER_WINCRED_WINDOWS_PATH"
+}
+
+teardown_docker_wincred_sandbox() {
+  HOME="$1"
+  unset ADT_FORCE_WSL
+}
+
+test_docker_wincred_shim_preserves_the_credential_helper_protocol() {
+  local original_home="$HOME"
+  setup_docker_wincred_sandbox docker-wincred-protocol
+
+  configure_docker_wincred_shim >/dev/null
+
+  [[ -x "$DOCKER_WINCRED_SHIM" ]] || fail "the Docker credential shim must be installed executable"
+
+  local output error status=0
+  output="$(printf 'server=https://registry.example\nusername=alice\n' |
+    "$DOCKER_WINCRED_SHIM" store extra 2>"$TEMP_DIR/docker-wincred-protocol.err")" || status=$?
+  error="$(<"$TEMP_DIR/docker-wincred-protocol.err")"
+  assert_equal "$status" "23" "the shim must preserve the delegate's exit status"
+  assert_equal "$output" $'args=store extra\ninput=server=https://registry.example\nusername=alice' \
+    "the shim must preserve arguments, stdin, and stdout"
+  assert_equal "$error" "delegate-stderr" "the shim must preserve stderr"
+
+  teardown_docker_wincred_sandbox "$original_home"
+}
+
+test_docker_wincred_options_are_parsed_in_both_forms() {
+  local original_path="${DOCKER_WINCRED_WINDOWS_PATH:-}"
+  DOCKER_WINCRED_WINDOWS_PATH=""; SKIP_DOCKER_WINCRED=0
+  parse_args --docker-wincred-path /a/docker-credential-wincred.exe --skip-docker-wincred
+  assert_equal "$DOCKER_WINCRED_WINDOWS_PATH" "/a/docker-credential-wincred.exe" \
+    "--docker-wincred-path must accept a separate value"
+  assert_equal "$SKIP_DOCKER_WINCRED" "1" "--skip-docker-wincred must set the skip flag"
+
+  DOCKER_WINCRED_WINDOWS_PATH=""
+  SKIP_DOCKER_WINCRED=0
+  parse_args --docker-wincred-path=/b/docker-credential-wincred.exe
+  assert_equal "$DOCKER_WINCRED_WINDOWS_PATH" "/b/docker-credential-wincred.exe" \
+    "--docker-wincred-path= must accept an inline value"
+
+  if ( parse_args --docker-wincred-path 2>/dev/null ); then
+    fail "--docker-wincred-path must require a value"
+  fi
+
+  DOCKER_WINCRED_WINDOWS_PATH="$original_path"
+  SKIP_DOCKER_WINCRED=0
+}
+
+test_docker_wincred_shim_does_not_replace_an_unmanaged_command() {
+  local original_home="$HOME"
+  setup_docker_wincred_sandbox docker-wincred-unmanaged
+  printf '#!/usr/bin/env bash\nprintf "foreign\\n"\n' > "$DOCKER_WINCRED_SHIM"
+  chmod 755 "$DOCKER_WINCRED_SHIM"
+  local before status=0
+  before="$(sha256sum "$DOCKER_WINCRED_SHIM")"
+
+  ( configure_docker_wincred_shim >/dev/null 2>&1 ) || status=$?
+
+  assert_equal "$status" "1" "an unmanaged command at the shim path must be refused"
+  assert_equal "$(sha256sum "$DOCKER_WINCRED_SHIM")" "$before" \
+    "refusing an unmanaged command must leave it byte-identical"
+
+  teardown_docker_wincred_sandbox "$original_home"
+}
+
+test_docker_wincred_shim_refuses_unmanaged_symlinks() {
+  local original_home="$HOME"
+  setup_docker_wincred_sandbox docker-wincred-symlinks
+  local unmanaged_target="$TEMP_DIR/docker-wincred-symlinks/unmanaged-helper"
+  printf '#!/usr/bin/env bash\nprintf "foreign\\n"\n' > "$unmanaged_target"
+  chmod 755 "$unmanaged_target"
+  ln -s "$unmanaged_target" "$DOCKER_WINCRED_SHIM"
+  local target_before status=0
+  target_before="$(sha256sum "$unmanaged_target")"
+
+  ( configure_docker_wincred_shim >/dev/null 2>&1 ) || status=$?
+
+  assert_equal "$status" "1" "a symlink to an unmanaged helper must be refused"
+  [[ -L "$DOCKER_WINCRED_SHIM" ]] || fail "refusing an unmanaged symlink must preserve the link"
+  assert_equal "$(sha256sum "$unmanaged_target")" "$target_before" \
+    "refusing an unmanaged symlink must leave its target byte-identical"
+
+  rm "$DOCKER_WINCRED_SHIM"
+  ln -s "$TEMP_DIR/docker-wincred-symlinks/missing-helper" "$DOCKER_WINCRED_SHIM"
+  status=0
+  ( configure_docker_wincred_shim >/dev/null 2>&1 ) || status=$?
+  assert_equal "$status" "1" "a broken unmanaged symlink must be refused"
+  [[ -L "$DOCKER_WINCRED_SHIM" ]] || fail "refusing a broken symlink must preserve the link"
+
+  teardown_docker_wincred_sandbox "$original_home"
+}
+
+test_docker_wincred_shim_is_not_installed_off_wsl() {
+  local original_home="$HOME"
+  setup_docker_wincred_sandbox docker-wincred-not-wsl
+  # shellcheck disable=SC2034
+  ADT_FORCE_WSL=0
+
+  configure_docker_wincred_shim >/dev/null
+
+  [[ ! -e "$DOCKER_WINCRED_SHIM" ]] ||
+    fail "a shim around a Windows executable must not be installed off WSL"
+
+  teardown_docker_wincred_sandbox "$original_home"
+}
+
+test_docker_wincred_shim_is_skipped_when_requested() {
+  local original_home="$HOME"
+  setup_docker_wincred_sandbox docker-wincred-skipped
+  # shellcheck disable=SC2034
+  SKIP_DOCKER_WINCRED=1
+
+  configure_docker_wincred_shim >/dev/null
+
+  [[ ! -e "$DOCKER_WINCRED_SHIM" ]] || fail "--skip-docker-wincred must install nothing"
+
+  teardown_docker_wincred_sandbox "$original_home"
+}
+
+test_docker_wincred_shim_dry_run_previews_without_writing() {
+  local original_home="$HOME"
+  setup_docker_wincred_sandbox docker-wincred-dry-run
+  # shellcheck disable=SC2034
+  DRY_RUN=1
+
+  local output
+  output="$(configure_docker_wincred_shim)"
+
+  [[ ! -e "$DOCKER_WINCRED_SHIM" ]] || fail "--dry-run must not write the Docker credential shim"
+  [[ "$output" == *"DOCKER_WINCRED_DEFAULT="* ]] ||
+    fail "--dry-run must preview the Docker credential shim"
+
+  teardown_docker_wincred_sandbox "$original_home"
+}
+
+test_docker_wincred_shim_is_valid_shell_and_rewritten_on_change() {
+  local original_home="$HOME"
+  setup_docker_wincred_sandbox docker-wincred-idempotent
+
+  configure_docker_wincred_shim >/dev/null
+  bash -n "$DOCKER_WINCRED_SHIM" || fail "the generated Docker credential shim must be valid bash"
+
+  local before after new_delegate
+  before="$(sha256sum "$DOCKER_WINCRED_SHIM" | cut -d' ' -f1)"
+  configure_docker_wincred_shim >/dev/null
+  assert_equal "$(sha256sum "$DOCKER_WINCRED_SHIM" | cut -d' ' -f1)" "$before" \
+    "re-running with no change must leave the Docker credential shim byte-identical"
+
+  new_delegate="$TEMP_DIR/docker-wincred-idempotent/delegate with \"quotes\" and \$dollar.exe"
+  cp "$DOCKER_WINCRED_WINDOWS_PATH" "$new_delegate"
+  DOCKER_WINCRED_WINDOWS_PATH="$new_delegate"
+  configure_docker_wincred_shim >/dev/null
+  after="$(sha256sum "$DOCKER_WINCRED_SHIM" | cut -d' ' -f1)"
+  [[ "$after" != "$before" ]] || fail "a changed delegate path must rewrite the Docker credential shim"
+  assert_equal "$(DOCKER_WINCRED_EXE='' "$DOCKER_WINCRED_SHIM" list 2>/dev/null || true)" \
+    $'args=list\ninput=' "the rendered delegate path must survive shell metacharacters literally"
+
+  teardown_docker_wincred_sandbox "$original_home"
+}
+
+test_docker_wincred_environment_override_sets_the_default_delegate() {
+  local output
+  output="$(ADT_DOCKER_WINCRED_PATH=/custom/docker-credential-wincred.exe \
+    bash "$INSTALLER" --help)"
+  [[ "$output" == *"(default: /custom/docker-credential-wincred.exe)."* ]] ||
+    fail "ADT_DOCKER_WINCRED_PATH must set the documented default delegate"
+}
+
+test_docker_wincred_path_must_be_absolute() {
+  local original_home="$HOME"
+  setup_docker_wincred_sandbox docker-wincred-relative
+  DOCKER_WINCRED_WINDOWS_PATH="relative/docker-credential-wincred.exe"
+
+  local status=0
+  ( configure_docker_wincred_shim >/dev/null 2>&1 ) || status=$?
+  assert_equal "$status" "1" "a relative Docker credential delegate must be rejected"
+  [[ ! -e "$DOCKER_WINCRED_SHIM" ]] || fail "rejecting a relative delegate must not write the shim"
+
+  teardown_docker_wincred_sandbox "$original_home"
+}
+
+set_only_docker_wincred_verification_enabled() {
+  # shellcheck disable=SC2034
+  { SKIP_RUNTIMES=1; SKIP_OPENCODE=1; SKIP_CLAUDE=1; SKIP_CODEX=1; SKIP_OPENSPEC=1
+    SKIP_SUPERPOWERS=1; SKIP_QUALITY_TOOLS=1; SKIP_KARPATHY=1; SKIP_GIT_CREDENTIAL=1
+    SKIP_DOCKER_WINCRED=0; SKIP_AZ_SHIM=1; }
+  # shellcheck disable=SC2329
+  verify_command() { :; }
+}
+
+test_docker_wincred_shim_verification_accepts_protocol_preservation() {
+  local original_home="$HOME"
+  setup_docker_wincred_sandbox docker-wincred-verify-success
+  configure_docker_wincred_shim >/dev/null
+  set_only_docker_wincred_verification_enabled
+
+  ( verify_installation ) >/dev/null 2>&1 ||
+    fail "verification must accept a managed Docker credential shim that preserves the protocol"
+
+  teardown_docker_wincred_sandbox "$original_home"
+}
+
+test_docker_wincred_shim_verification_refuses_an_unmanaged_command_without_running_it() {
+  local original_home="$HOME"
+  setup_docker_wincred_sandbox docker-wincred-verify-unmanaged
+  cat > "$DOCKER_WINCRED_SHIM" <<EOF
+#!/usr/bin/env bash
+printf 'ran' > "$TEMP_DIR/docker-wincred-unmanaged-ran"
+printf 'registry-user-that-must-not-leak'
+EOF
+  chmod 755 "$DOCKER_WINCRED_SHIM"
+  set_only_docker_wincred_verification_enabled
+
+  local message status=0
+  message="$( ( verify_installation ) 2>&1 >/dev/null )" || status=$?
+  assert_equal "$status" "1" "verification must reject an unmanaged Docker credential command"
+  [[ "$message" == *"unmanaged Docker credential helper"* ]] ||
+    fail "verification must identify the unmanaged helper without running it, got: $message"
+  [[ "$message" != *"registry-user-that-must-not-leak"* ]] ||
+    fail "verification must not include helper output"
+  [[ ! -e "$TEMP_DIR/docker-wincred-unmanaged-ran" ]] ||
+    fail "verification must not execute an unmanaged Docker credential command"
+
+  teardown_docker_wincred_sandbox "$original_home"
+}
+
+test_docker_wincred_shim_verification_rejects_protocol_breakage() {
+  local original_home="$HOME"
+  setup_docker_wincred_sandbox docker-wincred-verify-tampered
+  configure_docker_wincred_shim >/dev/null
+
+  # The command still exists and runs, but no longer preserves stdin or the
+  # delegate's exit status. Existence-only verification would miss this.
+  printf '#!/usr/bin/env bash\n# docker-credential-wincred.exe - expose Rancher Desktop\nprintf "tampered\\n"\n' > "$DOCKER_WINCRED_SHIM"
+  chmod 755 "$DOCKER_WINCRED_SHIM"
+
+  set_only_docker_wincred_verification_enabled
+
+  local message status=0
+  message="$( ( verify_installation ) 2>&1 >/dev/null )" || status=$?
+  if (( status == 0 )); then
+    fail "verification must reject a Docker credential shim that breaks the helper protocol"
+  fi
+  [[ "$message" == *"did not preserve the helper protocol"* ]] ||
+    fail "protocol verification must fail for the specific break, got: $message"
+  [[ "$message" != *"tampered"* ]] || fail "verification must not include helper output"
+
+  teardown_docker_wincred_sandbox "$original_home"
+}
+
 # Isolates $HOME so the generated shim lands in the suite's tree. Without this
 # the tests would write ~/.local/bin/az on the developer's own machine, which is
 # exactly the file the feature is about and exactly the one not to clobber.
@@ -1435,7 +1708,7 @@ test_az_shim_verification_rejects_a_shim_that_lost_its_allowlist() {
 
   # shellcheck disable=SC2034
   { SKIP_RUNTIMES=1; SKIP_OPENCODE=1; SKIP_CLAUDE=1; SKIP_CODEX=1; SKIP_OPENSPEC=1
-    SKIP_SUPERPOWERS=1; SKIP_QUALITY_TOOLS=1; SKIP_KARPATHY=1; SKIP_GIT_CREDENTIAL=1; }
+    SKIP_SUPERPOWERS=1; SKIP_QUALITY_TOOLS=1; SKIP_KARPATHY=1; SKIP_GIT_CREDENTIAL=1; SKIP_DOCKER_WINCRED=1; }
   # shellcheck disable=SC2329
   verify_command() { :; }
 
@@ -1747,7 +2020,7 @@ test_installer_loads_catalog_beside_a_standalone_copy() {
   fi
 
   assert_equal "$status" "0" "a standalone two-file bundle must find its adjacent catalog"
-  assert_equal "$output" "0.2.3" "the standalone bundle must run the copied installer"
+  assert_equal "$output" "0.3.0" "the standalone bundle must run the copied installer"
 }
 
 test_installer_prefers_explicit_then_repository_catalog() {
@@ -1765,7 +2038,7 @@ test_installer_prefers_explicit_then_repository_catalog() {
     status=$?
   fi
   assert_equal "$status" "0" "an explicit catalog must override an adjacent catalog"
-  assert_equal "$output" "0.2.3" "an explicit valid catalog must let a standalone bundle run"
+  assert_equal "$output" "0.3.0" "an explicit valid catalog must let a standalone bundle run"
 
   cp "$INSTALLER" "$checkout/environments/linux/install.sh"
   cp "$CATALOG_FILE" "$checkout/catalog/software-catalog.env"
@@ -1777,7 +2050,7 @@ test_installer_prefers_explicit_then_repository_catalog() {
     status=$?
   fi
   assert_equal "$status" "0" "a recognized repository catalog must override an adjacent catalog"
-  assert_equal "$output" "0.2.3" "a repository-layout copy must run with its repository catalog"
+  assert_equal "$output" "0.3.0" "a repository-layout copy must run with its repository catalog"
 }
 
 test_source_commit_requires_the_exact_repository_root() {
@@ -1856,7 +2129,7 @@ test_installer_version_flag() {
   status=$?
   set -e
   assert_equal "$status" "0" "--version must exit 0"
-  assert_equal "$output" "0.2.3" "--version must print exactly the version"
+  assert_equal "$output" "0.3.0" "--version must print exactly the version"
   [[ "$output" != *"Unknown option"* ]] \
     || fail "--version must be parsed before the generic unknown-option arm"
 }
@@ -1880,7 +2153,7 @@ test_installer_version_ignores_ambiguous_opencode_config() {
   set -e
 
   assert_equal "$status" "0" "--version must not resolve the OpenCode config"
-  assert_equal "$output" "0.2.3" "--version with dual configs must print exactly the version"
+  assert_equal "$output" "0.3.0" "--version with dual configs must print exactly the version"
 }
 
 test_opencode_config_resolution_honors_skip_and_explicit_override() {
@@ -2657,6 +2930,19 @@ test_git_credential_wrapper_is_not_installed_off_wsl
 test_git_credential_wrapper_is_skipped_when_requested
 test_git_credential_wrapper_dry_run_previews_without_writing
 test_git_credential_wrapper_is_valid_shell_and_rewritten_on_change
+test_docker_wincred_shim_preserves_the_credential_helper_protocol
+test_docker_wincred_options_are_parsed_in_both_forms
+test_docker_wincred_shim_does_not_replace_an_unmanaged_command
+test_docker_wincred_shim_refuses_unmanaged_symlinks
+test_docker_wincred_shim_is_not_installed_off_wsl
+test_docker_wincred_shim_is_skipped_when_requested
+test_docker_wincred_shim_dry_run_previews_without_writing
+test_docker_wincred_shim_is_valid_shell_and_rewritten_on_change
+test_docker_wincred_environment_override_sets_the_default_delegate
+test_docker_wincred_path_must_be_absolute
+test_docker_wincred_shim_verification_accepts_protocol_preservation
+test_docker_wincred_shim_verification_refuses_an_unmanaged_command_without_running_it
+test_docker_wincred_shim_verification_rejects_protocol_breakage
 test_az_shim_forwards_an_allowlisted_verb_to_the_windows_cli
 test_az_shim_refuses_a_verb_outside_the_allowlist
 test_az_shim_runs_a_denied_verb_only_when_asked_deliberately

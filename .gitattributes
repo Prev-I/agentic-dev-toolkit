@@ -4,3 +4,4 @@
 *.yaml text eol=lf
 *.yml text eol=lf
 *.env text eol=lf
+models/routing/opencode/eval/records/**/*.patch text eol=lf whitespace=-blank-at-eol

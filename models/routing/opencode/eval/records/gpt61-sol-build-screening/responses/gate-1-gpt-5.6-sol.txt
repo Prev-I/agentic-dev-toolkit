@@ -1,0 +1,6 @@
+Using `brainstorming` to confirm the smallest compatible design before implementation. This is a bounded one-file change, so I’ll inspect the existing shell code and tests, then present a short design for approval.
+The existing acceptance test defines the required behavior, so no clarification is needed.
+
+Design: add only a `reverse()` function to `lib/strings.sh`, leaving `upper()` and `README.md` untouched. The function will reverse its single argument using Bash string operations and print it with `printf '%s\n'`; verification will run both `tests/acceptance.sh` and `tests/regression.sh`.
+
+Approve this design and I’ll implement it.

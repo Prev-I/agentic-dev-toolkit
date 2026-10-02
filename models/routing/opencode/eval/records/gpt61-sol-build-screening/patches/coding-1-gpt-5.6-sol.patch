@@ -1,0 +1,208 @@
+--- a/environments/linux/install.sh
++++ b/environments/linux/install.sh
+@@ -59,7 +59,19 @@
+ GCM_WINDOWS_PATH="${ADT_GCM_PATH:-/mnt/c/Program Files/Git/mingw64/bin/git-credential-manager.exe}"
+ GIT_CREDENTIAL_WRAPPER="${GIT_CREDENTIAL_WRAPPER:-$HOME/.local/bin/git-credential-manager-wsl}"
+ 
+-export PATH="$HOME/.local/bin:$HOME/bin:$HOME/.opencode/bin:$PATH"
++prepend_managed_paths() {
++  local path
++  for path in "$HOME/.opencode/bin" "$HOME/bin" "$HOME/.local/bin"; do
++    [[ -d "$path" ]] || continue
++    case ":$PATH:" in
++      *":$path:"*) ;;
++      *) PATH="$path:$PATH" ;;
++    esac
++  done
++  export PATH
++}
++
++prepend_managed_paths
+ 
+ TEMP_PATHS=()
+ DOWNLOADED_INSTALLER=""
+@@ -393,7 +405,15 @@
+   cat >> "$temp_file" <<'EOF_BASHRC'
+ 
+ # >>> agentic-dev-toolkit >>>
+-export PATH="$HOME/.local/bin:$HOME/bin:$HOME/.opencode/bin:$PATH"
++for agentic_path in "$HOME/.opencode/bin" "$HOME/bin" "$HOME/.local/bin"; do
++  [[ -d "$agentic_path" ]] || continue
++  case ":$PATH:" in
++    *":$agentic_path:"*) ;;
++    *) PATH="$agentic_path:$PATH" ;;
++  esac
++done
++unset agentic_path
++export PATH
+ export OPENCODE_ENABLE_EXA=true
+ if [[ -x "$HOME/.local/bin/mise" ]]; then
+   eval "$("$HOME/.local/bin/mise" activate bash)"
+@@ -410,7 +430,7 @@
+     rm -f "$temp_file"
+   fi
+ 
+-  export PATH="$HOME/.local/bin:$HOME/bin:$HOME/.opencode/bin:$PATH"
++  prepend_managed_paths
+ }
+ 
+ install_mise() {
+--- a/tests/install.sh
++++ b/tests/install.sh
+@@ -6,6 +6,7 @@
+ readonly REPOSITORY_ROOT
+ readonly INSTALLER="$REPOSITORY_ROOT/environments/linux/install.sh"
+ readonly CLAUDE_TEMPLATE="$REPOSITORY_ROOT/instructions/adapters/claude-code/CLAUDE.md"
++readonly BASH_BIN="$(command -v bash)"
+ 
+ cleanup() {
+   rm -rf "${TEMP_DIR:-}"
+@@ -105,6 +106,134 @@
+   HOME="$original_home"
+ }
+ 
++test_installer_bootstrap_guards_managed_path_entries() {
++  local home="$TEMP_DIR/bootstrap home"
++  local initial_path="/original:$home/.opencode/bin:/original"
++  local actual
++
++  mkdir -p "$home/.local/bin" "$home/.opencode/bin"
++  actual="$(HOME="$home" PATH="$initial_path" "$BASH_BIN" --noprofile --norc -c '
++    source "$1"
++    printf "%s" "$PATH"
++  ' _ "$TEMP_DIR/install-functions.sh")"
++
++  assert_equal "$actual" "$home/.local/bin:$initial_path" \
++    "bootstrap PATH must add only existing exact entries and preserve the original PATH"
++}
++
++test_installer_bootstrap_preserves_an_empty_path_entry() {
++  local home="$TEMP_DIR/bootstrap empty home"
++  local actual
++
++  mkdir -p "$home/.local/bin" "$home/bin" "$home/.opencode/bin"
++  actual="$(HOME="$home" PATH="" "$BASH_BIN" --noprofile --norc -c '
++    source "$1"
++    printf "%s" "$PATH"
++  ' _ "$TEMP_DIR/install-functions.sh")"
++
++  assert_equal "$actual" "$home/.local/bin:$home/bin:$home/.opencode/bin:" \
++    "bootstrap PATH must preserve an initially empty PATH entry"
++}
++
++test_managed_bash_block_guards_path_entries_on_repeated_activation() (
++  local home="$TEMP_DIR/managed block home"
++  local initial_path="/original:$home/.local/bin:/again:$home/.local/bin:$home/bin-tools"
++  local actual
++
++  HOME="$home"
++  PATH="/usr/bin:/bin"
++  DRY_RUN=0
++  mkdir -p "$HOME/.local/bin" "$HOME/bin" "$HOME/.opencode/bin"
++  ensure_shell_configuration >/dev/null
++
++  actual="$(HOME="$home" PATH="$initial_path" "$BASH_BIN" --noprofile --norc -c '
++    direnv() { printf ":"; }
++    source "$1"
++    source "$1"
++    printf "%s" "$PATH"
++  ' _ "$home/.bashrc")"
++
++  assert_equal "$actual" "$home/bin:$home/.opencode/bin:$initial_path" \
++    "managed Bash PATH must use exact entries and remain idempotent"
++)
++
++test_managed_bash_block_preserves_an_empty_path_entry() (
++  local home="$TEMP_DIR/managed block empty home"
++  local actual
++
++  HOME="$home"
++  PATH="/usr/bin:/bin"
++  DRY_RUN=0
++  mkdir -p "$HOME/.local/bin" "$HOME/bin" "$HOME/.opencode/bin"
++  ensure_shell_configuration >/dev/null
++
++  actual="$(HOME="$home" PATH="" "$BASH_BIN" --noprofile --norc -c '
++    direnv() { printf ":"; }
++    source "$1"
++    printf "%s" "$PATH"
++  ' _ "$home/.bashrc")"
++
++  assert_equal "$actual" "$home/.local/bin:$home/bin:$home/.opencode/bin:" \
++    "managed Bash PATH must preserve an initially empty PATH entry"
++)
++
++test_shell_configuration_refresh_guards_managed_path_entries() (
++  local home="$TEMP_DIR/refresh home"
++  local initial_path="/usr/bin:/bin:/original:$home/.local/bin:$home/.local/bin:/tail"
++
++  HOME="$home"
++  PATH="$initial_path"
++  DRY_RUN=0
++  mkdir -p "$HOME/.local/bin" "$HOME/bin"
++
++  ensure_shell_configuration >/dev/null
++  ensure_shell_configuration >/dev/null
++
++  assert_equal "$PATH" "$home/bin:$initial_path" \
++    "current-process PATH refresh must add only existing exact entries and remain idempotent"
++)
++
++test_shell_configuration_refresh_preserves_an_empty_path_entry() (
++  local home="$TEMP_DIR/refresh empty home"
++
++  HOME="$home"
++  DRY_RUN=0
++  mkdir -p "$HOME/.local/bin" "$HOME/bin" "$HOME/.opencode/bin"
++
++  mkdir() { /usr/bin/mkdir "$@"; }
++  touch() { /usr/bin/touch "$@"; }
++  mktemp() { /usr/bin/mktemp "$@"; }
++  awk() { /usr/bin/awk "$@"; }
++  cat() { /usr/bin/cat "$@"; }
++  cmp() { /usr/bin/cmp "$@"; }
++  cp() { /usr/bin/cp "$@"; }
++  mv() { /usr/bin/mv "$@"; }
++  rm() { /usr/bin/rm "$@"; }
++
++  PATH=""
++  ensure_shell_configuration >/dev/null
++
++  assert_equal "$PATH" "$home/.local/bin:$home/bin:$home/.opencode/bin:" \
++    "current-process PATH refresh must preserve an initially empty PATH entry"
++)
++
++test_shell_configuration_dry_run_does_not_mutate_path_or_profile() (
++  local home="$TEMP_DIR/shell dry run home"
++  local initial_path="/usr/bin:/bin:/original"
++
++  HOME="$home"
++  PATH="$initial_path"
++  DRY_RUN=1
++  mkdir -p "$HOME"
++  printf '%s\n' 'existing profile' > "$HOME/.bashrc"
++
++  ensure_shell_configuration >/dev/null
++
++  assert_equal "$PATH" "$initial_path" "shell configuration dry-run must not change PATH"
++  assert_equal "$(<"$HOME/.bashrc")" "existing profile" \
++    "shell configuration dry-run must not change the Bash profile"
++)
++
+ test_project_configuration_creates_direnv_file_when_missing() {
+   local project_root="$TEMP_DIR/project-with-direnv"
+   PROJECT_PATH="$project_root"
+@@ -986,6 +1115,13 @@
+ test_lttng_selector_falls_back_to_legacy_package
+ test_dry_run_does_not_probe_apt_package_metadata
+ test_shell_configuration_enables_direnv
++test_installer_bootstrap_guards_managed_path_entries
++test_installer_bootstrap_preserves_an_empty_path_entry
++test_managed_bash_block_guards_path_entries_on_repeated_activation
++test_managed_bash_block_preserves_an_empty_path_entry
++test_shell_configuration_refresh_guards_managed_path_entries
++test_shell_configuration_refresh_preserves_an_empty_path_entry
++test_shell_configuration_dry_run_does_not_mutate_path_or_profile
+ test_project_configuration_creates_direnv_file_when_missing
+ test_project_configuration_preserves_existing_direnv_file
+ test_project_configuration_dry_run_previews_direnv_file_without_creating_it

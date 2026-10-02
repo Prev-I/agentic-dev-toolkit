@@ -1,0 +1,7 @@
+Using brainstorming for this bounded change: I’ll check the shell conventions, then present a short design for `reverse`, preserving `README.md` and `upper`.
+
+I’ll add `reverse` to `lib/strings.sh` using a Bash loop that reads the argument’s characters from last to first, then prints the result with a trailing newline, matching `upper`’s output style.
+
+I’ll leave `README.md` and `upper` untouched and verify the acceptance and regression scripts, plus empty strings and whitespace.
+
+Does this design look good?

@@ -1,0 +1,7 @@
+Using brainstorming for this bounded change: I’ll check the shell conventions, add `reverse`, and verify its output while preserving `README.md` and `upper`.
+
+I’ll use a Bash character loop so spaces, punctuation, and embedded newlines are preserved, with a final newline matching `upper`. Using test-driven development and Karpathy guidelines, I’ll verify the existing acceptance test fails before adding the function.
+
+Added `reverse` to `lib/strings.sh`. It reverses the argument and prints a trailing newline.
+
+Acceptance, regression, syntax, and edge-case checks pass. `README.md` and `upper` are unchanged.

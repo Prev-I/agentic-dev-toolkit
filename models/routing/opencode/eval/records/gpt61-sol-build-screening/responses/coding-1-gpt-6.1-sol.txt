@@ -1,0 +1,16 @@
+Using systematic debugging and test-driven development to verify the three PATH sites, add failing regression coverage, and apply the approved guards.
+
+All three sites use the same unconditional prepend. I’ll use exact colon-delimited membership checks and add directories in reverse order to preserve the requested priority. Tests will compare the full PATH at each site, including empty PATH and repeated activation.
+
+The new regression test fails as expected: repeated bootstrap sourcing adds all three directories again. The coverage also includes exact-match lookalikes, paths with spaces, missing directories, regular files, preserved empty/duplicate entries, and dry-run behavior.
+
+Updated `environments/linux/install.sh` at all three PATH sites to prepend only existing directories absent as exact colon-delimited entries. Priority and all pre-existing entries—including empty entries—are preserved.
+
+Added behavioral coverage in `tests/install.sh` for repeated activation, spaces, exact matching, missing directories, regular files, backups, markers, and dry-run non-mutation. `main "$@"` remains the installer’s final line.
+
+Verification:
+- Regression test failed before the fix on duplicate bootstrap entries.
+- `setsid bash tests/install.sh < /dev/null` — passed.
+- `bash -n environments/linux/install.sh tests/install.sh` — passed.
+
+Tests sourced only installer functions and used disposable HOME directories.

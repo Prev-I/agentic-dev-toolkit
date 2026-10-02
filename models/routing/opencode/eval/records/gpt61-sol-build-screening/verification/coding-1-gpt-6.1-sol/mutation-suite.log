@@ -1,0 +1,5 @@
+FAIL: repeated bootstrap PATH: expected '/tmp/tmp.IBCaV9EdDC/path home [literal]/.local/bin:/tmp/tmp.IBCaV9EdDC/path home [literal]/bin:/tmp/tmp.IBCaV9EdDC/path home [literal]/.opencode/bin:/usr/bin:/bin', got '/tmp/tmp.IBCaV9EdDC/path home [literal]/.local/bin:/tmp/tmp.IBCaV9EdDC/path home [literal]/bin:/tmp/tmp.IBCaV9EdDC/path home [literal]/.opencode/bin:/tmp/tmp.IBCaV9EdDC/path home [literal]/.local/bin:/tmp/tmp.IBCaV9EdDC/path home [literal]/bin:/tmp/tmp.IBCaV9EdDC/path home [literal]/.opencode/bin:/usr/bin:/bin'
+
+ERROR: setup failed near line 150 (exit code 1).
+
+ERROR: setup failed near line 183 (exit code 1).

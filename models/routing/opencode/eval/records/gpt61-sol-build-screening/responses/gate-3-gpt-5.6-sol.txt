@@ -1,0 +1,4 @@
+Using brainstorming to confirm the smallest correct design. This is a bounded one-file change, so I’ll inspect the existing shell code and tests, then present a short design for approval before implementation.
+The change is bounded and unambiguous: add `reverse()` after `upper()` in `lib/strings.sh`, preserving `upper` and `README.md`. It will reverse the single argument using Bash string operations and print one newline; verification will run `tests/acceptance.sh` and `tests/regression.sh`.
+
+Approve this design and I’ll implement it.

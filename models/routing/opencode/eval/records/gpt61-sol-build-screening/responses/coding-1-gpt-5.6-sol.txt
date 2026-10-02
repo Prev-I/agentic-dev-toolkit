@@ -1,0 +1,18 @@
+Using `test-driven-development` to add failing PATH regression coverage before the fix, and `karpathy-guidelines` to keep the changes limited to the two approved files. I’ll inspect the installer and existing test harness, add focused behavioral tests and confirm the expected failure, then make the smallest Bash change and run the required full verification.
+The current implementation has three literal unconditional exports. The regression tests will exercise each site as behavior, including exact-entry matching, nonexistent-directory skipping, duplicate preservation/idempotence, spaces in `HOME`, and the required trailing empty entry for an initially empty `PATH`; dry-run mutation remains covered separately.
+The new test fails for the intended reason: bootstrap adds a nonexistent `bin` and duplicates an existing `.opencode/bin`. I’ll introduce one small in-process helper used by bootstrap and refresh, and emit the equivalent reverse-order guarded loop in the managed Bash block so prepending still yields the approved priority without altering the original `PATH` tail.
+Using `systematic-debugging` for the unexpected suite failure. The error occurs after the empty-`PATH` refresh test, so I’m tracing whether its command shims leaked beyond the intended subshell or whether the reported line itself clears `PATH`.
+The suite failure was in test setup, not production behavior: two tests set `PATH` to synthetic entries before calling external commands such as `mkdir`. Keeping `/usr/bin:/bin` in those non-empty fixtures preserves the intended assertions while allowing setup; the dedicated empty-`PATH` test uses absolute command shims. The full behavioral suite now passes, and I’m doing final syntax and contract checks.
+Implemented managed PATH guards in `environments/linux/install.sh`.
+
+- Applies directory-existence and exact colon-delimited entry checks at bootstrap, managed Bash activation, and current-process refresh.
+- Preserves priority, existing entries, duplicates, spaces, and trailing empty PATH entries.
+- Repeated activation is idempotent.
+- Preserves mise/direnv activation, markers, backups, dry-run behavior, and final `main "$@"`.
+- Added focused behavioral coverage in `tests/install.sh`.
+
+Verification:
+
+- `setsid bash tests/install.sh < /dev/null`: PASS
+- `bash -n environments/linux/install.sh`: PASS
+- `bash -n tests/install.sh`: PASS

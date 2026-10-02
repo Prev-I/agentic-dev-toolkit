@@ -1,0 +1,37 @@
+{
+  "experiment_id": "gpt61-sol-strong-build-followup-20261001",
+  "status": "COMPLETE",
+  "decision": "KEEP_INCUMBENT",
+  "incumbent": "github-copilot/gpt-5.6-sol high",
+  "challenger": "github-copilot/gpt-6.1-sol high",
+  "summary": {
+    "gpt-5.6-sol": {
+      "coding_passes": 3,
+      "median_wall_clock_ms": 306369,
+      "median_credits": 112.99564,
+      "gate_adherence": 3,
+      "behavioral_mutation_detections": 2,
+      "human_correction_findings": 0
+    },
+    "gpt-6.1-sol": {
+      "coding_passes": 3,
+      "median_wall_clock_ms": 156586,
+      "median_credits": 28.657920000000004,
+      "gate_adherence": 2,
+      "behavioral_mutation_detections": 3,
+      "human_correction_findings": 1
+    }
+  },
+  "quality_findings": [
+    "coding-2-gpt-6.1-sol changed shared test setup, broke an existing WSL-path-dependent check, and then forced the non-WSL branch globally; the oracle and suite passed, but the harness change would require human correction before adoption.",
+    "coding-3-gpt-5.6-sol's mutation run exited because its new helper was absent from the historical installer instead of reaching a behavioral assertion, so that run is classified as HARNESS_ERROR rather than mutation sensitivity."
+  ],
+  "budget": {
+    "approved_credits": 500,
+    "observed_credits": 471.98711,
+    "remaining_credits": 28.01289,
+    "billing_caveat": "Runtime-reported cost multiplied by 100; not reconciled with provider billing."
+  },
+  "decision_basis": "Both models passed all three coding attempts. GPT-6.1 had stronger candidate-test mutation sensitivity and was faster and cheaper on this workload, but it had one human-correction finding and its approval-gate adherence was worse than GPT-5.6 at two of three versus three of three. The frozen rule is conjunctive and requires no quality regression and no worse gate adherence, so operational advantages cannot produce promotion.",
+  "routing_changed": false
+}

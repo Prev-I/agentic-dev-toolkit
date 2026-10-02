@@ -1,0 +1,20 @@
+Using test-driven development to reproduce the PATH regression before changing the installer, and the Karpathy guidelines to keep the fix surgical. The approved contract and two-file scope serve as the implementation plan; I will not create a separate plan file or delegate.
+The three PATH mutations are direct unconditional exports. I will add behavioral tests that source the installer without `main`, execute the generated Bash block in a clean subprocess, and exercise `ensure_shell_configuration` in a disposable HOME, including empty PATH, spaces, exact-entry matching, missing directories, idempotence, and dry-run non-mutation.
+The regression test fails for the expected reason: sourcing the managed block twice duplicates every managed entry. I will now introduce one small in-process helper, mirror its reverse-order guarded loop in the emitted block, and reuse the helper for bootstrap and refresh so the final priority remains unchanged.
+The full behavioral suite is green after the minimal implementation. Before completion I am checking syntax, the exact two-file diff, the installer’s final line, and shell semantics around the guarded match; no installer execution is involved.
+One final review found that the generated block’s loop variable could overwrite a user’s existing shell variable. I am removing that side effect by expanding the three guarded checks explicitly in the managed block; the installer helper keeps its local loop variable.
+Implemented managed PATH guards in `environments/linux/install.sh`:
+
+- Adds managed directories only when they exist and are absent as exact colon-delimited entries.
+- Applies consistently during bootstrap, managed Bash activation, and current-process refresh.
+- Preserves priority, existing entries, duplicates, trailing empty entries, and paths containing spaces.
+- Keeps repeated activation idempotent and dry-run non-mutating.
+- Preserves mise/direnv activation, markers, backups, and final `main "$@"`.
+
+Added focused behavioral coverage in `tests/install.sh`.
+
+Verification:
+
+- `setsid bash tests/install.sh < /dev/null` passed.
+- `bash -n environments/linux/install.sh && bash -n tests/install.sh` passed.
+- The installer itself was not executed.

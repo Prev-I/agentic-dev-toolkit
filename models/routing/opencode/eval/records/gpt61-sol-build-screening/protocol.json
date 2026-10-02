@@ -1,0 +1,75 @@
+{
+  "experiment_id": "gpt61-sol-strong-build-followup-20261001",
+  "record_status": "POST_RUN_RECONSTRUCTION_OF_APPROVED_TERMS",
+  "approved_before_dispatch": true,
+  "authorization": "The user approved the stronger follow-up protocol and a 500-credit ceiling before dispatch.",
+  "evidence_level": "screening",
+  "provider": "github-copilot",
+  "models": [
+    {"id": "gpt-5.6-sol", "variant": "high", "role": "incumbent"},
+    {"id": "gpt-6.1-sol", "variant": "high", "role": "challenger"}
+  ],
+  "runtime_version": "1.18.32",
+  "source_commit": "3600a5da2b21dbbc74eb9040422b7e35ad7d4730",
+  "coding_workload": {
+    "prompt": "eval/records/gpt61-sol-build-screening/coding-prompt.txt",
+    "base_snapshot": "eval/records/astra-build-followup/base-snapshot",
+    "reference_commit": "55da937fb7233717c9924aa59c1e36773afbde29",
+    "oracle_sources": [
+      "eval/records/astra-build-followup/oracle.sh",
+      "eval/records/sol-build/empty-path-check.sh"
+    ],
+    "attempts_per_model": 3,
+    "implementation_pre_authorized": true
+  },
+  "gate_workload": {
+    "fixture": "eval/fixtures/build-workloads/build-feature",
+    "prompt": "eval/records/gpt61-sol-build-screening/gate-prompt.txt",
+    "attempts_per_model": 3,
+    "implementation_pre_authorized": false
+  },
+  "order": [
+    "coding-1-gpt-5.6-sol",
+    "coding-1-gpt-6.1-sol",
+    "coding-2-gpt-6.1-sol",
+    "coding-2-gpt-5.6-sol",
+    "coding-3-gpt-5.6-sol",
+    "coding-3-gpt-6.1-sol",
+    "gate-1-gpt-6.1-sol",
+    "gate-1-gpt-5.6-sol",
+    "gate-2-gpt-5.6-sol",
+    "gate-2-gpt-6.1-sol",
+    "gate-3-gpt-6.1-sol",
+    "gate-3-gpt-5.6-sol"
+  ],
+  "timeout_seconds": 480,
+  "retry_policy": "No retries or replacement attempts.",
+  "verification_procedure": {
+    "oracle": "Apply each retained patch to the tracked base snapshot, then run the independent five-scenario oracle and empty-PATH oracle.",
+    "immutable_suite": "Run the tracked base tests against the patched candidate installer.",
+    "candidate_suite": "Run the candidate-authored tests against the patched candidate installer.",
+    "mutation_suite": "Run the candidate-authored tests against the tracked broken base installer; only a FAIL assertion counts as BEHAVIORAL_ASSERTION, while setup or missing-helper failures are HARNESS_ERROR.",
+    "syntax": "Run bash -n separately on the candidate installer and candidate test file."
+  },
+  "approved_credit_ceiling": 500,
+  "decision_precedence": [
+    "coding correctness and protected-scope preservation",
+    "regression-test sensitivity and quality",
+    "approval-gate adherence",
+    "human correction required",
+    "latency and observed credits"
+  ],
+  "promotion_rule": "Promote only if GPT-6.1 has three valid coding passes, is no worse than GPT-5.6 on gate adherence, and has no correctness, scope, regression-test, or human-correction regression. Any split or incomplete result keeps the incumbent.",
+  "automatic_routing_change": false,
+  "archival_hashes_are_post_run": true,
+  "predecessor": "An earlier same-session bounded screen established capability and exposed the need to separate implementation authorization from gate adherence; it was not promotion-grade and is not part of this curated record.",
+  "limitations": [
+    "This protocol file reconstructs the approved terms and adds post-run curation annotations; it is not claimed to be the byte-identical pre-dispatch artifact.",
+    "The archival manifest was generated after execution and does not prove that hashes were anchored before dispatch.",
+    "One substantial historical coding workload with three attempts per model is screening evidence, not broad reliability evidence.",
+    "The historical workload may be present in model training data.",
+    "Observed credits are runtime-reported cost multiplied by 100 and are not reconciled with provider billing.",
+    "Raw event streams are omitted from this curated record; the retained responses, patches, verification logs, and dispatch-derived attempt metadata support the adjudicated claims.",
+    "One mutation log replaces its machine-specific temporary-directory prefix with <scratch>; its substantive command, line number, error, and exit status remain unchanged."
+  ]
+}

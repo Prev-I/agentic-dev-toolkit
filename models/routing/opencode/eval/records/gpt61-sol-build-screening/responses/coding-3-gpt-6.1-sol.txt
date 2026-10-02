@@ -1,0 +1,21 @@
+Using systematic debugging and test-driven development to cover the PATH edge cases, then apply small guards at all three sites.
+
+
+All three sites use the same unconditional prepend. I’ll replace each with a directory check and exact colon-delimited membership check, processing directories in reverse order to preserve priority and empty PATH entries. Tests will cover all three sites under disposable HOME directories.
+
+
+The regression test fails as expected: sourcing the bootstrap twice duplicates all three directories. Using the Karpathy guidelines, I’ll keep the fix to small, quoted Bash guards at the existing sites.
+
+
+The installer compatibility suite passes, including the new PATH cases. The empty-PATH test initially hit a harness error because `cat` was unavailable; I added it to the absolute-command wrappers. Using verification-before-completion, I’ll finish with syntax checks and a final file review.
+
+
+Implemented guards at all three PATH sites in `environments/linux/install.sh`. Managed directories are prepended only when they exist and lack an exact PATH entry, preserving priority, existing entries, and empty entries.
+
+Added behavioral regressions in `tests/install.sh` for repeated activation, spaces, exact matching, missing directories, empty PATH, activation hooks, backups, and dry-run behavior.
+
+Verification:
+- `setsid bash tests/install.sh < /dev/null` — passed.
+- `bash -n environments/linux/install.sh tests/install.sh` — passed.
+
+Only the two permitted files changed. `main "$@"` remains the final installer line.

@@ -1,0 +1,22 @@
+Using systematic debugging to trace the current PATH behavior, test-driven development to add failing behavioral coverage before the fix, and Karpathy guidelines to keep the changes surgical. I’ll verify the three mutation sites, add focused tests that demonstrate the exact contract, then implement and run the requested isolated test and syntax checks.
+I’m using the writing-plans skill to create a compact in-session implementation plan; the scope restriction forbids creating its usual plan file, and explicit authorization removes the approval pause. The break each regression test must catch is unconditional insertion or substring-based membership at any of the three sites; expected PATH values will be hand-derived literals and asserted through sourced installer behavior.
+The root cause is confined to three unconditional assignments: bootstrap, generated `.bashrc`, and post-write refresh. I’m adding behavioral tests that execute sourced code in disposable homes, covering empty PATH’s trailing empty entry, missing directories, exact-entry matching versus prefixes, spaces, ordering, and repeated activation without inspecting implementation text.
+The new suite fails at the bootstrap assertion for the expected reason: it inserts a missing `.opencode/bin` and duplicates the already-present `bin`. I’m now replacing those assignments with one reverse-iteration helper for process PATHs and equivalent guarded logic in the emitted block, so prepending yields the required final priority while retaining the original PATH byte-for-byte as the suffix.
+The first green run exposed a test-fixture issue rather than an implementation failure: the test removed every system command from PATH before calling `mkdir` and before `ensure_shell_configuration` uses standard tools. I’m adjusting the nonempty fixture to retain `/bin`; for the empty-PATH refresh edge, I’ll exercise the shared process helper directly and separately execute the generated block from an empty PATH, avoiding any installer execution or artificial command mocks.
+The behavioral suite is green after the minimal implementation. I’m moving to independent verification now: exact requested syntax checks, another full no-terminal suite run, then a scoped diff review for shell edge cases, allowed files, and the installer’s final entry-point line.
+Fresh verification passed: both `bash -n` checks exited 0 and the required `setsid` suite reported `PASS`. Because this snapshot has no Git history and the task explicitly forbids delegation, I’m performing the final review directly against the scoped files rather than dispatching the reviewer workflow.
+The final review found one avoidable shell-side effect in the emitted profile block: the generic loop name `directory` would erase any user variable with that name via `unset`. I’m narrowing it to a managed-block-specific name, then rerunning the complete verification because even this small profile change must be proven.
+Implemented managed PATH guards in `environments/linux/install.sh`.
+
+- Adds managed directories only when they exist and are absent as exact colon-delimited entries.
+- Preserves priority, existing entries, duplicate existing entries, spaces, and empty PATH’s trailing entry.
+- Applies consistently to bootstrap, generated Bash configuration, and current-process refresh.
+- Repeated activation remains idempotent.
+- Preserved managed markers, mise/direnv activation, backups, dry-run behavior, and final `main "$@"` line.
+- Added focused behavioral regressions in `tests/install.sh`.
+
+Verification:
+
+- `setsid bash tests/install.sh < /dev/null` → `PASS: installer compatibility tests`
+- `bash -n environments/linux/install.sh` → passed
+- `bash -n tests/install.sh` → passed

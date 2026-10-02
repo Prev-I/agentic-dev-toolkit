@@ -1,0 +1,160 @@
+--- a/environments/linux/install.sh
++++ b/environments/linux/install.sh
+@@ -59,7 +59,16 @@
+ GCM_WINDOWS_PATH="${ADT_GCM_PATH:-/mnt/c/Program Files/Git/mingw64/bin/git-credential-manager.exe}"
+ GIT_CREDENTIAL_WRAPPER="${GIT_CREDENTIAL_WRAPPER:-$HOME/.local/bin/git-credential-manager-wsl}"
+ 
+-export PATH="$HOME/.local/bin:$HOME/bin:$HOME/.opencode/bin:$PATH"
++prepend_managed_paths() {
++  local directory
++  for directory in "$HOME/.opencode/bin" "$HOME/bin" "$HOME/.local/bin"; do
++    [[ -d "$directory" ]] || continue
++    [[ ":$PATH:" == *":$directory:"* ]] || PATH="$directory:$PATH"
++  done
++  export PATH
++}
++
++prepend_managed_paths
+ 
+ TEMP_PATHS=()
+ DOWNLOADED_INSTALLER=""
+@@ -393,7 +402,16 @@
+   cat >> "$temp_file" <<'EOF_BASHRC'
+ 
+ # >>> agentic-dev-toolkit >>>
+-export PATH="$HOME/.local/bin:$HOME/bin:$HOME/.opencode/bin:$PATH"
++if [[ -d "$HOME/.opencode/bin" && ":$PATH:" != *":$HOME/.opencode/bin:"* ]]; then
++  PATH="$HOME/.opencode/bin:$PATH"
++fi
++if [[ -d "$HOME/bin" && ":$PATH:" != *":$HOME/bin:"* ]]; then
++  PATH="$HOME/bin:$PATH"
++fi
++if [[ -d "$HOME/.local/bin" && ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
++  PATH="$HOME/.local/bin:$PATH"
++fi
++export PATH
+ export OPENCODE_ENABLE_EXA=true
+ if [[ -x "$HOME/.local/bin/mise" ]]; then
+   eval "$("$HOME/.local/bin/mise" activate bash)"
+@@ -410,7 +428,7 @@
+     rm -f "$temp_file"
+   fi
+ 
+-  export PATH="$HOME/.local/bin:$HOME/bin:$HOME/.opencode/bin:$PATH"
++  prepend_managed_paths
+ }
+ 
+ install_mise() {
+--- a/tests/install.sh
++++ b/tests/install.sh
+@@ -105,6 +105,100 @@
+   HOME="$original_home"
+ }
+ 
++capture_bootstrap_path() {
++  local home="$1"
++  local initial_path="$2"
++
++  HOME="$home" PATH="$initial_path" /bin/bash --noprofile --norc -c '
++    source "$1"
++    printf %s "$PATH"
++  ' _ "$TEMP_DIR/install-functions.sh"
++}
++
++capture_bashrc_path() {
++  local home="$1"
++  local initial_path="$2"
++
++  HOME="$home" PATH="$initial_path" /bin/bash --noprofile --norc -c '
++    direnv() { :; }
++    source "$1"
++    source "$1"
++    printf %s "$PATH"
++  ' _ "$home/.bashrc"
++}
++
++test_managed_paths_preserve_empty_path_at_bootstrap_and_shell_activation() {
++  local original_home="$HOME"
++  local original_path="$PATH"
++  local managed_home="$TEMP_DIR/home with spaces"
++  local expected="$managed_home/.local/bin:$managed_home/bin:$managed_home/.opencode/bin:"
++
++  mkdir -p "$managed_home/.local/bin" "$managed_home/bin" "$managed_home/.opencode/bin"
++
++  assert_equal "$(capture_bootstrap_path "$managed_home" "")" "$expected" \
++    "installer bootstrap must preserve an empty PATH entry after managed directories"
++
++  HOME="$managed_home"
++  PATH=""
++  prepend_managed_paths
++  assert_equal "$PATH" "$expected" \
++    "current-process PATH refresh must preserve an empty PATH entry after managed directories"
++
++  PATH="$original_path"
++  DRY_RUN=0
++  ensure_shell_configuration >/dev/null
++  assert_equal "$(capture_bashrc_path "$managed_home" "")" "$expected" \
++    "managed Bash activation must preserve priority, spaces, and an empty PATH entry"
++
++  HOME="$original_home"
++  PATH="$original_path"
++}
++
++test_shell_configuration_adds_only_existing_exact_missing_paths_once() {
++  local original_home="$HOME"
++  local original_path="$PATH"
++  local managed_home="$TEMP_DIR/exact path home"
++  local initial_path="/usr/bin:/before:$managed_home/.local/bin-extra:$managed_home/bin:/before:"
++  local expected="$managed_home/.local/bin:$initial_path"
++
++  mkdir -p "$managed_home/.local/bin" "$managed_home/bin"
++  assert_equal "$(capture_bootstrap_path "$managed_home" "$initial_path")" "$expected" \
++    "installer bootstrap must add only existing exact missing PATH entries"
++
++  HOME="$managed_home"
++  PATH="$initial_path"
++  DRY_RUN=0
++
++  ensure_shell_configuration >/dev/null
++  ensure_shell_configuration >/dev/null
++
++  assert_equal "$PATH" "$expected" \
++    "current-process refresh must add only existing exact PATH entries without changing prior entries"
++  assert_equal "$(capture_bashrc_path "$managed_home" "$initial_path")" "$expected" \
++    "repeated managed Bash activation must not add duplicates or missing directories"
++
++  HOME="$original_home"
++  PATH="$original_path"
++}
++
++test_shell_configuration_dry_run_does_not_mutate_path_or_home() {
++  local original_home="$HOME"
++  local original_path="$PATH"
++  local managed_home="$TEMP_DIR/dry-run-home"
++
++  HOME="$managed_home"
++  PATH="/dry-run-path:"
++  DRY_RUN=1
++
++  ensure_shell_configuration >/dev/null
++
++  assert_equal "$PATH" "/dry-run-path:" "shell configuration dry-run must not mutate PATH"
++  [[ ! -e "$managed_home" ]] || fail "shell configuration dry-run must not create HOME content"
++
++  HOME="$original_home"
++  PATH="$original_path"
++}
++
+ test_project_configuration_creates_direnv_file_when_missing() {
+   local project_root="$TEMP_DIR/project-with-direnv"
+   PROJECT_PATH="$project_root"
+@@ -986,6 +1080,9 @@
+ test_lttng_selector_falls_back_to_legacy_package
+ test_dry_run_does_not_probe_apt_package_metadata
+ test_shell_configuration_enables_direnv
++test_managed_paths_preserve_empty_path_at_bootstrap_and_shell_activation
++test_shell_configuration_adds_only_existing_exact_missing_paths_once
++test_shell_configuration_dry_run_does_not_mutate_path_or_home
+ test_project_configuration_creates_direnv_file_when_missing
+ test_project_configuration_preserves_existing_direnv_file
+ test_project_configuration_dry_run_previews_direnv_file_without_creating_it

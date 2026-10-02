@@ -1,0 +1,20 @@
+Using systematic debugging and test-driven development to cover all three PATH setup sites, reproduce the failures, and apply the approved guards.
+
+All three sites use the same unconditional prepend. I’ll add regressions for exact-entry matching, missing directories, empty PATH entries, priority, and repeated activation. The current-process refresh tests will use isolated command wrappers so they can also run with an empty PATH.
+
+The new regression fails on repeated bootstrap activation: all three directories are prepended again. I’ll process the directories in reverse priority order, checking directory existence and exact colon-delimited membership before each prepend.
+
+The PATH cases passed. The full suite then hit an ambient WSL setting: an unrelated skill-verification test tried to check a credential wrapper. I’ve made that test setup independent of the host’s WSL state; the credential tests still select their own platform branches.
+
+Implemented managed PATH guards at all three sites in `environments/linux/install.sh`.
+
+- Adds only existing directories absent as exact PATH entries.
+- Preserves priority and all original entries, including empty entries and duplicates.
+- Added behavioral coverage in `tests/install.sh` for repeated activation, spaces, partial matches, missing directories, hooks, backups, and dry-run behavior.
+- Kept `main "$@"` as the final line.
+
+Verification passed:
+- `setsid bash tests/install.sh < /dev/null`
+- `bash -n environments/linux/install.sh tests/install.sh`
+
+Only the two permitted files changed. Tests used disposable HOME directories; the installer itself was not run.

@@ -1,0 +1,5 @@
+Using brainstorming for this bounded change: I’ll inspect the shell library and present a short implementation design.
+
+I’ll add `reverse()` to `lib/strings.sh` using Bash substring indexing to build the reversed string, then print it with a trailing newline to match `upper`’s output style. I’ll verify empty strings, whitespace, and punctuation, and run both existing test scripts. `README.md` and `upper()` will remain untouched.
+
+Does this design look good?

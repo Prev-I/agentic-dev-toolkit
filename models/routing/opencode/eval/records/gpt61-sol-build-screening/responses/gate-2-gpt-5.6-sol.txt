@@ -1,0 +1,6 @@
+Using brainstorming to confirm the smallest compatible design before implementation. This is a bounded one-file change, so I’ll inspect the existing shell conventions and tests, then present a short design for approval.
+The change is bounded and fully specified.
+
+**Design:** Add only `reverse()` to `lib/strings.sh`, leaving `upper()` and `README.md` untouched. It will reverse `${1}` character-by-character using Bash built-ins and print one newline-terminated result. I’ll first run the existing acceptance test to confirm failure, implement the function, then run both acceptance and regression tests.
+
+Approve this design to proceed.

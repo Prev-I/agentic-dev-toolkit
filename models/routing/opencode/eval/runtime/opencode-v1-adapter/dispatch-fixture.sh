@@ -8,6 +8,7 @@ source "$dispatch_root/budget-ledger.sh"
 dispatch_fixture() {
   local outdir="" label="" prompt_file="" agent="" model="" variant=""
   local fixture_workspace="" timeout_seconds=900 ledger="" account=evaluation attempt=1
+  local routing_profile_id="" routing_profile_id_set=false
   local bin=${OPENCODE_BIN:-opencode}
 
   while (( $# )); do
@@ -19,6 +20,7 @@ dispatch_fixture() {
       --model) model=$2; shift 2 ;;
       --variant) variant=$2; shift 2 ;;
       --workspace) fixture_workspace=$2; shift 2 ;;
+      --routing-profile-id) routing_profile_id=$2; routing_profile_id_set=true; shift 2 ;;
       --timeout) timeout_seconds=$2; shift 2 ;;
       --ledger) ledger=$2; shift 2 ;;
       --account) account=$2; shift 2 ;;
@@ -28,6 +30,7 @@ dispatch_fixture() {
   done
   [[ -n "$outdir" && -n "$label" && -n "$prompt_file" ]] || return 2
   [[ -n "$agent" || ( -n "$model" && -n "$variant" ) ]] || return 2
+  [[ "$routing_profile_id_set" == false || -n "$routing_profile_id" ]] || return 2
 
   mkdir -p "$outdir"
   local raw="$outdir/raw.jsonl" start end status version commit target cwd prompt
@@ -35,7 +38,15 @@ dispatch_fixture() {
   version=$("$bin" --version 2>/dev/null || printf unknown)
   commit=$(git rev-parse HEAD 2>/dev/null || printf unknown)
   cwd=${fixture_workspace:-$PWD}
-  if [[ -n "$agent" ]]; then target="agent:$agent"; else target="$model"; fi
+  # These sentinels describe how the target was selected, not the surrounding
+  # OpenCode config. Callers with a verified profile can override them.
+  if [[ -n "$agent" ]]; then
+    target="agent:$agent"
+    [[ -n "$routing_profile_id" ]] || routing_profile_id=unresolved-runtime-profile
+  else
+    target="$model"
+    [[ -n "$routing_profile_id" ]] || routing_profile_id=direct-model-evaluation
+  fi
 
   start=$(date +%s%3N)
   set +e
@@ -122,6 +133,7 @@ PY
   fi
 
   LABEL="$label" TARGET="$target" VARIANT="${variant:-resolved}" ATTEMPT="$attempt" \
+    ROUTING_PROFILE_ID="$routing_profile_id" \
     VERSION="$version" COMMIT="$commit" STATUS="$status" START="$start" END="$end" \
     CREDITS="$credits" CLASSIFICATION="$classification" FAILURE_CLASS="$failure_class" \
     PARSED="$outdir/.parsed.json" TIMEOUT_SECONDS="$timeout_seconds" \
@@ -137,10 +149,10 @@ document = {
     "timestamp": datetime.datetime.now().astimezone().isoformat(),
     "label": os.environ["LABEL"],
     "attempt": int(os.environ["ATTEMPT"]),
-    "routing_profile_id": "v1-restored-2026-09",
+    "routing_profile_id": os.environ["ROUTING_PROFILE_ID"],
     "routing_profile_commit": os.environ["COMMIT"],
     "runtime_version": os.environ["VERSION"].strip(),
-    "eval_runner_version": "phase-r-dispatch-v1",
+    "eval_runner_version": "phase-r-dispatch-v2",
     "environment": f"{os.uname().sysname} {os.uname().release} {os.uname().machine}",
     "dispatch_target": os.environ["TARGET"],
     "variant": os.environ["VARIANT"],

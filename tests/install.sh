@@ -268,6 +268,7 @@ test_dry_run_does_not_probe_apt_package_metadata() {
   output="$(install_system_packages)"
   [[ "$output" == *"Dry-run leaves the distro-specific LTTng package unresolved"* ]] || fail "dry-run must explain the unresolved LTTng package"
   [[ "$output" == *" direnv"* ]] || fail "dry-run must install direnv"
+  [[ "$output" == *" libsecret-1-0 "* ]] || fail "dry-run must install libsecret-1-0 as a complete package argument"
 }
 
 test_shell_configuration_enables_direnv() {
@@ -2020,7 +2021,7 @@ test_installer_loads_catalog_beside_a_standalone_copy() {
   fi
 
   assert_equal "$status" "0" "a standalone two-file bundle must find its adjacent catalog"
-  assert_equal "$output" "0.3.0" "the standalone bundle must run the copied installer"
+  assert_equal "$output" "0.3.1" "the standalone bundle must run the copied installer"
 }
 
 test_installer_prefers_explicit_then_repository_catalog() {
@@ -2038,7 +2039,7 @@ test_installer_prefers_explicit_then_repository_catalog() {
     status=$?
   fi
   assert_equal "$status" "0" "an explicit catalog must override an adjacent catalog"
-  assert_equal "$output" "0.3.0" "an explicit valid catalog must let a standalone bundle run"
+  assert_equal "$output" "0.3.1" "an explicit valid catalog must let a standalone bundle run"
 
   cp "$INSTALLER" "$checkout/environments/linux/install.sh"
   cp "$CATALOG_FILE" "$checkout/catalog/software-catalog.env"
@@ -2050,7 +2051,7 @@ test_installer_prefers_explicit_then_repository_catalog() {
     status=$?
   fi
   assert_equal "$status" "0" "a recognized repository catalog must override an adjacent catalog"
-  assert_equal "$output" "0.3.0" "a repository-layout copy must run with its repository catalog"
+  assert_equal "$output" "0.3.1" "a repository-layout copy must run with its repository catalog"
 }
 
 test_source_commit_requires_the_exact_repository_root() {
@@ -2129,7 +2130,7 @@ test_installer_version_flag() {
   status=$?
   set -e
   assert_equal "$status" "0" "--version must exit 0"
-  assert_equal "$output" "0.3.0" "--version must print exactly the version"
+  assert_equal "$output" "0.3.1" "--version must print exactly the version"
   [[ "$output" != *"Unknown option"* ]] \
     || fail "--version must be parsed before the generic unknown-option arm"
 }
@@ -2153,7 +2154,7 @@ test_installer_version_ignores_ambiguous_opencode_config() {
   set -e
 
   assert_equal "$status" "0" "--version must not resolve the OpenCode config"
-  assert_equal "$output" "0.3.0" "--version with dual configs must print exactly the version"
+  assert_equal "$output" "0.3.1" "--version with dual configs must print exactly the version"
 }
 
 test_opencode_config_resolution_honors_skip_and_explicit_override() {

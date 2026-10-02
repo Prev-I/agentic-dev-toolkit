@@ -435,9 +435,11 @@ an agent can reach, and an `az` an agent can reach is an `az` an agent can
 carry no credential of their own — they authenticate through Azure.Identity's
 `ChainedTokenCredential`, and on a WSL workstation every other link of that chain
 is unavailable: no `EnvironmentCredential` variables, no Visual Studio, no
-`msalruntime` for the VS Code broker, no PowerShell, no `azd`, no libsecret for
-the interactive browser. The Azure CLI link is the only one that resolves, and it
-is reached by:
+`msalruntime` for the VS Code broker, no PowerShell, and no `azd`. The installer
+provides the libsecret runtime for the Azure DevOps MCP's optional native
+authentication integration, but no Secret Service or keyring. For this
+Azure.Identity chain, the Azure CLI link remains the reliable non-interactive
+path and is reached by:
 
 ```bash
 az account get-access-token --output json --resource <resource>

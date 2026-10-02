@@ -12,7 +12,7 @@ readonly KARPATHY_RAW_BASE='https://raw.githubusercontent.com/multica-ai/andrej-
 readonly KARPATHY_SKILL_PATH='skills/karpathy-guidelines/SKILL.md'
 # The installer's own version, declared with the other constants for parity
 # with the repository's other versioned scripts. Printed verbatim by --version.
-readonly SCRIPT_VERSION="0.3.0"
+readonly SCRIPT_VERSION="0.3.1"
 
 log() {
   printf '\n==> %s\n' "$*"
@@ -768,8 +768,10 @@ install_system_packages() {
     bash-completion build-essential ca-certificates curl direnv gawk git gnupg jq
     openssh-client pkg-config ripgrep tar unzip xz-utils zip
     libbz2-dev libffi-dev libicu-dev libkrb5-3 liblzma-dev libncursesw5-dev
-    libreadline-dev libsqlite3-dev libssl-dev tk-dev uuid-dev
-    zlib1g-dev
+    libreadline-dev
+    # Runtime library for the Azure DevOps MCP's optional native authentication integration.
+    libsecret-1-0
+    libsqlite3-dev libssl-dev tk-dev uuid-dev zlib1g-dev
   )
   local lttng_package
 
@@ -1807,9 +1809,11 @@ render_az_shim() {
   # of their own: they authenticate through Azure.Identity's
   # ChainedTokenCredential, and on a WSL workstation every other link of that
   # chain is unavailable -- no EnvironmentCredential variables, no Visual
-  # Studio, no msalruntime for the VS Code broker, no PowerShell, no azd, no
-  # libsecret for the interactive browser. The Azure CLI link is the only one
-  # that resolves, and it is reached by a single call:
+  # Studio, no msalruntime for the VS Code broker, no PowerShell and no azd. The
+  # libsecret runtime is installed for the Azure DevOps MCP's optional native
+  # authentication integration, but no Secret Service or keyring is provided.
+  # For this Azure.Identity chain, the Azure CLI link remains the reliable
+  # non-interactive path and is reached by a single call:
   #
   #     az account get-access-token --output json --resource <resource>
   #

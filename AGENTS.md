@@ -343,9 +343,11 @@ store to keep alive. One login for both sides is the whole point; do not
 credential of their own and authenticate through Azure.Identity's
 `ChainedTokenCredential`. On a WSL workstation every other link of that chain is
 unavailable — no `EnvironmentCredential` variables, no Visual Studio, no
-`msalruntime` for the VS Code broker, no PowerShell, no `azd`, no libsecret for
-the interactive browser — so the Azure CLI link is the only one that resolves,
-and it is reached by `az account get-access-token`. `version`, `login`, `logout`
+`msalruntime` for the VS Code broker, no PowerShell, and no `azd`. The installer
+provides the libsecret runtime for the Azure DevOps MCP's optional native
+authentication integration, but no Secret Service or keyring. For this
+Azure.Identity chain, the Azure CLI link remains the reliable non-interactive
+path and is reached by `az account get-access-token`. `version`, `login`, `logout`
 and `account {show,list}` round it out. Widening the list widens what an agent
 can do to a live subscription, so treat additions as a security change, not a
 convenience. `AZ_UNSAFE=1` is the deliberate override and is meant to be typed.

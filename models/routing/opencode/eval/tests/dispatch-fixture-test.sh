@@ -85,6 +85,8 @@ assert_file "$out/dispatch.json"
 assert_contains "$(<"$out/raw.jsonl")" 'step_finish'
 assert_contains "$(<"$workspace/args.txt")" '--agent explore'
 assert_contains "$(<"$workspace/args.txt")" '--format json'
+assert_contains "$(<"$out/dispatch.json")" '"routing_profile_id": "unresolved-runtime-profile"'
+assert_contains "$(<"$out/dispatch.json")" '"eval_runner_version": "phase-r-dispatch-v2"'
 for field in routing_profile_commit runtime_version eval_runner_version label attempt \
              dispatch_target wall_clock_ms observed_cost derived_credits tokens exit_status classification; do
   assert_contains "$(<"$out/dispatch.json")" "\"$field\""
@@ -178,6 +180,40 @@ DISPATCH_ARGS_SINK="$workspace/model-args.txt" OPENCODE_BIN="$workspace/opencode
   || fail "explicit model dispatch failed"
 assert_contains "$(<"$workspace/model-args.txt")" '--model github-copilot/claude-sonnet-5 --variant high'
 assert_contains "$(<"$model_out/dispatch.json")" '"dispatch_target": "github-copilot/claude-sonnet-5"'
+assert_contains "$(<"$model_out/dispatch.json")" '"routing_profile_id": "direct-model-evaluation"'
+
+# --- an experiment that knows its resolved profile can override the honest
+# fallback instead of inheriting a historical constant ---
+profile_out="$workspace/profile"
+DISPATCH_ARGS_SINK="$workspace/profile-args.txt" OPENCODE_BIN="$workspace/opencode-ok" \
+  dispatch_fixture --outdir "$profile_out" \
+  --label profile --prompt-file "$workspace/prompt.txt" --agent build \
+  --routing-profile-id experiment-profile-v2 \
+  || fail "explicit profile dispatch failed"
+assert_contains "$(<"$profile_out/dispatch.json")" '"routing_profile_id": "experiment-profile-v2"'
+assert_file "$workspace/profile-args.txt"
+if grep -q -- '--routing-profile-id' "$workspace/profile-args.txt"; then
+  fail "routing profile metadata leaked into the opencode command line"
+fi
+
+model_profile_out="$workspace/model-profile"
+OPENCODE_BIN="$workspace/opencode-ok" dispatch_fixture --outdir "$model_profile_out" \
+  --label model-profile --prompt-file "$workspace/prompt.txt" \
+  --model github-copilot/claude-sonnet-5 --variant high \
+  --routing-profile-id model-comparison-v1 \
+  || fail "explicit model profile dispatch failed"
+assert_contains "$(<"$model_profile_out/dispatch.json")" '"routing_profile_id": "model-comparison-v1"'
+
+if OPENCODE_BIN="$workspace/opencode-ok" dispatch_fixture --outdir "$workspace/empty-profile" \
+  --label empty-profile --prompt-file "$workspace/prompt.txt" --agent build \
+  --routing-profile-id ""; then
+  fail "accepted an explicitly empty routing profile ID"
+fi
+[[ ! -e "$workspace/empty-profile" ]] || fail "empty profile rejection created dispatch output"
+
+if grep -q 'v1-restored-2026-09' "$root/runtime/opencode-v1-adapter/dispatch-fixture.sh"; then
+  fail "dispatch primitive restored the stale historical profile ID"
+fi
 
 # --- the primitive owns no gate semantics ---
 if grep -nE '(PASS|FAIL|pass|block)' "$root/runtime/opencode-v1-adapter/dispatch-fixture.sh" \

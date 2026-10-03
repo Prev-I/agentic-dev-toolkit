@@ -12,22 +12,27 @@ import sys
 
 current = json.loads(os.environ["CURRENT"])
 expected = json.loads(os.environ["RESTORED"])
-expected["model"] = "github-copilot/gpt-5.6-sol"
-for role, model in {
-    "plan": "github-copilot/claude-opus-5.5",
-    "build": "github-copilot/gpt-5.6-sol",
-    "general": "github-copilot/gpt-6-luna",
-    "explore": "github-copilot/gpt-6-luna",
-    "scout": "github-copilot/gpt-6-luna",
-    "reviewer": "github-copilot/claude-opus-5.5",
-    "expert": "openai/gpt-6-astra",
-    "breakglass": "openai/gpt-6-sol",
-}.items():
+expected["model"] = "github-copilot/gpt-6.1-sol"
+approved = {
+    "plan": ("github-copilot/claude-opus-5.5", "xhigh"),
+    "build": ("github-copilot/gpt-6.1-sol", "high"),
+    "general": ("github-copilot/gpt-6.1-sol", "medium"),
+    "explore": ("github-copilot/gpt-6-luna", "medium"),
+    "scout": ("github-copilot/gpt-6-luna", "low"),
+    "reviewer": ("github-copilot/claude-opus-5.5", "high"),
+    "expert": ("openai/gpt-6-astra", "xhigh"),
+    "breakglass": ("openai/gpt-6.1-sol", "max"),
+    "compaction": ("github-copilot/claude-sonnet-5.5", "low"),
+    "title": ("github-copilot/gpt-6-luna", "low"),
+    "summary": ("github-copilot/gpt-6-luna", "low"),
+}
+for role, (model, variant) in approved.items():
     expected["agent"][role]["model"] = model
-assert current == expected, "Only approved models/default may change; preserve all permissions and other roles"
+    expected["agent"][role]["variant"] = variant
+assert current == expected, "Only approved models/default/variants may change; preserve all permissions and modes"
 targets = json.load(open(sys.argv[1], encoding="utf-8"))
-assert targets["profile_id"] == "v5-build-quality-rollback-2026-09-29"
-assert targets["decision_reference"] == "docs/decisions/2026-09-29-build-model-rollback.md"
+assert targets["profile_id"] == "v6-current-routing-2026-10-03"
+assert targets["decision_reference"] == "docs/decisions/2026-10-03-current-routing-alignment.md"
 assert targets["routing_authority"] == "opencode.jsonc agent block"
 assert targets["markdown_agents_carry_routing_fields"] is False
 assert targets["default_model"] == current["model"]
@@ -38,10 +43,8 @@ for role, target in targets["agents"].items():
         if target[field] is not None:
             assert row.get(field) == target[field], (role, field)
 records = {
-    "plan": "plan-breakglass-alignment/capability/plan-opus55-max/dispatch.json",
     "explore": "gpt6-role-screening/recovery/explore/pair1-arm2-luna6/dispatch/dispatch.json",
     "scout": "navigation-model-alignment/capability/scout-luna6-low/dispatch.json",
-    "breakglass": "plan-breakglass-alignment/capability/breakglass-sol6-max/dispatch.json",
 }
 records_root = os.path.join(os.path.dirname(sys.argv[1]), "..", "records")
 for role, relative in records.items():
@@ -57,5 +60,5 @@ explore_result = next(
     if item["model"] == "gpt-6-luna"
 )
 assert explore_result["gate_passed"] is True
-print("PASS: current routing changes only approved models/default")
+print("PASS: current routing changes only approved models/default/variants")
 PY

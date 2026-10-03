@@ -5,7 +5,7 @@
   // Do not replace unrelated configuration, and append to an existing
   // instructions array rather than replacing it.
   //
-  // User-approved selection: docs/decisions/2026-09-29-build-model-rollback.md.
+  // User-approved selection: docs/decisions/2026-10-03-current-routing-alignment.md.
   // Targets: eval/manifests/current-routing-targets.json.
   // Historical Phase-R profile remains in profiles/v1-restored-2026-09.jsonc.
   //
@@ -19,7 +19,7 @@
   ],
 
   // Baseline model applied when no agent override matches.
-  "model": "github-copilot/gpt-5.6-sol",
+  "model": "github-copilot/gpt-6.1-sol",
 
   "permission": {
     // Web search via Exa AI — requires OPENCODE_ENABLE_EXA=true in the environment.
@@ -38,11 +38,10 @@
 
     "plan": {
       // Architectural planning and task decomposition.
-      // Variant `max` is capability-verified for Opus 5.5 in
-      // eval/records/plan-breakglass-alignment/.
+      // Variant `xhigh` is user-selected and exposed by the current catalog.
       "mode": "primary",
       "model": "github-copilot/claude-opus-5.5",
-      "variant": "max",
+      "variant": "xhigh",
       "permission": {
         "edit": "deny",
         "task": {
@@ -56,7 +55,7 @@
     "build": {
       // Hands-on code generation and modification; the user-selected controller.
       "mode": "primary",
-      "model": "github-copilot/gpt-5.6-sol",
+      "model": "github-copilot/gpt-6.1-sol",
       "variant": "high",
       "permission": {
         "edit": "allow",
@@ -73,8 +72,8 @@
 
     "general": {
       // Catch-all delegated worker for bounded tasks.
-      "model": "github-copilot/gpt-6-luna",
-      "variant": "high",
+      "model": "github-copilot/gpt-6.1-sol",
+      "variant": "medium",
       "permission": {
         "task": {
           "*": "allow",
@@ -145,7 +144,7 @@
       // Human-selected primary only. Never Task-routable; the deny rules
       // above are the control. `hidden` is not a security property.
       "mode": "primary",
-      "model": "openai/gpt-6-sol",
+      "model": "openai/gpt-6.1-sol",
       "variant": "max",
       "permission": {
         "edit": "deny",
@@ -157,17 +156,17 @@
     // ── Lightweight utility agents ─────────────────────────────────
 
     "compaction": {
-      "model": "github-copilot/gpt-5.6-terra",
-      "variant": "medium"
+      "model": "github-copilot/claude-sonnet-5.5",
+      "variant": "low"
     },
 
     "title": {
-      "model": "github-copilot/gpt-5.6-luna",
+      "model": "github-copilot/gpt-6-luna",
       "variant": "low"
     },
 
     "summary": {
-      "model": "github-copilot/gpt-5.6-luna",
+      "model": "github-copilot/gpt-6-luna",
       "variant": "low"
     }
   }

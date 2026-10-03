@@ -13,17 +13,17 @@ The routing policy is loaded through OpenCode's `instructions` setting; it does 
 
 | Role | OpenCode agent | Model | Variant |
 |---|---|---|---|
-| Planning/design | `plan` | `github-copilot/claude-opus-5.5` | `max` |
-| Primary build/controller | `build` | `github-copilot/gpt-5.6-sol` | `high` |
-| Delegated implementation/debugging | `general` | `github-copilot/gpt-6-luna` | `high` |
+| Planning/design | `plan` | `github-copilot/claude-opus-5.5` | `xhigh` |
+| Primary build/controller | `build` | `github-copilot/gpt-6.1-sol` | `high` |
+| Delegated implementation/debugging | `general` | `github-copilot/gpt-6.1-sol` | `medium` |
 | Local codebase exploration | `explore` | `github-copilot/gpt-6-luna` | `medium` |
 | External/upstream research | `scout` | `github-copilot/gpt-6-luna` | `low` |
 | Independent review | `reviewer` | `github-copilot/claude-opus-5.5` | `high` |
 | Escalation-only expert | `expert` | `openai/gpt-6-astra` | `xhigh` |
-| Human-only breakglass | `breakglass` | `openai/gpt-6-sol` | `max` |
-| Context compaction | `compaction` | `github-copilot/gpt-5.6-terra` | `medium` |
-| Session title | `title` | `github-copilot/gpt-5.6-luna` | `low` |
-| Session summary | `summary` | `github-copilot/gpt-5.6-luna` | `low` |
+| Human-only breakglass | `breakglass` | `openai/gpt-6.1-sol` | `max` |
+| Context compaction | `compaction` | `github-copilot/claude-sonnet-5.5` | `low` |
+| Session title | `title` | `github-copilot/gpt-6-luna` | `low` |
+| Session summary | `summary` | `github-copilot/gpt-6-luna` | `low` |
 
 `opencode.jsonc` is the single authority for role-to-model assignment.
 `.opencode/agents/reviewer.md` and `.opencode/agents/expert.md` define prompt,
@@ -39,14 +39,14 @@ direct OpenAI subscription connection; normal work stays on Copilot. Plan now
 shares Opus 5.5 with Reviewer. All permissions and Breakglass boundaries remain
 unchanged.
 
-The [2026-09-29 Build rollback](docs/decisions/2026-09-29-build-model-rollback.md)
-extends the navigation alignment for current use. It is a monitored routing
-choice, not a claim of general model superiority.
+The [2026-10-03 current routing alignment](docs/decisions/2026-10-03-current-routing-alignment.md)
+records the active user selection. It is an operational routing choice, not a
+claim of general model superiority.
 `eval/manifests/current-routing-targets.json` declares the current targets; the
-default model follows Build (Copilot GPT-5.6 Sol).
-Seven of the eight current-profile role substitutions have fresh capability or
-role-screening evidence; direct OpenAI Astra inference and Expert-role fitness remain unverified, an
-exception to the usual capability-probe prerequisite below.
+default model follows Build (Copilot GPT-6.1 Sol). The decision record states
+the evidence boundary for substitutions without new successful-call or
+role-fixture evidence, including the unverified direct OpenAI Astra inference
+and Expert-role fitness exception.
 
 ## Routing migration
 
@@ -234,15 +234,14 @@ call:
 
 ```text
 github-copilot/claude-opus-5.5
+github-copilot/claude-sonnet-5.5
 github-copilot/gpt-6-luna
-github-copilot/gpt-5.6-luna
-github-copilot/gpt-5.6-terra
-github-copilot/gpt-5.6-sol
-openai/gpt-6-sol
+github-copilot/gpt-6.1-sol
+openai/gpt-6.1-sol
 openai/gpt-6-astra
 ```
 
-Variant availability can depend on the provider/model catalog exposed to your installation. Verify `high`, `xhigh`, and `max` before merging. If a requested variant is not exposed, use the highest available variant for that model without changing the role mapping.
+Variant availability can depend on the provider/model catalog exposed to your installation. Verify `low`, `medium`, `high`, `xhigh`, and `max` as applicable before merging. If a requested variant is not exposed, use the highest available variant for that model without changing the role mapping.
 
 ## 2. Enable web search
 
@@ -280,8 +279,8 @@ alignment check inspects:
 
 `reviewer` is independent and read-only on Copilot Opus 5.5/high. `expert` uses
 direct OpenAI Astra/xhigh, is hidden, read-only, cannot spawn subagents, and is
-capped at six agentic steps. Build uses Copilot GPT-5.6 Sol/high; Breakglass uses
-direct OpenAI GPT-6 Sol/max as a human-selected primary.
+capped at six agentic steps. Build uses Copilot GPT-6.1 Sol/high; Breakglass uses
+direct OpenAI GPT-6.1 Sol/max as a human-selected primary.
 
 These are copies. After installing them — and after any later change to
 either side — [the alignment check](#alignment-check--is-the-installed-configuration-still-this-bundle)
@@ -302,17 +301,17 @@ entry in an existing global config to the absolute installed path.
 The fragment pins all eleven roles as follows:
 
 ```text
-plan       -> Claude Opus 5.5 (Copilot)   max
-build      -> GPT-5.6 Sol (Copilot)       high
-general    -> GPT-6 Luna (Copilot)        high
+plan       -> Claude Opus 5.5 (Copilot)   xhigh
+build      -> GPT-6.1 Sol (Copilot)       high
+general    -> GPT-6.1 Sol (Copilot)       medium
 explore    -> GPT-6 Luna (Copilot)        medium
 scout      -> GPT-6 Luna (Copilot)        low
 reviewer   -> Claude Opus 5.5 (Copilot)   high
 expert     -> GPT-6 Astra (direct OpenAI) xhigh
-breakglass -> GPT-6 Sol (direct OpenAI)   max
-compaction -> GPT-5.6 Terra (Copilot)     medium
-title      -> GPT-5.6 Luna (Copilot)      low
-summary    -> GPT-5.6 Luna (Copilot)      low
+breakglass -> GPT-6.1 Sol (direct OpenAI) max
+compaction -> Claude Sonnet 5.5 (Copilot) low
+title      -> GPT-6 Luna (Copilot)        low
+summary    -> GPT-6 Luna (Copilot)        low
 ```
 
 It also permits `plan`, `build`, and `general` to invoke subagents via the Task
@@ -324,7 +323,7 @@ permission blocks and at the top level.
 `.opencode/model-routing.md` provides the semantic mapping:
 
 ```text
-Superpowers implementation subagent -> general    -> GPT-6 Luna high (Copilot)
+Superpowers implementation subagent -> general    -> GPT-6.1 Sol medium (Copilot)
 Superpowers review / re-review       -> reviewer   -> Claude Opus 5.5 high (Copilot)
 high-risk / disputed judgment        -> expert     -> GPT-6 Astra xhigh (direct OpenAI)
 ```

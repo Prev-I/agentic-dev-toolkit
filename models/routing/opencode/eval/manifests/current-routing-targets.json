@@ -1,19 +1,19 @@
 {
-  "profile_id": "v5-build-quality-rollback-2026-09-29",
-  "decision_reference": "docs/decisions/2026-09-29-build-model-rollback.md",
-  "default_model": "github-copilot/gpt-5.6-sol",
+  "profile_id": "v6-current-routing-2026-10-03",
+  "decision_reference": "docs/decisions/2026-10-03-current-routing-alignment.md",
+  "default_model": "github-copilot/gpt-6.1-sol",
   "agents": {
-    "plan": {"model": "github-copilot/claude-opus-5.5", "variant": "max", "mode": "primary"},
-    "build": {"model": "github-copilot/gpt-5.6-sol", "variant": "high", "mode": "primary"},
-    "general": {"model": "github-copilot/gpt-6-luna", "variant": "high", "mode": null},
+    "plan": {"model": "github-copilot/claude-opus-5.5", "variant": "xhigh", "mode": "primary"},
+    "build": {"model": "github-copilot/gpt-6.1-sol", "variant": "high", "mode": "primary"},
+    "general": {"model": "github-copilot/gpt-6.1-sol", "variant": "medium", "mode": null},
     "explore": {"model": "github-copilot/gpt-6-luna", "variant": "medium", "mode": null},
     "scout": {"model": "github-copilot/gpt-6-luna", "variant": "low", "mode": null},
     "reviewer": {"model": "github-copilot/claude-opus-5.5", "variant": "high", "mode": "subagent"},
-    "compaction": {"model": "github-copilot/gpt-5.6-terra", "variant": "medium", "mode": null},
-    "title": {"model": "github-copilot/gpt-5.6-luna", "variant": "low", "mode": null},
-    "summary": {"model": "github-copilot/gpt-5.6-luna", "variant": "low", "mode": null},
+    "compaction": {"model": "github-copilot/claude-sonnet-5.5", "variant": "low", "mode": null},
+    "title": {"model": "github-copilot/gpt-6-luna", "variant": "low", "mode": null},
+    "summary": {"model": "github-copilot/gpt-6-luna", "variant": "low", "mode": null},
     "expert": {"model": "openai/gpt-6-astra", "variant": "xhigh", "mode": "subagent"},
-    "breakglass": {"model": "openai/gpt-6-sol", "variant": "max", "mode": "primary"}
+    "breakglass": {"model": "openai/gpt-6.1-sol", "variant": "max", "mode": "primary"}
   },
   "forbidden_model_references": ["claude-opus-4.6", "gpt-5.3-codex"],
   "forbidden_effective_state": {

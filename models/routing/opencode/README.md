@@ -48,6 +48,13 @@ the evidence boundary for substitutions without new successful-call or
 role-fixture evidence, including the unverified direct OpenAI Astra inference
 and Expert-role fitness exception.
 
+[`observe/`](observe/) contains the read-only, post-hoc observer for the current
+profile's operational observation period. It produces metadata-only reports in
+user state outside the repository, includes Task children, separates eval
+dispatchers from production sessions, and requires human confirmation before
+applying trigger thresholds. Its README defines the weekly review and privacy
+boundary.
+
 ## Routing migration
 
 The historical OpenCode V1 multi-model routing restoration was governed by:

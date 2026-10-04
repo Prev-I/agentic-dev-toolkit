@@ -59,6 +59,55 @@ Task child: parent hash, repository class, and decision-packet boolean only.
 Packet presence requires all seven structured headings and does not assess
 their content, correctness, or whether escalation was justified.
 
+`STALE_PROCESS` denotes a session created after configuration writing whose
+runtime log run was already loading before that boundary. Run-first-seen is a
+logged startup bound, not an OS process creation timestamp. Log rotation can
+remove this evidence; absence is not proof of a fresh process. These flags are
+informational and never automatically trigger routing rollback.
+
+`MANUAL_OVERRIDE` is a review candidate when assistant messages for the same
+agent change models mid-session to neither the current manifest model nor the
+previous model read from `--previous-config` (default: the local 20261003 backup).
+It is not proof of human action: plugins or other runtime paths can also select
+a model. Known stale processes take precedence; the candidate requires review
+before any action. If previous configuration is unavailable, that evidence gap
+limits the classification.
+
+Repository identity prefers Git remote URLs (including linked-worktree common
+config): `github.com/Prev-I/agentic-dev-toolkit` is toolkit. Directory naming is
+only a fallback when remotes are absent. Git config is read without executing
+Git, includes, commands, or URLs. Gate, scope and rework episodes record the
+observed message model/variant; the product Build checkpoint counts only gate
+episodes observed on the current Build model. Agent names alone do not qualify.
+
+The alignment check reports a non-blocking `WARN STALE_PROCESS` for running
+Linux OpenCode processes started before the latest configuration mtime. It
+reads `/proc` process names/start ticks, not command arguments, and never stops
+or reloads a process. File-alignment status and exit code remain unchanged.
+
+### Compaction variant diagnosis — OpenCode 1.18.32
+
+The 2026-10-04 19:54:11.861 UTC compaction inherited a Plan parent message using
+`claude-opus-5.5` / `xhigh`. The selected compaction model was configured
+`claude-sonnet-5.5`, but the recorded variant was `xhigh`, not configured `low`.
+Version-pinned sources:
+
+- [compaction.ts](https://github.com/anomalyco/opencode/blob/v1.18.32/packages/opencode/src/session/compaction.ts)
+  selects `agent.model` but assigns `variant: userMessage.model.variant` and
+  passes the parent user message to the processor.
+- [llm/request.ts](https://github.com/anomalyco/opencode/blob/v1.18.32/packages/opencode/src/session/llm/request.ts)
+  selects `input.model.variants[input.user.model.variant]`, rather than the
+  configured compaction agent variant. Missing model variants resolve to no
+  variant options; stored `xhigh` is not proof the provider applied that effort.
+
+Classification: **OpenCode variant inheritance behavior**, not config drift.
+Proposed upstream correction (not applied): resolve the compaction variant from
+the compaction agent, validate it against the selected model, and pass a copied
+user request with that resolved variant to both metadata and LLM preparation.
+Add a runtime test with parent `xhigh` and compaction `low`; both stored metadata
+and prepared options must use `low`. No runtime/config/plugin changes are made
+by this observer.
+
 ### Local activation evidence inspected on 2026-10-04
 
 `opencode.jsonc.bak-20261003` preserves a 2026-09-29 modification time; its

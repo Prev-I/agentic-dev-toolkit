@@ -63,6 +63,7 @@ check_alignment() {
   REPO_JSON="$repo_json" LIVE_JSON="$live_json" TARGETS="$targets" \
     BUNDLE_ROOT="$bundle_root" LIVE_SUPPORT="$live_support" \
     PROFILE_PATH="$profile" LIVE_CONFIG_PATH="$live_config" JSON_OUT="$json_out" \
+    PROCESS_METADATA="$alignment_root/../../../observe/process_metadata.py" \
     python3 <<'PY'
 import datetime
 import hashlib
@@ -70,6 +71,8 @@ import json
 import os
 import re
 import sys
+import runpy
+from pathlib import Path
 
 repo = json.loads(os.environ["REPO_JSON"])
 live = json.loads(os.environ["LIVE_JSON"])
@@ -284,6 +287,11 @@ elif repo_routing != live_routing:
 # --- report ---------------------------------------------------------------
 
 status = "DRIFT" if drift else ("STALE" if stale else "ALIGNED")
+process_helper = runpy.run_path(os.environ["PROCESS_METADATA"])
+old_processes = process_helper["stale_processes"](
+    int(os.stat(os.environ["LIVE_CONFIG_PATH"]).st_mtime * 1000),
+    Path(os.environ.get("OPENCODE_PROC_ROOT", "/proc")),
+)
 document = {
     "checked_at": datetime.datetime.now().astimezone().isoformat(),
     "status": status,
@@ -293,6 +301,7 @@ document = {
     "auto_repair": False,
     "drift": drift,
     "stale": stale,
+    "stale_processes": old_processes,
 }
 out = os.environ.get("JSON_OUT") or ""
 if out:
@@ -324,6 +333,8 @@ if stale:
         show(item)
 if status == "ALIGNED":
     print("ALIGNED -- installed configuration matches the repository bundle.")
+if old_processes:
+    print(f"WARN STALE_PROCESS -- {len(old_processes)} running OpenCode process(es) started before the configuration mtime; restart/reload explicitly if appropriate.")
 
 if drift:
     print()

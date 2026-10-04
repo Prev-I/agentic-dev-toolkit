@@ -32,7 +32,7 @@ def main():
         db.execute("UPDATE session SET time_created=? WHERE id='ses_span'", (EPOCH - 10000,))
         add_message(db, "ses_span", "before", 1000, "assistant", model="before-model")
         db.execute("UPDATE message SET time_created=? WHERE id='before'", (EPOCH - 1000,))
-        add_message(db, "ses_span", "after", 2000, "assistant", model="spanning-model")
+        add_message(db, "ses_span", "after", 2000, "assistant", model="before-model")
         for sid, repo in (("ses_toolkit", toolkit), ("ses_product", product)):
             add_session(db, sid, repo, start=3000)
             add_message(db, sid, sid + "_u", 3001, "user")
@@ -79,7 +79,7 @@ def main():
         assert rerun["triggers"]["routing_mismatch"] is False
         repos = report["production_repositories"]
         assert repos["toolkit"]["sessions"] == 1 and repos["product"]["sessions"] == 2
-        assert report["checkpoint"]["build_sessions_with_gate"] == 1
+        assert report["checkpoint"]["build_sessions_with_gate"] == 0
         experts = report["expert_escalations"]
         assert len(experts) == 2
         assert {item["decision_packet"] for item in experts} == {True, False}

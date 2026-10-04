@@ -2,6 +2,7 @@
 """Read-only OpenCode routing observation with metadata-only output."""
 
 import argparse
+import configparser
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 import hashlib
@@ -187,6 +188,21 @@ def profile_boundary(manifest, override=None, config=None):
 
 def repository_class(directory, root):
     normalized = Path(directory).expanduser().resolve()
+    if root:
+        gitdir = root / ".git"
+        try:
+            if gitdir.is_file():
+                gitdir = (root / gitdir.read_text().strip().split(":", 1)[1].strip()).resolve()
+            common = gitdir / "commondir"
+            if common.is_file():
+                gitdir = (gitdir / common.read_text().strip()).resolve()
+            config = configparser.RawConfigParser()
+            config.read(gitdir / "config")
+            urls = [config.get(section, "url") for section in config.sections() if section.startswith('remote "') and config.has_option(section, "url")]
+            if urls:
+                return "toolkit" if any(re.search(r"(?:github\.com[:/])Prev-I/agentic-dev-toolkit(?:\.git)?/?$", url, re.I) for url in urls) else "product"
+        except (OSError, ValueError, configparser.Error):
+            pass
     if (root and root.name == "agentic-dev-toolkit") or "agentic-dev-toolkit" in normalized.parts:
         return "toolkit"
     return "product" if root else "unknown"
@@ -274,8 +290,10 @@ def dispatcher_sessions(path):
 def parse_log_files(log_dir, since):
     streams = []
     errors = defaultdict(list)
+    starts = {}
+    session_runs = defaultdict(set)
     if log_dir is None or not log_dir.is_dir():
-        return streams, errors, 0
+        return streams, errors, 0, {}
     count = 0
     for path in sorted(log_dir.glob("*.log")):
         count += 1
@@ -289,6 +307,12 @@ def parse_log_files(log_dir, since):
                     when = utc_ms(timestamp)
                 except ValueError:
                     continue
+                run = values.get("run")
+                if run:
+                    starts[run] = min(starts.get(run, when), when)
+                sid = values.get("session.id") or values.get("sessionID")
+                if sid and run:
+                    session_runs[sid].add(run)
                 if when < since:
                     continue
                 sid = values.get("session.id")
@@ -296,7 +320,7 @@ def parse_log_files(log_dir, since):
                     continue
                 event = {
                     "sid": sid, "time": when, "agent": values.get("agent"),
-                    "provider": values.get("providerID"), "model": values.get("modelID"),
+                    "provider": values.get("providerID"), "model": values.get("modelID"), "run": run,
                 }
                 if values.get("message") == "stream":
                     streams.append(event)
@@ -313,7 +337,8 @@ def parse_log_files(log_dir, since):
                     else:
                         reason = "other"
                     errors[sid].append((reason, event))
-    return streams, errors, count
+    process_starts = {sid: min(starts[run] for run in runs) for sid, runs in session_runs.items()}
+    return streams, errors, count, process_starts
 
 
 def collect(args):
@@ -325,6 +350,9 @@ def collect(args):
     state = ensure_state(Path(args.state_dir))
     key = key_for(state)
     targets = load_manifest(Path(args.manifest))
+    previous = {}
+    if args.previous_config and Path(args.previous_config).expanduser().is_file():
+        previous = read_jsonc(Path(args.previous_config).expanduser()).get("agent", {})
     known_dispatchers = dispatcher_sessions(Path(args.eval_records) if args.eval_records else None)
     db = connect_readonly(Path(args.db))
     db.execute("BEGIN")
@@ -420,7 +448,7 @@ def collect(args):
             exists = meta.get("exists")
             message["edits"].append((inp.get("filePath"), "update" if tool == "edit" or exists else "add"))
 
-    streams, log_errors, log_count = parse_log_files(Path(args.log_dir) if args.log_dir else None, since)
+    streams, log_errors, log_count, process_starts = parse_log_files(Path(args.log_dir) if args.log_dir else None, since)
     db.close()
     reviews = load_reviews(state)
     flags = []
@@ -438,11 +466,34 @@ def collect(args):
     repository_gates = {name: Counter() for name in ("toolkit", "product", "unknown")}
     repository_requests = defaultdict(Counter)
     repository_children = defaultdict(lambda: defaultdict(set))
+    behavior_episodes = []
+    manual_changes = defaultdict(list)
+    for sid, rows in messages.items():
+        last = {}
+        for message in rows:
+            data = message["data"]
+            if data.get("role") != "assistant" or data.get("agent") not in targets:
+                continue
+            agent = data["agent"]
+            observed = f"{data.get('providerID')}/{data.get('modelID')}"
+            if agent in last and last[agent] != observed and observed not in (targets[agent]["model"], previous.get(agent, {}).get("model")):
+                manual_changes[sid].append((message["time"], agent, observed))
+            last[agent] = observed
 
     def activation_class(sid, when):
         if when < profile_effective:
             return "PRE_ACTIVATION"
-        return "SESSION_SPANNING_ACTIVATION" if sessions[sid]["created"] < profile_effective else "POST_ACTIVATION"
+        if sessions[sid]["created"] < profile_effective:
+            return "SESSION_SPANNING_ACTIVATION"
+        if process_starts.get(sid, profile_effective) < profile_effective:
+            return "STALE_PROCESS"
+        return "POST_ACTIVATION"
+
+    def routing_class(sid, when, agent, provider, model):
+        cls = activation_class(sid, when)
+        if cls != "STALE_PROCESS" and cls != "PRE_ACTIVATION" and any(time <= when and role == agent and observed == f"{provider}/{model}" for time, role, observed in manual_changes[sid]):
+            return "MANUAL_OVERRIDE"
+        return cls
 
     def audit_route(rid, sid, when, reason, agent, provider, model, variant=None):
         if root_info[rid]["class"] == "eval_dispatcher" or when < max(since, utc_ms(boundary["timestamp"][:10])):
@@ -450,7 +501,7 @@ def collect(args):
         target = targets.get(agent)
         if not target:
             return
-        cls = activation_class(sid, when)
+        cls = routing_class(sid, when, agent, provider, model)
         identity = (root_info[rid]["hash"], reason, agent, provider, model, variant, cls)
         if any(item["identity"] == identity for item in routing_audit):
             return
@@ -459,11 +510,14 @@ def collect(args):
                               "expected_model": target["model"], "observed_model": f"{provider}/{model}",
                               "expected_variant": target.get("variant"), "variant": variant,
                               "model": model, "repository": root_info[rid]["repository"]})
+        if sid in process_starts:
+            routing_audit[-1]["process_first_seen"] = iso_ms(process_starts[sid])
 
     def add_flag(rid, signal, reason, agent=None, provider=None, model=None, variant=None, paths=None, when=None, sid=None):
         if any(
             item["root"] == rid and item["signal"] == signal and item["reason"] == reason
             and item.get("provider") == provider and item.get("agent") == (agent or sessions[rid]["agent"])
+            and (signal not in ("gate", "scope", "rework") or item.get("model") == model)
             for item in flags
         ):
             return
@@ -479,7 +533,7 @@ def collect(args):
             "repository": root_info[rid]["repository"],
         }
         if signal == "routing":
-            item["activation_class"] = activation_class(sid or rid, when if when is not None else sessions[rid]["created"])
+            item["activation_class"] = routing_class(sid or rid, when if when is not None else sessions[rid]["created"], item["agent"], provider, model)
             item["expected_model"] = targets.get(item["agent"], {}).get("model")
             item["observed_model"] = f"{provider}/{model}"
         for name, value in (("provider", provider), ("model", model), ("variant", variant)):
@@ -571,6 +625,7 @@ def collect(args):
                     "sid": sid, "time": message["time"], "role": data.get("role"),
                     "text": "\n".join(message["texts"]), "answers": message["answers"],
                     "skills": message["skills"], "tasks": message["tasks"], "edits": edits,
+                    "agent": data.get("agent"), "provider": data.get("providerID"), "model": data.get("modelID"), "variant": data.get("variant"),
                 })
                 if data.get("role") == "assistant":
                     target = targets.get(data.get("agent") or sessions[sid]["agent"])
@@ -600,8 +655,10 @@ def collect(args):
         timeline.sort(key=lambda item: item["time"])
         brainstorming = [i for i, item in enumerate(timeline) if "brainstorming" in item["skills"]]
         if root["agent"] == "build" and brainstorming:
-            checkpoint += info["class"] == "production" and info["repository"] == "product"
             for episode, start in enumerate(brainstorming):
+                gate_message = timeline[start]
+                aligned_gate = gate_message.get("agent") == "build" and f"{gate_message.get('provider')}/{gate_message.get('model')}" == targets["build"]["model"]
+                checkpoint += info["class"] == "production" and info["repository"] == "product" and aligned_gate
                 previous_users = [item for item in timeline[:start] if item["role"] == "user" and item["sid"] == rid]
                 authorized = bool(previous_users and preauthorized(previous_users[-1]["text"]))
                 approved = authorized
@@ -615,12 +672,13 @@ def collect(args):
                         approved = True
                     if item["edits"] and not approved:
                         paths = [path for path, _ in item["edits"]]
-                        add_flag(rid, "gate", "edit_before_approval", paths=paths)
+                        add_flag(rid, "gate", "edit_before_approval", paths=paths, agent=item.get("agent"), provider=item.get("provider"), model=item.get("model"), variant=item.get("variant"), when=item["time"])
                         verdict = "NON_ADHERENT"
                         break
                     if item["edits"] and approved:
                         verdict = "PRE_AUTHORIZED" if authorized else "ADHERENT"
                 gate_outcomes[verdict] += 1
+                behavior_episodes.append({"session": info["hash"], "repository": info["repository"], "signal": "gate", "timestamp": iso_ms(gate_message["time"]), "observed_model": f"{gate_message.get('provider')}/{gate_message.get('model')}", "variant": gate_message.get("variant"), "outcome": verdict, "manifest_aligned": aligned_gate})
                 if info["class"] == "production":
                     repository_gates[info["repository"]][verdict] += 1
 
@@ -628,7 +686,8 @@ def collect(args):
             for item in timeline:
                 shared = [path for path, kind in item["edits"] if kind in ("update", "delete", "move") and SHARED.search(path)]
                 if shared:
-                    add_flag(rid, "scope", "shared_test_or_setup_modified", paths=shared)
+                    add_flag(rid, "scope", "shared_test_or_setup_modified", paths=shared, agent=item.get("agent"), provider=item.get("provider"), model=item.get("model"), variant=item.get("variant"), when=item["time"])
+                    behavior_episodes.append({"session": info["hash"], "repository": info["repository"], "signal": "scope", "timestamp": iso_ms(item["time"]), "observed_model": f"{item.get('provider')}/{item.get('model')}", "variant": item.get("variant")})
 
             conversation = "\n".join(item["text"] for item in timeline if item["role"] == "user" and item["sid"] == rid)
             edits = {path for item in timeline for path, _ in item["edits"]}
@@ -644,14 +703,19 @@ def collect(args):
                     allowed_prefix = f"openspec/changes/{candidates[0].name}/"
                     outside = sorted(path for path in edits if not path.startswith(allowed_prefix) and path not in declared)
                     if outside:
-                        add_flag(rid, "scope", "outside_active_openspec_change", paths=outside)
+                        for item in timeline:
+                            changed = sorted(set(outside) & {path for path, _ in item["edits"]})
+                            if changed:
+                                add_flag(rid, "scope", "outside_active_openspec_change", paths=changed, agent=item.get("agent"), provider=item.get("provider"), model=item.get("model"), variant=item.get("variant"), when=item["time"])
+                                behavior_episodes.append({"session": info["hash"], "repository": info["repository"], "signal": "scope", "timestamp": iso_ms(item["time"]), "observed_model": f"{item.get('provider')}/{item.get('model')}", "variant": item.get("variant")})
 
             edited = set()
             pending_user = False
             for item in timeline:
                 current = {path for path, _ in item["edits"]}
                 if pending_user and edited & current:
-                    add_flag(rid, "rework", "same_file_modified_after_user_turn", paths=sorted(edited & current))
+                    add_flag(rid, "rework", "same_file_modified_after_user_turn", paths=sorted(edited & current), agent=item.get("agent"), provider=item.get("provider"), model=item.get("model"), variant=item.get("variant"), when=item["time"])
+                    behavior_episodes.append({"session": info["hash"], "repository": info["repository"], "signal": "rework", "timestamp": iso_ms(item["time"]), "observed_model": f"{item.get('provider')}/{item.get('model')}", "variant": item.get("variant")})
                     break
                 if current:
                     edited.update(current)
@@ -741,6 +805,7 @@ def collect(args):
         "routing_activation_audit": [{k: v for k, v in item.items() if k != "identity"} for item in routing_audit],
         "routing_activation_counts": dict(Counter(item["activation_class"] for item in routing_audit)),
         "expert_escalations": list(expert_packets.values()),
+        "behavior_episodes": behavior_episodes,
         "coverage": {
             "database": True, "log_files": log_count,
             "dispatcher_ids_loaded": len(known_dispatchers),
@@ -750,8 +815,8 @@ def collect(args):
         **{name: production[name] for name in ("agents", "signals", "gate_outcomes", "gate_parity_outcomes", "agent_signals", "provider_errors", "provider_retries", "routing_requests", "escalations")},
         "checkpoint": {"build_sessions_with_gate": checkpoint, "minimum": 15, "maximum": 20},
         "triggers": triggers,
-        "review": [item for item in public_flags if item["population"] == "production" and item.get("activation_class") in (None, "POST_ACTIVATION")],
-        "informational": [item for item in public_flags if item["population"] != "production" or item.get("activation_class") not in (None, "POST_ACTIVATION")],
+        "review": [item for item in public_flags if item["population"] == "production" and item.get("activation_class") in (None, "POST_ACTIVATION", "MANUAL_OVERRIDE")],
+        "informational": [item for item in public_flags if item["population"] != "production" or item.get("activation_class") not in (None, "POST_ACTIVATION", "MANUAL_OVERRIDE")],
     }
     (state / "latest-report.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return report
@@ -845,6 +910,7 @@ def parser():
     report.add_argument("--since")
     report.add_argument("--profile-effective")
     report.add_argument("--activation-config", default=str(Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "opencode/opencode.jsonc"))
+    report.add_argument("--previous-config", default=str(Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "opencode/opencode.jsonc.bak-20261003"))
     report.add_argument("--db", default=str(default_db()))
     report.add_argument("--log-dir", default=str(default_db().parent / "log"))
     report.add_argument("--state-dir", default=str(default_state()))

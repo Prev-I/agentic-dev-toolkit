@@ -281,3 +281,21 @@ after=$(sha256sum "$live/opencode.jsonc" | cut -d' ' -f1)
 [[ "$before" == "$after" ]] || fail "check_alignment must never modify the installed configuration"
 
 printf 'PASS: alignment check (drift vs stale, user-owned keys never flagged)\n'
+
+# An old process is operationally stale, never a config drift or a failing gate.
+setup_aligned
+proc="$workdir/proc"
+mkdir -p "$proc/123"
+printf 'btime 1000\n' >"$proc/stat"
+printf 'opencode\n' >"$proc/123/comm"
+python3 - "$proc/123/stat" <<'PY'
+import sys
+open(sys.argv[1], "w").write("123 (opencode) " + " ".join(["S"] + ["0"] * 18 + ["100"]))
+PY
+OPENCODE_PROC_ROOT="$proc" run_check || fail "stale process warning must not block aligned files"
+grep -q 'STALE_PROCESS' "$workdir/out.txt" || fail "missing stale process warning"
+[[ "$(report_status)" == ALIGNED ]] || fail "stale process changed config alignment status"
+python3 - "$workdir/report.json" <<'PY'
+import json, sys
+assert len(json.load(open(sys.argv[1]))["stale_processes"]) == 1
+PY

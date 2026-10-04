@@ -42,8 +42,9 @@ source coverage and fails closed when required schema is absent.
 
 ## Session classes
 
-- `pre_profile`: before the 2026-10-03 profile merge timestamp; never a current
-  routing mismatch.
+- `pre_profile`: no activity reaches the 2026-10-03 profile merge timestamp;
+  never a current routing mismatch. Requests before that boundary are excluded
+  even when the session continues afterward.
 - `eval_dispatcher`: temporary-directory or experiment-agent sessions. These
   include the `LEAK_DISPATCHER_OVERRIDE_ONLY` class retained by PR #68 and do
   not count as production mismatches.

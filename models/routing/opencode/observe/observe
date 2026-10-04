@@ -59,16 +59,23 @@ def ensure_state(path):
     for parent in (path, *path.parents):
         if (parent / ".git").exists():
             raise ObserveError("state_directory_inside_git_worktree")
+    existed = path.exists()
     path.mkdir(parents=True, exist_ok=True, mode=0o700)
-    os.chmod(path, 0o700)
+    if not existed:
+        os.chmod(path, 0o700)
     return path
 
 
 def key_for(state):
     path = state / "hash.key"
     if not path.exists():
-        path.write_bytes(secrets.token_bytes(32))
-        os.chmod(path, 0o600)
+        try:
+            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            pass
+        else:
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(secrets.token_bytes(32))
     return path.read_bytes()
 
 
@@ -130,6 +137,28 @@ def classify_gate_turn(response, has_edits):
     return "AMBIGUOUS"
 
 
+def parse_session_model(raw):
+    if not raw:
+        return None
+    if isinstance(raw, dict):
+        data = raw
+    else:
+        try:
+            data = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            if isinstance(raw, str) and "/" in raw:
+                provider, model = raw.split("/", 1)
+                return {"provider": provider, "model": model, "variant": None}
+            return None
+    if not isinstance(data, dict):
+        return None
+    provider = data.get("providerID")
+    model = data.get("id") or data.get("modelID")
+    if not provider or not model:
+        return None
+    return {"provider": provider, "model": model, "variant": data.get("variant")}
+
+
 def relative_path(raw, root):
     if not isinstance(raw, str) or not raw:
         return None
@@ -159,7 +188,7 @@ def load_reviews(state):
         return latest
     for line in path.read_text(encoding="utf-8").splitlines():
         item = json.loads(line)
-        latest[(item["session"], item["signal"])] = item
+        latest[(item["session"], item["signal"], item["reason"])] = item
     return latest
 
 
@@ -210,6 +239,8 @@ def parse_log_files(log_dir, since):
                     streams.append(event)
                 elif values.get("message") == "stream error":
                     raw = values.get("error.error", "").lower()
+                    if "abort" in raw or "cancel" in raw:
+                        continue
                     if "429" in raw or "rate limit" in raw:
                         reason = "rate_limit"
                     elif "timeout" in raw or "timed out" in raw:
@@ -230,6 +261,7 @@ def collect(args):
     targets = load_manifest(Path(args.manifest))
     known_dispatchers = dispatcher_sessions(Path(args.eval_records) if args.eval_records else None)
     db = connect_readonly(Path(args.db))
+    db.execute("BEGIN")
     sessions = {}
     for row in db.execute(
         "SELECT id,parent_id,directory,version,agent,model,time_created,time_updated FROM session WHERE time_updated>=?",
@@ -255,29 +287,29 @@ def collect(args):
     for rid, members in root_members.items():
         root = sessions[rid]
         wt = worktree_root(root["directory"])
-        if root["created"] < profile_effective:
-            category = "pre_profile"
-        elif rid in known_dispatchers or wt is None or root["agent"] not in targets:
+        if rid in known_dispatchers or root["agent"] not in targets:
             category = "eval_dispatcher"
+        elif root["updated"] < profile_effective:
+            category = "pre_profile"
         else:
             category = "production"
         root_info[rid] = {"class": category, "worktree": wt, "hash": session_hash(key, rid), "members": members}
 
     messages = defaultdict(list)
     message_root = {}
-    placeholders = ",".join("?" for _ in sessions)
-    for mid, sid, when, raw in db.execute(f"SELECT id,session_id,time_created,data FROM message WHERE session_id IN ({placeholders})", tuple(sessions)):
+    session_ids = json.dumps(list(sessions))
+    for mid, sid, when, raw in db.execute("SELECT id,session_id,time_created,data FROM message WHERE session_id IN (SELECT value FROM json_each(?))", (session_ids,)):
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
             continue
-        messages[sid].append({"id": mid, "time": when, "data": data, "texts": [], "edits": [], "skills": [], "tasks": [], "answers": []})
+        messages[sid].append({"id": mid, "time": when, "data": data, "texts": [], "edits": [], "snapshot_edits": [], "skills": [], "tasks": [], "answers": []})
         message_root[mid] = (sid, messages[sid][-1])
 
     for sid in messages:
         messages[sid].sort(key=lambda item: (item["time"], item["id"]))
 
-    for mid, sid, when, raw in db.execute(f"SELECT message_id,session_id,time_created,data FROM part WHERE session_id IN ({placeholders})", tuple(sessions)):
+    for mid, sid, when, raw in db.execute("SELECT message_id,session_id,time_created,data FROM part WHERE session_id IN (SELECT value FROM json_each(?))", (session_ids,)):
         target = message_root.get(mid)
         if target is None:
             continue
@@ -286,16 +318,22 @@ def collect(args):
         except json.JSONDecodeError:
             continue
         message = target[1]
-        if data.get("type") == "text":
+        if data.get("type") == "text" and not data.get("synthetic") and not data.get("ignored"):
             message["texts"].append(str(data.get("text", "")))
         elif data.get("type") == "patch":
             for path in data.get("files") or []:
                 if isinstance(path, str):
-                    message["edits"].append((path, "update"))
+                    message["snapshot_edits"].append((path, "update"))
+        elif data.get("type") == "agent":
+            message["tasks"].append(data.get("name"))
+        elif data.get("type") == "retry":
+            message["retries"] = message.get("retries", 0) + 1
         if data.get("type") != "tool":
             continue
         tool = data.get("tool")
         state_data = data.get("state") if isinstance(data.get("state"), dict) else {}
+        if state_data.get("status") != "completed":
+            continue
         inp = state_data.get("input") if isinstance(state_data.get("input"), dict) else {}
         meta = state_data.get("metadata") if isinstance(state_data.get("metadata"), dict) else {}
         if tool == "skill":
@@ -311,7 +349,8 @@ def collect(args):
                 if isinstance(item, dict):
                     message["edits"].append((item.get("relativePath") or item.get("filePath"), item.get("type")))
         elif tool in ("edit", "write"):
-            message["edits"].append((inp.get("filePath"), "update" if tool == "edit" else "add"))
+            exists = meta.get("exists")
+            message["edits"].append((inp.get("filePath"), "update" if tool == "edit" or exists else "add"))
 
     streams, log_errors, log_count = parse_log_files(Path(args.log_dir) if args.log_dir else None, since)
     db.close()
@@ -324,13 +363,20 @@ def collect(args):
     provider_errors = defaultdict(lambda: defaultdict(Counter))
     routing_requests = Counter()
     provider_retries = defaultdict(lambda: Counter())
+    requests_by_class = defaultdict(Counter)
+    gate_outcomes = Counter()
+    gate_parity_outcomes = Counter()
     checkpoint = 0
 
     def add_flag(rid, signal, reason, agent=None, provider=None, model=None, variant=None, paths=None):
-        if any(item["root"] == rid and item["signal"] == signal and item["reason"] == reason for item in flags):
+        if any(
+            item["root"] == rid and item["signal"] == signal and item["reason"] == reason
+            and item.get("provider") == provider and item.get("agent") == (agent or sessions[rid]["agent"])
+            for item in flags
+        ):
             return
         public = root_info[rid]["hash"]
-        review = reviews.get((public, signal))
+        review = reviews.get((public, signal, reason))
         item = {
             "root": rid, "session": public, "timestamp": iso_ms(sessions[rid]["created"]),
             "agent": agent or sessions[rid]["agent"], "signal": signal, "reason": reason,
@@ -354,41 +400,52 @@ def collect(args):
         root = sessions[rid]
         agent_counts[root["agent"]] += 1
         target = targets.get(root["agent"])
-        if info["class"] == "production" and target and root["model"] != target["model"]:
-            provider, _, model = root["model"].partition("/")
-            add_flag(rid, "routing", "root_model_differs", provider=provider, model=model)
+        observed_model = parse_session_model(root["model"])
+        if info["class"] == "production" and root["created"] >= profile_effective and target and observed_model:
+            provider, model = target["model"].split("/", 1)
+            if (observed_model["provider"], observed_model["model"], observed_model["variant"]) != (provider, model, target.get("variant")):
+                add_flag(rid, "routing", "root_model_differs", provider=observed_model["provider"], model=observed_model["model"], variant=observed_model["variant"])
 
         timeline = []
         for sid in info["members"]:
             member_root = info["worktree"]
             for message in messages.get(sid, []):
                 data = message["data"]
-                agent_counts[data.get("agent") or sessions[sid]["agent"]] += data.get("role") == "assistant"
                 if data.get("role") == "assistant" and data.get("providerID") and data.get("modelID"):
-                    routing_requests[(data.get("agent") or sessions[sid]["agent"], data["providerID"], data["modelID"], data.get("variant"))] += 1
+                    request_key = (data.get("agent") or sessions[sid]["agent"], data["providerID"], data["modelID"], data.get("variant"))
+                    requests_by_class[info["class"]][request_key] += 1
+                    if info["class"] == "production" and message["time"] >= profile_effective:
+                        routing_requests[request_key] += 1
                 edits = []
-                for raw_path, kind in message["edits"]:
+                raw_edits = message["edits"] or message["snapshot_edits"]
+                for raw_path, kind in raw_edits:
                     path = relative_path(raw_path, member_root)
                     if path:
                         edits.append((path, kind))
                 timeline.append({
-                    "time": message["time"], "role": data.get("role"),
-                    "text": "\n".join(message["texts"] + message["answers"]),
+                    "sid": sid, "time": message["time"], "role": data.get("role"),
+                    "text": "\n".join(message["texts"]), "answers": message["answers"],
                     "skills": message["skills"], "tasks": message["tasks"], "edits": edits,
                 })
-                if data.get("role") == "assistant" and info["class"] == "production":
+                if data.get("role") == "assistant" and message["time"] >= profile_effective and info["class"] == "production":
                     target = targets.get(data.get("agent") or sessions[sid]["agent"])
-                    if target and data.get("variant") and data.get("variant") != target.get("variant"):
+                    if target:
+                        expected_provider, expected_model = target["model"].split("/", 1)
+                        observed = (data.get("providerID"), data.get("modelID"), data.get("variant"))
+                        expected = (expected_provider, expected_model, target.get("variant"))
+                    if target and observed != expected:
                         add_flag(
-                            rid, "routing", "request_variant_differs",
+                            rid, "routing", "request_route_differs",
                             agent=data.get("agent") or sessions[sid]["agent"],
                             provider=data.get("providerID"), model=data.get("modelID"), variant=data.get("variant"),
                         )
                 for subagent in message["tasks"]:
                     if subagent in ("expert", "reviewer"):
                         escalations[subagent] += 1
+                if sessions[sid]["parent"] and sessions[sid]["agent"] == "breakglass":
+                    add_flag(rid, "escalation", "breakglass_child", agent="breakglass")
                 error = data.get("error")
-                if isinstance(error, dict) and error.get("name") != "MessageAbortedError" and info["class"] == "production":
+                if isinstance(error, dict) and error.get("name") in ("APIError", "UnknownError") and message["time"] >= profile_effective and info["class"] == "production":
                     provider = data.get("providerID")
                     add_flag(rid, "provider_error", classify_error(error), agent=data.get("agent"), provider=provider)
 
@@ -398,15 +455,21 @@ def collect(args):
             checkpoint += 1
             for start in brainstorming:
                 approved = False
+                verdict = "AMBIGUOUS"
+                gate_parity_outcomes[classify_gate_turn(timeline[start]["text"], bool(timeline[start]["edits"]))] += 1
                 for item in timeline[start:]:
-                    if item["role"] == "assistant" and APPROVAL.search(item["text"]):
+                    if item["role"] == "user" and item["sid"] == rid and APPROVAL.search(item["text"]):
                         approved = True
-                    if item["role"] == "user":
-                        approved = bool(APPROVAL.search(item["text"]))
+                    if item["answers"] and APPROVAL.search("\n".join(item["answers"])):
+                        approved = True
                     if item["edits"] and not approved:
                         paths = [path for path, _ in item["edits"]]
                         add_flag(rid, "gate", "edit_before_approval", paths=paths)
+                        verdict = "NON_ADHERENT"
                         break
+                    if item["edits"] and approved:
+                        verdict = "ADHERENT"
+                gate_outcomes[verdict] += 1
 
         if info["class"] == "production":
             for item in timeline:
@@ -414,7 +477,7 @@ def collect(args):
                 if shared:
                     add_flag(rid, "scope", "shared_test_or_setup_modified", paths=shared)
 
-            conversation = "\n".join(item["text"] for item in timeline if item["role"] == "user")
+            conversation = "\n".join(item["text"] for item in timeline if item["role"] == "user" and item["sid"] == rid)
             edits = {path for item in timeline for path, _ in item["edits"]}
             change_root = info["worktree"] / "openspec" / "changes" if info["worktree"] else None
             if change_root and change_root.is_dir():
@@ -432,7 +495,6 @@ def collect(args):
 
             edited = set()
             pending_user = False
-            correction = False
             for item in timeline:
                 current = {path for path, _ in item["edits"]}
                 if pending_user and edited & current:
@@ -440,15 +502,14 @@ def collect(args):
                     break
                 if current:
                     edited.update(current)
-                if item["role"] == "user" and edited:
+                if item["role"] == "user" and item["sid"] == rid and edited:
                     pending_user = True
-                    correction = correction or bool(CORRECTION.search(item["text"]))
 
     for sid, entries in log_errors.items():
         rid = roots.get(sid)
         if rid and root_info[rid]["class"] == "production" and entries:
-            reason, event = entries[0]
-            add_flag(rid, "provider_error", reason, agent=event["agent"], provider=event["provider"])
+            for reason, event in entries:
+                add_flag(rid, "provider_error", reason, agent=event["agent"], provider=event["provider"])
             if any(
                 stream["sid"] == sid and stream["agent"] == event["agent"] and stream["time"] > event["time"]
                 for stream in streams
@@ -459,11 +520,10 @@ def collect(args):
         rid = roots.get(stream["sid"])
         if not rid:
             continue
-        agent_counts[stream["agent"]] += 1
-        if stream["agent"] == "title":
+        if root_info[rid]["class"] == "production" and stream["time"] >= profile_effective and stream["agent"] == "title":
             routing_requests[(stream["agent"], stream["provider"], stream["model"], None)] += 1
         target = targets.get(stream["agent"])
-        if root_info[rid]["class"] == "production" and target:
+        if root_info[rid]["class"] == "production" and stream["time"] >= profile_effective and target:
             expected_provider, expected_model = target["model"].split("/", 1)
             if (stream["provider"], stream["model"]) != (expected_provider, expected_model):
                 add_flag(rid, "routing", "request_model_differs", agent=stream["agent"], provider=stream["provider"], model=stream["model"])
@@ -483,10 +543,16 @@ def collect(args):
     report = {
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "since": args.since,
-        "coverage": {"database": True, "log_files": log_count, "opencode_versions": sorted({s["version"] for s in sessions.values() if s["version"]})},
+        "coverage": {
+            "database": True, "log_files": log_count,
+            "dispatcher_ids_loaded": len(known_dispatchers),
+            "opencode_versions": sorted({s["version"] for s in sessions.values() if s["version"]}),
+        },
         "session_classes": dict(sorted(Counter(info["class"] for info in root_info.values()).items())),
         "agents": dict(sorted(agent_counts.items())),
-        "signals": {name: signal_counts.get(name, 0) for name in ("routing", "provider_error", "gate", "scope", "rework")},
+        "signals": {name: signal_counts.get(name, 0) for name in ("routing", "provider_error", "escalation", "gate", "scope", "rework")},
+        "gate_outcomes": dict(sorted(gate_outcomes.items())),
+        "gate_parity_outcomes": dict(sorted(gate_parity_outcomes.items())),
         "agent_signals": {agent: dict(sorted(counts.items())) for agent, counts in sorted(agent_signals.items())},
         "provider_errors": {
             provider: {agent: dict(sorted(counts.items())) for agent, counts in sorted(agents.items())}
@@ -499,6 +565,12 @@ def collect(args):
             {"agent": agent, "provider": provider, "model": model, "variant": variant, "requests": count}
             for (agent, provider, model, variant), count in sorted(routing_requests.items(), key=lambda item: tuple(str(v) for v in item[0]))
         ],
+        "routing_requests_by_class": {
+            category: [
+                {"agent": agent, "provider": provider, "model": model, "variant": variant, "requests": count}
+                for (agent, provider, model, variant), count in sorted(counts.items(), key=lambda item: tuple(str(v) for v in item[0]))
+            ] for category, counts in sorted(requests_by_class.items())
+        },
         "escalations": {"expert": escalations.get("expert", 0), "reviewer": escalations.get("reviewer", 0), "breakglass": sum(s["agent"] == "breakglass" for s in sessions.values())},
         "checkpoint": {"build_sessions_with_gate": checkpoint, "minimum": 15, "maximum": 20},
         "triggers": triggers,
@@ -511,10 +583,11 @@ def collect(args):
 def empty_report(state):
     report = {
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "coverage": {"database": True, "log_files": 0, "opencode_versions": []},
+        "coverage": {"database": True, "log_files": 0, "dispatcher_ids_loaded": 0, "opencode_versions": []},
         "session_classes": {}, "agents": {},
-        "signals": {name: 0 for name in ("routing", "provider_error", "gate", "scope", "rework")},
-        "agent_signals": {}, "provider_errors": {}, "provider_retries": {}, "routing_requests": [],
+        "signals": {name: 0 for name in ("routing", "provider_error", "escalation", "gate", "scope", "rework")},
+        "gate_outcomes": {}, "gate_parity_outcomes": {},
+        "agent_signals": {}, "provider_errors": {}, "provider_retries": {}, "routing_requests": [], "routing_requests_by_class": {},
         "escalations": {"expert": 0, "reviewer": 0, "breakglass": 0},
         "checkpoint": {"build_sessions_with_gate": 0, "minimum": 15, "maximum": 20},
         "triggers": {"routing_mismatch": False, "provider_errors_recurring": False, "gates_skipped": False, "rollback_required": False},
@@ -531,10 +604,14 @@ def report_command(args):
         sys.stdout.write("\n")
         return
     print(f"Sessions: {sum(report['session_classes'].values())}")
+    print("Coverage: database=yes, log_files=%s, dispatcher_ids=%s" % (report["coverage"]["log_files"], report["coverage"]["dispatcher_ids_loaded"]))
     print("Classes: " + ", ".join(f"{k}={v}" for k, v in report["session_classes"].items()))
     print("Signals: " + ", ".join(f"{k}={v}" for k, v in report["signals"].items()))
     cp = report["checkpoint"]
     print(f"Build gate checkpoint: {cp['build_sessions_with_gate']} of {cp['minimum']}-{cp['maximum']}")
+    print("Triggers: " + ", ".join(f"{k}={'yes' if v else 'no'}" for k, v in report["triggers"].items()))
+    if report["routing_requests"]:
+        print("Production routing requests: " + str(sum(item["requests"] for item in report["routing_requests"])))
     print(f"To review: {sum(item['status'] == 'pending' for item in report['review'])}")
     for item in report["review"]:
         if item["status"] == "pending":
@@ -545,10 +622,12 @@ def review_command(args):
     state = ensure_state(Path(args.state_dir))
     if args.signal not in SIGNALS:
         raise ObserveError("unknown_review_signal")
+    if not re.fullmatch(r"[0-9a-f]{16}", args.session):
+        raise ObserveError("invalid_session_hash")
     if args.rollback and not (args.decision == "confirm" and args.signal == "rework"):
         raise ObserveError("rollback_requires_confirmed_rework")
     item = {
-        "session": args.session, "signal": args.signal,
+        "session": args.session, "signal": args.signal, "reason": args.reason,
         "decision": "confirmed" if args.decision == "confirm" else "dismissed",
         "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "rollback": bool(args.rollback), "note": args.note or "",
@@ -586,6 +665,7 @@ def parser():
     review.add_argument("decision", choices=("confirm", "dismiss"))
     review.add_argument("session")
     review.add_argument("signal")
+    review.add_argument("reason")
     review.add_argument("--note")
     review.add_argument("--rollback", action="store_true")
     review.add_argument("--state-dir", default=str(default_state()))
@@ -602,7 +682,7 @@ def main():
     args = parser().parse_args()
     try:
         args.func(args)
-    except (ObserveError, ValueError, json.JSONDecodeError, sqlite3.Error) as error:
+    except (ObserveError, ValueError, json.JSONDecodeError, sqlite3.Error, OSError, KeyError, TypeError, AttributeError) as error:
         print(f"observe: {type(error).__name__}: {error if isinstance(error, ObserveError) else 'invalid_input'}", file=sys.stderr)
         raise SystemExit(2)
 

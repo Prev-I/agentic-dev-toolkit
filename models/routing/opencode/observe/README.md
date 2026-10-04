@@ -27,9 +27,9 @@ For each pending item:
 ```bash
 ./observe/observe locate SESSION_HASH
 opencode export SESSION_ID --sanitize > /tmp/opencode-review.json
-./observe/observe review confirm SESSION_HASH SIGNAL --note "short local note"
+./observe/observe review confirm SESSION_HASH SIGNAL REASON --note "short local note"
 # or
-./observe/observe review dismiss SESSION_HASH SIGNAL --note "short local note"
+./observe/observe review dismiss SESSION_HASH SIGNAL REASON --note "short local note"
 ```
 
 `locate` prints the real ID only to the current terminal. It never stores the
@@ -38,7 +38,8 @@ repository. Remove it when the review is complete. Use `--rollback` only when
 confirming a `rework` signal that required a rollback:
 
 ```bash
-./observe/observe review confirm SESSION_HASH rework --rollback --note "rollback required"
+./observe/observe review confirm SESSION_HASH rework same_file_modified_after_user_turn \
+  --rollback --note "rollback required"
 ```
 
 Run the report again. Trigger thresholds use only confirmed signals in the
@@ -79,7 +80,8 @@ Discovery was performed against OpenCode **1.18.32**:
   for bulk privacy-preserving collection.
 - `${XDG_DATA_HOME:-~/.local/share}/opencode/opencode.db` is the SQLite source.
   The observer opens it with `mode=ro` and reads `session`, `message`, and
-  `part`. `session.parent_id` and Task metadata connect child sessions.
+  `part`. OpenCode 1.18.32 stores `session.model` as JSON with `providerID`,
+  `id`, and `variant`. `session.parent_id` and Task metadata connect children.
 - `${XDG_DATA_HOME:-~/.local/share}/opencode/log/*.log` provides `stream` and
   `stream error` lines, including Title requests.
 
@@ -121,6 +123,9 @@ key and database can resolve it. State directory and key modes are `0700` and
   text. Declared paths are extracted from backtick-delimited artifact paths.
 - Rework means overlapping paths across a user turn. It does not prove the
   first implementation was wrong.
+- The default profile boundary is the PR #65 merge timestamp, not a proven
+  machine activation timestamp. Override it with `--profile-effective` when
+  local activation evidence gives a more precise boundary.
 
 ## Tests
 

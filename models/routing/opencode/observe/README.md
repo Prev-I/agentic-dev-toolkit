@@ -51,10 +51,11 @@ current-profile request counters. Root-model metadata uses session creation
 time as a proxy; it is not an independently timestamped request.
 
 Production counters are also split by normalized working repository: `toolkit`
-for an `agentic-dev-toolkit` path component, `product` for other Git roots, and
-`unknown` for unresolved/deleted roots. No complete path is serialized.
-The Build gate checkpoint includes **product only**, excluding toolkit and
-unknown work. `expert_escalations` has one row per distinct observed Expert
+by Git remote (repository name as fallback), `product` for other Git roots,
+`workspace` for existing cwd directories with no Git root, and `unknown` for
+missing directories. No complete path is serialized or inferred from edited files.
+The Build gate checkpoint includes **product only**, excluding toolkit,
+workspace and unknown work. `expert_escalations` has one row per distinct observed Expert
 Task child: parent hash, repository class, and decision-packet boolean only.
 Packet presence requires all seven structured headings and does not assess
 their content, correctness, or whether escalation was justified.
@@ -107,6 +108,14 @@ user request with that resolved variant to both metadata and LLM preparation.
 Add a runtime test with parent `xhigh` and compaction `low`; both stored metadata
 and prepared options must use `low`. No runtime/config/plugin changes are made
 by this observer.
+
+This parent-linked variant-only discrepancy is `KNOWN_DEVIATION` for version
+1.18.32, referencing the append-only
+[alignment addendum](../docs/decisions/2026-10-03-current-routing-alignment.md#addendum--2026-10-04-compaction-variant-inheritance).
+It appears only as informational metadata and never requires repeated review
+or triggers rollback. Model mismatches and unverified parent inheritance remain
+outside this exemption. [UPSTREAM-ISSUE.md](UPSTREAM-ISSUE.md) is an English
+issue draft without session content; it has not been submitted.
 
 ### Local activation evidence inspected on 2026-10-04
 

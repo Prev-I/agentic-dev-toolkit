@@ -17,6 +17,8 @@ import sys
 
 
 POPULATIONS = ("production", "eval_dispatcher", "pre_profile")
+REPOSITORIES = ("toolkit", "product", "workspace", "unknown")
+COMPACTION_REFERENCE = "docs/decisions/2026-10-03-current-routing-alignment.md#addendum--2026-10-04-compaction-variant-inheritance"
 SIGNALS = {"routing", "provider_error", "gate", "scope", "rework", "escalation"}
 APPROVAL = re.compile(r"(?i)\b(approved?|accepted|proceed|go ahead|looks good|lgtm|s[iì]|ok(?:ay)?)\b")
 CORRECTION = re.compile(r"(?i)\b(no|wrong|fix|revert|undo|rollback|correggi|sbagliat[oa]|rivedi)\b")
@@ -188,6 +190,8 @@ def profile_boundary(manifest, override=None, config=None):
 
 def repository_class(directory, root):
     normalized = Path(directory).expanduser().resolve()
+    if root is None:
+        return "workspace" if normalized.is_dir() else "unknown"
     if root:
         gitdir = root / ".git"
         try:
@@ -203,7 +207,7 @@ def repository_class(directory, root):
                 return "toolkit" if any(re.search(r"(?:github\.com[:/])Prev-I/agentic-dev-toolkit(?:\.git)?/?$", url, re.I) for url in urls) else "product"
         except (OSError, ValueError, configparser.Error):
             pass
-    if (root and root.name == "agentic-dev-toolkit") or "agentic-dev-toolkit" in normalized.parts:
+    if root.name == "agentic-dev-toolkit":
         return "toolkit"
     return "product" if root else "unknown"
 
@@ -463,11 +467,12 @@ def collect(args):
     checkpoint = 0
     routing_audit = []
     expert_packets = {}
-    repository_gates = {name: Counter() for name in ("toolkit", "product", "unknown")}
+    repository_gates = {name: Counter() for name in REPOSITORIES}
     repository_requests = defaultdict(Counter)
     repository_children = defaultdict(lambda: defaultdict(set))
     behavior_episodes = []
     manual_changes = defaultdict(list)
+    known_compactions = set()
     for sid, rows in messages.items():
         last = {}
         for message in rows:
@@ -476,6 +481,15 @@ def collect(args):
                 continue
             agent = data["agent"]
             observed = f"{data.get('providerID')}/{data.get('modelID')}"
+            parent = message_root.get(data.get("parentID"))
+            parent_data = parent[1]["data"] if parent and parent[0] == sid else {}
+            parent_model = parent_data.get("model") or {}
+            if (sessions[sid]["version"] == "1.18.32" and agent == "compaction"
+                    and observed == targets[agent]["model"]
+                    and data.get("variant") and data["variant"] != targets[agent].get("variant")
+                    and parent_data.get("role") == "user" and isinstance(parent_model, dict)
+                    and data["variant"] == parent_model.get("variant")):
+                known_compactions.add((sid, message["time"], observed, data["variant"]))
             if agent in last and last[agent] != observed and observed not in (targets[agent]["model"], previous.get(agent, {}).get("model")):
                 manual_changes[sid].append((message["time"], agent, observed))
             last[agent] = observed
@@ -489,7 +503,9 @@ def collect(args):
             return "STALE_PROCESS"
         return "POST_ACTIVATION"
 
-    def routing_class(sid, when, agent, provider, model):
+    def routing_class(sid, when, agent, provider, model, variant=None):
+        if agent == "compaction" and (sid, when, f"{provider}/{model}", variant) in known_compactions:
+            return "KNOWN_DEVIATION"
         cls = activation_class(sid, when)
         if cls != "STALE_PROCESS" and cls != "PRE_ACTIVATION" and any(time <= when and role == agent and observed == f"{provider}/{model}" for time, role, observed in manual_changes[sid]):
             return "MANUAL_OVERRIDE"
@@ -501,7 +517,7 @@ def collect(args):
         target = targets.get(agent)
         if not target:
             return
-        cls = routing_class(sid, when, agent, provider, model)
+        cls = routing_class(sid, when, agent, provider, model, variant)
         identity = (root_info[rid]["hash"], reason, agent, provider, model, variant, cls)
         if any(item["identity"] == identity for item in routing_audit):
             return
@@ -512,12 +528,15 @@ def collect(args):
                               "model": model, "repository": root_info[rid]["repository"]})
         if sid in process_starts:
             routing_audit[-1]["process_first_seen"] = iso_ms(process_starts[sid])
+        if cls == "KNOWN_DEVIATION":
+            routing_audit[-1]["reference"] = COMPACTION_REFERENCE
 
     def add_flag(rid, signal, reason, agent=None, provider=None, model=None, variant=None, paths=None, when=None, sid=None):
         if any(
             item["root"] == rid and item["signal"] == signal and item["reason"] == reason
             and item.get("provider") == provider and item.get("agent") == (agent or sessions[rid]["agent"])
-            and (signal not in ("gate", "scope", "rework") or item.get("model") == model)
+            and (signal not in ("gate", "scope", "rework", "routing") or item.get("model") == model)
+            and (signal != "routing" or item.get("variant") == variant)
             for item in flags
         ):
             return
@@ -533,9 +552,12 @@ def collect(args):
             "repository": root_info[rid]["repository"],
         }
         if signal == "routing":
-            item["activation_class"] = routing_class(sid or rid, when if when is not None else sessions[rid]["created"], item["agent"], provider, model)
+            item["activation_class"] = routing_class(sid or rid, when if when is not None else sessions[rid]["created"], item["agent"], provider, model, variant)
             item["expected_model"] = targets.get(item["agent"], {}).get("model")
             item["observed_model"] = f"{provider}/{model}"
+            if item["activation_class"] == "KNOWN_DEVIATION":
+                item["reference"] = COMPACTION_REFERENCE
+                item["status"] = "informational"
         for name, value in (("provider", provider), ("model", model), ("variant", variant)):
             if value is not None:
                 item[name] = value
@@ -785,7 +807,7 @@ def collect(args):
         })
     production = populations["production"]
     repositories = {}
-    for name in ("toolkit", "product", "unknown"):
+    for name in REPOSITORIES:
         ids = {rid for rid, info in root_info.items() if info["class"] == "production" and info["repository"] == name}
         selected = [item for item in flags if item["root"] in ids]
         repositories[name] = {

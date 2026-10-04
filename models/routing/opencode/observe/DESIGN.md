@@ -116,3 +116,15 @@ classes without absolute paths. The Build checkpoint counts only product.
 For each distinct observed Expert child, output only its direct parent hash,
 repository class and presence of the seven structured decision-packet headings.
 No prompt content is emitted and packet presence is not a quality adjudication.
+
+## Closure — workspace and known deviation
+
+An existing non-Git cwd is `workspace`, regardless of directory name or files
+modified. Missing cwd evidence stays `unknown`. Workspace counters remain
+visible and never advance the product Build checkpoint.
+
+Compaction variant inheritance is `KNOWN_DEVIATION` only for version 1.18.32,
+the expected configured model, and a stored variant matching the linked parent
+user message while differing from the manifest variant. The alignment record's
+append-only addendum is linked from each informational flag. Such flags never
+enter the review queue or trigger rollback; other mismatches remain observable.

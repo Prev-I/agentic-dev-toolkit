@@ -90,3 +90,43 @@ Routing and global configuration remain unchanged. The quality-profile cycle
 is closed by the ACCEPTED `2026-10-04-quality-profile-closure.md`; General
 screening is DEFERRED. No capability evidence here promotes a model or revises
 any existing quality adjudication.
+
+## Addendum — 2026-10-04 Breakglass subscription-call completion
+
+After explicit user approval of a separate subscription-quota account, the
+Breakglass gap above is closed by
+`eval/records/current-routing-capability-2026-10/breakglass-completion/`.
+One experiment-only primary request using `openai/gpt-6.1-sol`, requested variant
+`max`, and permissions equivalent to active Breakglass returned `CAPABILITY_OK`.
+No Task invocation or retry occurred. OAuth subscription metadata was verified
+before dispatch, with no API-key field, environment key or provider-options
+override; credential values and account identifiers were not recorded.
+
+The separate OpenAI account uses unit `calls` for primary probe dispatches:
+one historical Expert probe was
+recorded retroactively without changing its dispatch, and one newly authorized
+Breakglass call consumed its 1-call allowance. The user explicitly excluded
+Expert's historical usage from that allowance. Total primary probe dispatches are two;
+`derived_credits: null` means subscription quota, not metered consumption spend.
+Runtime tokens are retained, without converting subscription calls to Copilot
+credits or treating runtime cost zero as free billing. Ledger-observed Copilot
+spend stays 2.26529 credits, not a total provider-spend claim. Historical
+accounting-stop evidence remains unchanged.
+
+All seven previously listed targets now have successful-call evidence. This is
+not provider attestation of reasoning effort or role-quality evidence. Routing,
+global configuration, Task exclusion and the accepted quality-profile closure
+remain unchanged.
+
+### Accounting clarification — auxiliary requests (POST_RUN_DIAGNOSTIC)
+
+OpenCode's operational log also shows an auxiliary title request: Expert's
+historical session used OpenAI GPT-6 Astra for title generation, while the new
+Breakglass session used Copilot GPT-6 Luna. These auxiliary streams are not
+metered by the dispatcher ledger. The two sessions therefore contain three
+observed OpenAI provider streams (two historical and one new), not just two
+provider requests; `calls` counts the primary probe dispatches. The new allowance
+still used only one new OpenAI request. One auxiliary Copilot title request has
+unobserved cost, so 2.26529 is only the ledger-observed Copilot amount. Sanitized
+excerpts and the limits of permission parity/variant attestation are documented
+in the completion record. No historical dispatch or adjudication is rewritten.

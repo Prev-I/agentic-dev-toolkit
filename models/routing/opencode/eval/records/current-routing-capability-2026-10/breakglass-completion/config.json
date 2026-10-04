@@ -1,0 +1,11 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "breakglass-capability-only": {
+      "mode": "primary",
+      "model": "openai/gpt-6.1-sol",
+      "variant": "max",
+      "permission": {"edit": "deny", "bash": "deny", "task": "deny"}
+    }
+  }
+}

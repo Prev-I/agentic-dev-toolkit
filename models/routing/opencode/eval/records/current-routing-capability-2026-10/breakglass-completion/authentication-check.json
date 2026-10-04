@@ -1,0 +1,10 @@
+{
+  "provider": "openai",
+  "credential_type": "oauth",
+  "oauth_account_present": true,
+  "api_key_credential_present": false,
+  "api_key_environment_present": false,
+  "subscription_auth_precondition_passed": true,
+  "historical_expert_auth_at_dispatch_independently_captured": false,
+  "resolved_openai_provider_options_absent": true
+}

@@ -1,0 +1,13 @@
+{
+  "classification": "POST_RUN_DIAGNOSTIC",
+  "source": "OpenCode local operational log; sanitized stream-field excerpts only",
+  "scope": "Expert and Breakglass sessions correlated with retained raw session IDs in memory; identifiers and host paths omitted here",
+  "streams": [
+    {"parent_probe": "expert-capability", "timestamp_utc": "2026-10-04T07:56:47.875Z", "providerID": "openai", "modelID": "gpt-6-astra", "small": true, "agent": "title", "mode": "primary"},
+    {"parent_probe": "expert-capability", "timestamp_utc": "2026-10-04T07:56:48.011Z", "providerID": "openai", "modelID": "gpt-6-astra", "small": false, "agent": "build", "mode": "primary"},
+    {"parent_probe": "breakglass-capability", "timestamp_utc": "2026-10-04T08:44:55.407Z", "providerID": "github-copilot", "modelID": "gpt-6-luna", "small": true, "agent": "title", "mode": "primary"},
+    {"parent_probe": "breakglass-capability", "timestamp_utc": "2026-10-04T08:44:55.472Z", "providerID": "openai", "modelID": "gpt-6.1-sol", "small": false, "agent": "breakglass-capability-only", "mode": "primary"}
+  ],
+  "auxiliary_cost_and_tokens_available": false,
+  "adjudicates": false
+}

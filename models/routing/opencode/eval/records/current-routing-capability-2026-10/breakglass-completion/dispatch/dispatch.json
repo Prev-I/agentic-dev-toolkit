@@ -1,0 +1,35 @@
+{
+  "timestamp": "2026-10-04T10:45:02.548970+02:00",
+  "label": "breakglass-subscription-capability",
+  "attempt": 1,
+  "routing_profile_id": "unresolved-runtime-profile",
+  "routing_profile_commit": "ddf1e5023fc34428619f6d84f3f03e9f0490c287",
+  "runtime_version": "1.18.32",
+  "eval_runner_version": "phase-r-dispatch-v2",
+  "environment": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+  "dispatch_target": "agent:breakglass-capability-only",
+  "variant": "max",
+  "timeout_seconds": 120,
+  "exit_status": 0,
+  "classification": "OK",
+  "failure_class": null,
+  "provider_error_text": null,
+  "provider_status_code": null,
+  "observed_cost": 0,
+  "derived_credits": null,
+  "normalized_steady_state_cost": null,
+  "tokens": {
+    "total": 9650,
+    "input": 9589,
+    "output": 9,
+    "reasoning": 52,
+    "cache": {
+      "write": 0,
+      "read": 0
+    }
+  },
+  "wall_clock_ms": 9347,
+  "retry_count": 0,
+  "raw_evidence": "raw.jsonl",
+  "decides_gate_outcome": false
+}

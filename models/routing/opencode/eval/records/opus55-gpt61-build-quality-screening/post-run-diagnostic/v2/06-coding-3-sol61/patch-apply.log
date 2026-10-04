@@ -1,0 +1,3 @@
+classification: POST_RUN_DIAGNOSTIC
+patching file environments/linux/install.sh
+patching file tests/install.sh

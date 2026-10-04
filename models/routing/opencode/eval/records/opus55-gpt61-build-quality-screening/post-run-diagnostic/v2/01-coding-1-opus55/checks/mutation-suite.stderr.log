@@ -1,0 +1,1 @@
+FAIL: bootstrap must not add managed directories that do not exist: expected '/tmp/tmp.IhpN2ULf6n/path guard [x]/missing-bootstrap/home/bin:/usr/bin', got '/tmp/tmp.IhpN2ULf6n/path guard [x]/missing-bootstrap/home/.local/bin:/tmp/tmp.IhpN2ULf6n/path guard [x]/missing-bootstrap/home/bin:/tmp/tmp.IhpN2ULf6n/path guard [x]/missing-bootstrap/home/.opencode/bin:/usr/bin'

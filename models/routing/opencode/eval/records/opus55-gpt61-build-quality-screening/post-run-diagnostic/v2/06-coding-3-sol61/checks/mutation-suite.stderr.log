@@ -1,0 +1,5 @@
+FAIL: bootstrap managed PATH: expected '/usr/bin::/bin:', got '/tmp/tmp.EtSBdcFH13/path bootstrap [literal]/.local/bin:/tmp/tmp.EtSBdcFH13/path bootstrap [literal]/bin:/tmp/tmp.EtSBdcFH13/path bootstrap [literal]/.opencode/bin:/usr/bin::/bin:'
+
+ERROR: setup failed near line 147 (exit code 1).
+
+ERROR: setup failed near line 187 (exit code 1).

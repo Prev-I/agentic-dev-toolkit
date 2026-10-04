@@ -1,0 +1,1 @@
+FAIL: a directory already on PATH must not be added a second time: expected '1', got '2'

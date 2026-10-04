@@ -1,0 +1,20 @@
+{
+  "classification": "POST_RUN_DIAGNOSTIC",
+  "adjudicates": false,
+  "python_executable": "/usr/bin/python3.12",
+  "reference_commit": "55da937fb7233717c9924aa59c1e36773afbde29",
+  "broken_commit": "7605022b86dd9f4040f272cca59224f2e568a943",
+  "attempts": [],
+  "reference": {
+    "classification": "POST_RUN_DIAGNOSTIC",
+    "oracle": 0,
+    "empty_path": 0,
+    "immutable_suite": 1,
+    "candidate_suite": 1,
+    "syntax_environments/linux/install.sh": 0,
+    "syntax_tests/install.sh": 0,
+    "mutation_suite": 1,
+    "mutation_classification": "HARNESS_ERROR"
+  },
+  "controls_passed": false
+}

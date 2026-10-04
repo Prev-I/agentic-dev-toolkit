@@ -1,0 +1,9 @@
+This is the explicitly authorized, bounded provider-routing diagnostic. Do not read files, use skills, run commands, or change anything. Call the task tool exactly ONCE with subagent_type expert, description "Trivial advisory routing probe", and this complete decision packet:
+1. Problem statement: choose whether a read-only diagnostic should change production configuration when no defect has yet been demonstrated.
+2. Context: no defect is established; this is a provider-routing capability probe, with no implementation authorized.
+3. Options considered: A leave configuration unchanged; B change configuration speculatively.
+4. Arguments: A preserves the approved baseline; B could address an unknown issue but lacks evidence.
+5. Risks: A postpones correction if a defect is later proven; B introduces unverified changes.
+6. Requesting agent: build, explicitly instructed by the human to invoke this one trivial expert diagnostic.
+7. Desired output: your normal five sections, each at most one sentence. Use only this packet, no tools, and recommend A.
+After the task result, output only PROVIDER_PROBE_DONE. Do not retry if the tool or provider fails. No other tools or delegation are authorized.

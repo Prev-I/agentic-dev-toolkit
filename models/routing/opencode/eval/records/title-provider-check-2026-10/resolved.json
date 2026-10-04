@@ -1,0 +1,38 @@
+{
+  "build": {
+    "name": "build",
+    "mode": "primary",
+    "model": {
+      "providerID": "github-copilot",
+      "modelID": "gpt-6.1-sol"
+    },
+    "variant": "high"
+  },
+  "expert": {
+    "name": "expert",
+    "mode": "subagent",
+    "model": {
+      "providerID": "openai",
+      "modelID": "gpt-6-astra"
+    },
+    "variant": "xhigh"
+  },
+  "title": {
+    "name": "title",
+    "mode": "primary",
+    "model": {
+      "providerID": "github-copilot",
+      "modelID": "gpt-6-luna"
+    },
+    "variant": "low"
+  },
+  "summary": {
+    "name": "summary",
+    "mode": "primary",
+    "model": {
+      "providerID": "github-copilot",
+      "modelID": "gpt-6-luna"
+    },
+    "variant": "low"
+  }
+}

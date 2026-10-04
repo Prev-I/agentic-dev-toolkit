@@ -1,0 +1,13 @@
+{
+  "timestamp": "2026-10-04T12:08:23.642898+02:00",
+  "status": "RESERVED_BEFORE_DISPATCH",
+  "copilot_account": "current_routing_capability",
+  "copilot_ceiling_credits": 10,
+  "reserved_credits": 10,
+  "subscription_account": "openai_subscription",
+  "subscription_ceiling_calls": 1,
+  "reserved_calls": 1,
+  "unit_definition": "one expert Task dispatch, auxiliary requests declared separately",
+  "auxiliary_requests": [],
+  "retry_count": 0
+}

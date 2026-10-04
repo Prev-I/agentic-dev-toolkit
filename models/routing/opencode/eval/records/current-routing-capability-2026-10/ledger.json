@@ -16,8 +16,28 @@
       "authorization": "Explicit user confirmation: the one-call ceiling applies only to the new Breakglass probe; Expert is historical usage in the same account."
     },
     "auxiliary_requests": [
-      {"parent_probe": "expert-capability", "scope": "historical", "provider": "openai", "model": "gpt-6-astra", "agent": "title", "provider_requests": 1, "tokens": null, "cost": null, "source": "breakglass-completion/auxiliary-request-evidence.json"},
-      {"parent_probe": "breakglass-capability", "scope": "new_allowance", "provider": "github-copilot", "model": "gpt-6-luna", "agent": "title", "provider_requests": 1, "tokens": null, "cost": null, "source": "breakglass-completion/auxiliary-request-evidence.json"}
+      {
+        "parent_probe": "expert-capability",
+        "scope": "historical",
+        "provider": "openai",
+        "model": "gpt-6-astra",
+        "agent": "title",
+        "provider_requests": 1,
+        "tokens": null,
+        "cost": null,
+        "source": "breakglass-completion/auxiliary-request-evidence.json"
+      },
+      {
+        "parent_probe": "breakglass-capability",
+        "scope": "new_allowance",
+        "provider": "github-copilot",
+        "model": "gpt-6-luna",
+        "agent": "title",
+        "provider_requests": 1,
+        "tokens": null,
+        "cost": null,
+        "source": "breakglass-completion/auxiliary-request-evidence.json"
+      }
     ],
     "entries": [
       {
@@ -99,5 +119,72 @@
       "provider": "github-copilot",
       "credits": 0.00942
     }
-  ]
+  ],
+  "title_provider_check": {
+    "timestamp": "2026-10-04T12:08:23.642898+02:00",
+    "status": "PASS",
+    "copilot_account": "current_routing_capability",
+    "copilot_ceiling_credits": 10,
+    "reserved_credits": 10,
+    "subscription_account": "openai_subscription",
+    "subscription_ceiling_calls": 1,
+    "reserved_calls": 1,
+    "unit_definition": "one expert Task dispatch, auxiliary requests declared separately",
+    "auxiliary_requests": [
+      {
+        "provider": "github-copilot",
+        "model": "gpt-6-luna",
+        "session": "ses_ef99d2383ffe5kmy5YzdllvTtl",
+        "small": "true",
+        "agent": "title",
+        "mode": "primary"
+      }
+    ],
+    "retry_count": 0,
+    "record_status": "POST_RUN_DIAGNOSTIC",
+    "runtime_version": "1.18.32",
+    "classification": "LEAK_DISPATCHER_OVERRIDE_ONLY",
+    "exit_status": 0,
+    "requests": [
+      {
+        "provider": "github-copilot",
+        "model": "gpt-6-luna",
+        "session": "ses_ef99d2383ffe5kmy5YzdllvTtl",
+        "small": "true",
+        "agent": "title",
+        "mode": "primary"
+      },
+      {
+        "provider": "github-copilot",
+        "model": "gpt-6.1-sol",
+        "session": "ses_ef99d2383ffe5kmy5YzdllvTtl",
+        "small": "false",
+        "agent": "build",
+        "mode": "primary"
+      },
+      {
+        "provider": "openai",
+        "model": "gpt-6-astra",
+        "session": "ses_ef99d0781ffe8ctrqhFoTL1tRT",
+        "small": "false",
+        "agent": "expert",
+        "mode": "subagent"
+      },
+      {
+        "provider": "github-copilot",
+        "model": "gpt-6.1-sol",
+        "session": "ses_ef99d2383ffe5kmy5YzdllvTtl",
+        "small": "false",
+        "agent": "build",
+        "mode": "primary"
+      }
+    ],
+    "task_dispatches": 1,
+    "copilot_observed_credits": 4.97982,
+    "copilot_auxiliary_cost": null,
+    "subscription_calls": 1,
+    "openai_provider_requests": 1,
+    "routing_changed": false,
+    "budget_boundary": "10 credits reserved; completed-step watchdog, not hard in-flight cap; auxiliary title cost unavailable; second Expert stream detected only after start; legacy ledger helpers exclude this appended structure (combined observed primary Copilot spend 7.24511); provider request count means LLM stream lines, HTTP retries unverified"
+  }
 }

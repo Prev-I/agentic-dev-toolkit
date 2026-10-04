@@ -4,6 +4,7 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 source "$root/tests/test-lib.sh"
 source "$root/tests/prerequisites.sh"
 require_system_python
+require_command direnv
 script="$root/records/opus55-gpt61-build-quality-screening/verify-results-v2.sh"
 assert_file "$script"
 w=$(mktemp -d)

@@ -130,3 +130,37 @@ still used only one new OpenAI request. One auxiliary Copilot title request has
 unobserved cost, so 2.26529 is only the ledger-observed Copilot amount. Sanitized
 excerpts and the limits of permission parity/variant attestation are documented
 in the completion record. No historical dispatch or adjudication is rewritten.
+
+## Addendum — 2026-10-04 title-provider production-path diagnostic
+
+`eval/records/title-provider-check-2026-10/` records one configured Build parent
+delegating to Expert through Task, without a CLI model override. Parent title
+used Copilot GPT-6 Luna; two Build streams used Copilot GPT-6.1 Sol; the single
+Expert child stream used direct OpenAI GPT-6 Astra. No summary stream or child
+title stream was observed. In OpenCode 1.18.32, child title generation is
+suppressed and automatic SessionSummary computes snapshot diffs without an LLM.
+
+The bounded diagnosis is **LEAK_DISPATCHER_OVERRIDE_ONLY**. The historical
+Expert probe isolated XDG config, thereby losing the explicit title model, and
+supplied a direct OpenAI model override. Without configured title routing,
+OpenCode falls back to the main provider. A model override alone does not
+replace an explicitly configured title model. Future isolated probes must use
+experiment-only primary agents and verify preserved metadata routing.
+
+The new appended ledger structure reserved 10 Copilot credits and one OpenAI
+subscription Task dispatch before execution. Observed primary Copilot spend was
+4.97982 credits; one Expert subscription dispatch/stream and one auxiliary
+Copilot title stream occurred. Title spend is unavailable, so the amount is not
+a total provider-spend assertion or a proved hard 10-credit cap. There was no
+outer retry or quota error; title's internal SDK retry capability remains a
+source-level caveat. Routing, global configuration and historical evidence
+remain unchanged; no production routing fix is proposed by this diagnostic.
+
+Accounting clarification: legacy `ledger_spent`/`ledger_admit` read only the
+historical top-level entries (2.26529 credits), excluding the new structure.
+Combined observed primary Copilot spend is 7.24511 credits; future admission
+must include the addition explicitly. The one-call watchdog detects extra
+Expert streams after they start, not before dispatch. Retained stream/message
+evidence does not independently count HTTP requests or audit SDK retries.
+Snapshot diffs in the exports capture the harness writing its own raw output;
+they are not agent file edits.

@@ -159,6 +159,16 @@ routing profile, call candidate models during tests, or authorize Phase R. See
 the [Phase 0 gate record](docs/evidence/2026-09-02-phase-0-gates.md) for the
 implemented gates and unresolved budget inputs.
 
+For future isolated capability probes, use an **experiment-only primary agent**
+with the intended model and verified role permissions, preserving and checking
+active Title/Summary routing. As of OpenCode 1.18.32, isolating XDG configuration
+can lose the explicit title model; a direct `--model` override then selects the
+provider used by title fallback. `--model` alone does not override a configured title model.
+The Breakglass completion is an example of an experiment-only primary. Record
+auxiliary provider streams and unknown costs separately from primary dispatch
+accounting. See the [title-provider diagnostic](eval/records/title-provider-check-2026-10/result.md)
+for the configured Build→Expert path and its evidence boundaries.
+
 ## Alignment check — is the installed configuration still this bundle?
 
 Merging this bundle is a copy, not a link: once installed, the user-global

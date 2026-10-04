@@ -1,0 +1,22 @@
+{
+  "findings": [
+    {
+      "file": "counter.sh",
+      "severity": "material",
+      "summary": "Unvalidated counter contents are evaluated as Bash arithmetic, allowing embedded array-index command substitutions to execute shell commands.",
+      "evidence": "n=$(<\"$1\"); printf '%s\\n' \"$((n+1))\""
+    },
+    {
+      "file": "counter.sh",
+      "severity": "material",
+      "summary": "A failed read is ignored, so an unreadable but writable counter file can be overwritten with 1 instead of preserving its existing value and reporting failure.",
+      "evidence": "n=$(<\"$1\"); printf '%s\\n' \"$((n+1))\" >\"$1\";"
+    },
+    {
+      "file": "counter.sh",
+      "severity": "material",
+      "summary": "Concurrent increments can read the same value and overwrite each other's results because the read-modify-write operation has no locking.",
+      "evidence": "n=$(<\"$1\"); printf '%s\\n' \"$((n+1))\" >\"$1\";"
+    }
+  ]
+}

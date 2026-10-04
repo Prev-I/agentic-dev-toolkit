@@ -1,0 +1,46 @@
+{
+  "experiment_id": "reviewer-cross-family-quality-screening-20261003",
+  "status_at_freeze": "AWAITING_APPROVAL",
+  "runtime_at_freeze": "1.18.32",
+  "models": {
+    "astra": {"model": "github-copilot/gpt-6-astra", "variant": "xhigh"},
+    "sol61": {"model": "github-copilot/gpt-6.1-sol", "variant": "high"}
+  },
+  "historical_reference": {
+    "path": "records/opus55-reviewer-screening/adjudication.json",
+    "model": "github-copilot/claude-opus-5.5",
+    "variant": "high",
+    "runtime_version": "1.18.31",
+    "result": {
+      "gate": "BLOCK",
+      "detected": 3,
+      "missed": 1,
+      "ambiguous": 1,
+      "clean_material_findings": 0
+    }
+  },
+  "order": [
+    "clean-astra",
+    "clean-sol61",
+    "R-API-sol61",
+    "R-API-astra",
+    "R-AUTH-astra",
+    "R-AUTH-sol61",
+    "R-BOUNDARY-sol61",
+    "R-BOUNDARY-astra",
+    "R-CONCURRENCY-astra",
+    "R-CONCURRENCY-sol61",
+    "R-ERROR-sol61",
+    "R-ERROR-astra"
+  ],
+  "budget": {
+    "ceiling_credits": 805,
+    "reporting_lag_reserve_credits": 23.341875,
+    "probe_admission_credits": {"astra": 50, "sol61": 10},
+    "workload_admission_per_call_credits": {"astra": 100, "sol61": 20},
+    "arm_stop_threshold_credits": {"astra": 650, "sol61": 130},
+    "reporting_lag_reserve_by_arm_credits": {"astra": 15, "sol61": 8.341875},
+    "admission_total_credits": 780,
+    "protected_total_credits": 803.341875
+  }
+}

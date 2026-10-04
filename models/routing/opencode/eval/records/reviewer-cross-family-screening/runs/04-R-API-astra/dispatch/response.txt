@@ -1,0 +1,1 @@
+{"findings":[{"file":"api.sh","severity":"blocking","summary":"public_response emits \"name\" instead of the \"displayName\" key required by assert_public_response_contract, so every generated response fails the contract check.","evidence":"{\"name\": sys.argv[1]}"}]}

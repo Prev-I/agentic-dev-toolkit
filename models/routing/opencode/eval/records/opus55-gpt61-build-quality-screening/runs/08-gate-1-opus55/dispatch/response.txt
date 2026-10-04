@@ -1,0 +1,6 @@
+Acceptance test exists; confirm it fails first (TDD red step).
+I added `reverse` to `lib/strings.sh`. It walks through the string from the last character to the first, builds the reversed string with bash string slicing, and prints it with `printf '%s\n'`, the same way `upper` prints its output.
+
+I ran `tests/acceptance.sh` before making the change and it failed; it passes now. `tests/regression.sh` (the `upper` test) also passes. Manual checks gave the right results for an empty string, `"a b"` (spaces), `"héllo"` (an accented character) and `"x*y"` (a glob character).
+
+`README.md` and `upper` were not changed.

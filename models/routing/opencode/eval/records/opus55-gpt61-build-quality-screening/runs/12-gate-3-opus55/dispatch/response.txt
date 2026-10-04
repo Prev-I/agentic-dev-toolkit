@@ -1,0 +1,18 @@
+Tests already exist. Confirming the acceptance test fails before implementing:
+I added `reverse` to `lib/strings.sh`, and both test scripts pass: `tests/acceptance.sh` (`reverse abc` gives `cba`) and `tests/regression.sh` (`upper abc` gives `ABC`). I ran the acceptance test before making the change and it failed, as expected.
+
+```bash
+reverse() {
+  local input=$1 output='' i
+  for (( i = ${#input} - 1; i >= 0; i-- )); do
+    output+=${input:i:1}
+  done
+  printf '%s\n' "$output"
+}
+```
+
+It's plain Bash with no external commands. Output uses `printf '%s\n'`, the same as `upper`, so an input like `-n` prints as text instead of being treated as an option. I also checked an empty string, repeated spaces and `*`, and they all come out correctly.
+
+**Non-ASCII text depends on the locale.** Under a UTF-8 locale, `héllo` reverses correctly to `olléh`. Under the plain C locale, Bash counts bytes rather than characters, so multi-byte characters come out garbled.
+
+`README.md` and `upper` are unchanged.

@@ -1,0 +1,1 @@
+{"findings":[{"file":"storage.sh","severity":"material","summary":"Storage failures are hidden and converted into a successful empty-list response, preventing callers from distinguishing an unavailable or failing backend from genuinely empty storage.","evidence":"\"$storage\" list 2>/dev/null || printf '[]\\n'"}]}

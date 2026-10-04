@@ -1,0 +1,106 @@
+{
+  "caps": {
+    "reviewer_astra": 650,
+    "reviewer_sol61": 130
+  },
+  "entries": [
+    {
+      "timestamp": "2026-10-04T06:12:18.018400+02:00",
+      "account": "reviewer_astra",
+      "label": "reviewer-astra-capability",
+      "provider": "github-copilot",
+      "credits": 3.1567499999999997
+    },
+    {
+      "timestamp": "2026-10-04T06:12:25.003342+02:00",
+      "account": "reviewer_sol61",
+      "label": "reviewer-sol61-capability",
+      "provider": "github-copilot",
+      "credits": 0.63185
+    },
+    {
+      "timestamp": "2026-10-04T06:12:42.244271+02:00",
+      "account": "reviewer_astra",
+      "label": "reviewer-clean-astra",
+      "provider": "",
+      "credits": 8.4982
+    },
+    {
+      "timestamp": "2026-10-04T06:13:07.759639+02:00",
+      "account": "reviewer_sol61",
+      "label": "reviewer-clean-sol61",
+      "provider": "",
+      "credits": 1.96665
+    },
+    {
+      "timestamp": "2026-10-04T06:13:26.062445+02:00",
+      "account": "reviewer_sol61",
+      "label": "reviewer-R-API-sol61",
+      "provider": "",
+      "credits": 1.79805
+    },
+    {
+      "timestamp": "2026-10-04T06:13:45.411754+02:00",
+      "account": "reviewer_astra",
+      "label": "reviewer-R-API-astra",
+      "provider": "",
+      "credits": 8.8966
+    },
+    {
+      "timestamp": "2026-10-04T06:17:54.222827+02:00",
+      "account": "reviewer_astra",
+      "label": "reviewer-R-AUTH-astra",
+      "provider": "",
+      "credits": 12.0606
+    },
+    {
+      "timestamp": "2026-10-04T06:18:12.584335+02:00",
+      "account": "reviewer_sol61",
+      "label": "reviewer-R-AUTH-sol61",
+      "provider": "",
+      "credits": 1.6322700000000003
+    },
+    {
+      "timestamp": "2026-10-04T06:18:30.922344+02:00",
+      "account": "reviewer_sol61",
+      "label": "reviewer-R-BOUNDARY-sol61",
+      "provider": "",
+      "credits": 1.68955
+    },
+    {
+      "timestamp": "2026-10-04T06:18:46.198942+02:00",
+      "account": "reviewer_astra",
+      "label": "reviewer-R-BOUNDARY-astra",
+      "provider": "",
+      "credits": 7.92735
+    },
+    {
+      "timestamp": "2026-10-04T06:19:19.948002+02:00",
+      "account": "reviewer_astra",
+      "label": "reviewer-R-CONCURRENCY-astra",
+      "provider": "",
+      "credits": 12.16695
+    },
+    {
+      "timestamp": "2026-10-04T06:19:49.576222+02:00",
+      "account": "reviewer_sol61",
+      "label": "reviewer-R-CONCURRENCY-sol61",
+      "provider": "",
+      "credits": 2.2618300000000002
+    },
+    {
+      "timestamp": "2026-10-04T06:20:15.097276+02:00",
+      "account": "reviewer_sol61",
+      "label": "reviewer-R-ERROR-sol61",
+      "provider": "",
+      "credits": 1.9718
+    },
+    {
+      "timestamp": "2026-10-04T06:20:42.672872+02:00",
+      "account": "reviewer_astra",
+      "label": "reviewer-R-ERROR-astra",
+      "provider": "",
+      "credits": 10.34095
+    }
+  ]
+}

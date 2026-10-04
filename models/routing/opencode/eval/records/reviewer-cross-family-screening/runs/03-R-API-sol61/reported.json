@@ -1,0 +1,10 @@
+{
+  "findings": [
+    {
+      "file": "api.sh",
+      "severity": "material",
+      "summary": "public_response emits \"name\" instead of the \"displayName\" field required by assert_public_response_contract, so its responses always fail the supplied contract check.",
+      "evidence": "{\"name\": sys.argv[1]}"
+    }
+  ]
+}

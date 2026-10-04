@@ -1,0 +1,66 @@
+{
+  "experiment_id": "opus55-gpt61-build-quality-screening-20261003",
+  "status": "COMPLETE_INVALID",
+  "decision": "INVALID_OR_INCOMPLETE",
+  "routing_changed": false,
+  "budget": {
+    "approved_ceiling_credits": 630,
+    "observed_credits": 469.84583,
+    "opus55_credits": 377.35638,
+    "sol61_credits": 92.48945,
+    "billing_caveat": "Runtime-reported completed-step cost multiplied by 100; not provider-billing reconciliation."
+  },
+  "coding_collection": {
+    "opus55": {
+      "dispatches_ok": 3,
+      "patch_apply_passes": 3,
+      "oracle_passes": 3,
+      "empty_path_passes": 3,
+      "syntax_passes": 3,
+      "protected_scope_passes": 3,
+      "behavioral_mutation_detections": 3,
+      "valid_coding_passes": 0,
+      "median_credits": 116.01914,
+      "median_wall_clock_ms": 247850
+    },
+    "sol61": {
+      "dispatches_ok": 3,
+      "patch_apply_passes": 3,
+      "oracle_passes": 3,
+      "empty_path_passes": 3,
+      "syntax_passes": 3,
+      "protected_scope_passes": 3,
+      "behavioral_mutation_detections": 3,
+      "valid_coding_passes": 0,
+      "median_credits": 25.05121,
+      "median_wall_clock_ms": 128545
+    }
+  },
+  "gate_collection": {
+    "opus55": {"adherent": 0, "non_adherent": 3, "ambiguous": 0},
+    "sol61": {"adherent": 3, "non_adherent": 0, "ambiguous": 0}
+  },
+  "harness_failure": {
+    "class": "VERIFICATION_ENVIRONMENT",
+    "affected_attempts": 6,
+    "symptom": "Both immutable and candidate suites exited 1 with 'rendered mise configuration must be valid TOML with the expected tool keys'.",
+    "root_cause": "Post-run harness-only diagnosis, not captured in the retained suite logs: the frozen verifier used env -i with a temporary HOME while retaining PATH. A minimal reproduction showed python3 resolving through the host mise shim, which rejected the host azure-artifacts mise config as untrusted under the temporary HOME. The retained logs themselves contain only the common TOML assertion failure.",
+    "execution_extent": "The suite stopped at the TOML assertion after earlier assertions, including candidate PATH checks, had run. Roughly thirty later assertions did not run. The complete suite outcome is undetermined, not a candidate failure or pass.",
+    "protocol_effect": "The frozen valid_coding_pass rule requires both suites. The verifier is approval-bound and the protocol forbids retries or post-hoc procedure changes, so the six coding attempts cannot be promoted to valid passes."
+  },
+  "decision_basis": "The paired dispatch collection completed within budget and produced six oracle-passing, syntax-clean, in-scope patches with behavioral mutation detection. However, the frozen verification environment invalidated both suites for all six coding attempts. Under the preregistered rule, an invalid verification pair yields no routing conclusion. The gate workload descriptively favored current GPT-6.1 Sol (3/3 adherent versus Opus 5.5 at 0/3), but gate evidence cannot override invalid coding evidence.",
+  "preregistered_outcomes": {
+    "OPUS55_CREDIBLE_BUILD_CANDIDATE": "Not established.",
+    "KEEP_CURRENT_SOL61": "Current routing remains operationally unchanged, but this experiment does not count as comparative promotion-grade evidence.",
+    "BOTH_PASS_NO_CLEAR_WINNER": "Not established.",
+    "INVALID_OR_INCOMPLETE": "Observed because the frozen verification environment invalidated both suites for all coding attempts."
+  },
+  "limitations": [
+    "No retries or verifier edits were made after approval.",
+    "The six retained patches and non-suite checks are diagnostic evidence only because valid_coding_pass is conjunctive.",
+    "All six mutation logs contain a concrete PATH FAIL assertion before any TOML failure, so the retained BEHAVIORAL_ASSERTION classifications hold for this record. The classifier's generic FAIL substring rule should be tightened in a future freeze.",
+    "A future freeze needs a positive-control run of the reference solution in the exact verifier environment, a fixed verifier working directory, and a python3 path that bypasses the host mise shim.",
+    "One historical coding workload and one small gate fixture do not establish broad Build reliability.",
+    "The freeze was manifest-bound but deliberately uncommitted under the task constraint; Git HEAD does not contain the protocol files."
+  ]
+}

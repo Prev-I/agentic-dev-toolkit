@@ -1,0 +1,19 @@
+Using systematic-debugging to inspect the three PATH setup sites, then test-driven-development to add regression coverage before fixing them. I’ll use disposable HOME directories and source the installer without running its main function.
+
+All three sites use the same unconditional prepend, which adds duplicates and nonexistent directories. I’ll guard each addition with a directory check and an exact colon-delimited match, processing directories in reverse priority so new entries retain the required order. Regression tests will cover all three sites, including empty PATH, repeated activation, and paths with spaces.
+
+The regression test fails as expected: bootstrap prepends all three directories even when none exists. The tests also account for the refresh function’s existing behavior of creating `.local/bin` before updating PATH.
+
+The guards are in place at all three sites. Each prepend retains the original PATH verbatim, including its empty entry when PATH is empty. Using verification-before-completion to run the required suite and syntax checks.
+
+The new PATH cases pass, and both syntax checks pass. The full suite then hits a host-dependent failure: this machine has a WSL kernel, so an existing Karpathy verification test checks for a credential wrapper before reaching its intended assertion. I’ll set the test harness’s initial platform override to non-WSL; the credential tests already select WSL explicitly in their sandboxes.
+
+Updated all three PATH setup sites in `environments/linux/install.sh` to prepend only existing directories absent as exact PATH entries. Priority, existing entries—including empty entries—and repeated-activation behavior are preserved.
+
+Added regression coverage in `tests/install.sh` for missing directories, duplicates, exact matching, empty PATH, spaces, backups, and dry-run non-mutation. `main "$@"` remains the installer’s final line.
+
+Verification:
+- `setsid bash tests/install.sh < /dev/null` — passed.
+- Syntax checks for both files — passed.
+
+Only the two permitted files changed. Tests used disposable HOME directories without running the installer’s main function.

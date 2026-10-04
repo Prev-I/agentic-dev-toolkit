@@ -1,0 +1,65 @@
+{
+  "experiment_id": "reviewer-cross-family-quality-screening-20261003",
+  "status": "COMPLETE",
+  "decision": "NO_CHALLENGER_PASSES_THRESHOLD",
+  "routing_changed": false,
+  "budget": {
+    "approved_ceiling_credits": 805,
+    "observed_credits": 74.9994,
+    "astra_credits": 63.0474,
+    "sol61_credits": 11.952,
+    "billing_caveat": "Runtime-reported completed-step cost multiplied by 100; not provider-billing reconciliation."
+  },
+  "historical_reference": {
+    "model": "github-copilot/claude-opus-5.5",
+    "variant": "high",
+    "runtime_version": "1.18.31",
+    "gate": "BLOCK",
+    "detected": 3,
+    "missed": 1,
+    "ambiguous": 1,
+    "clean_material_findings": 0
+  },
+  "quality": {
+    "astra": {
+      "model": "github-copilot/gpt-6-astra",
+      "variant": "xhigh",
+      "gate": "BLOCK",
+      "detected": ["R-API", "R-AUTH", "R-ERROR"],
+      "missed": ["R-BOUNDARY"],
+      "ambiguous": ["R-CONCURRENCY"],
+      "clean_material_findings": 0,
+      "workload_credits": 59.89065,
+      "workload_wall_clock_ms": 356922
+    },
+    "sol61": {
+      "model": "github-copilot/gpt-6.1-sol",
+      "variant": "high",
+      "gate": "BLOCK",
+      "detected": ["R-API", "R-AUTH", "R-ERROR"],
+      "missed": ["R-BOUNDARY"],
+      "ambiguous": ["R-CONCURRENCY"],
+      "clean_material_findings": 1,
+      "workload_credits": 11.32015,
+      "workload_wall_clock_ms": 130512
+    }
+  },
+  "decision_basis": "Neither challenger reached the frozen 5/5 plus clean-zero threshold. Both reproduced the historical 3 detected, 1 missed, 1 ambiguous attribution. Astra preserved clean-zero; GPT-6.1 Sol reported one material finding on the clean control. Efficiency cannot override the quality block.",
+  "preregistered_outcomes": {
+    "NO_CHALLENGER_PASSES_THRESHOLD": "Observed. No quality-profile Reviewer decision is unlocked.",
+    "ASTRA_PASSES_THRESHOLD": "Not observed.",
+    "SOL61_PASSES_THRESHOLD": "Not observed.",
+    "BOTH_PASS_THRESHOLD": "Not observed.",
+    "CREDIBLE_CANDIDATE_BELOW_THRESHOLD": "Not observed: neither challenger improved beyond the historical three detections.",
+    "INVALID_OR_INCOMPLETE": "Not observed."
+  },
+  "limitations": [
+    "One dispatch per model per case does not establish reliability.",
+    "The Opus 5.5 reference ran on OpenCode 1.18.31 with different runner, plugin and instruction context; comparison is historical rather than contemporaneous.",
+    "R-CONCURRENCY remains fail-closed ambiguous because multiple material findings target the same override and the case has no witness.",
+    "R-BOUNDARY was missed by both challengers, as it was by the historical reference.",
+    "GPT-6.1 Sol's clean-control finding identifies a real error-handling defect in clean/counter.sh: an unreadable but writable counter can be overwritten with 1 while the function reports success. The frozen clean-zero contract penalizes that correct finding. Rescoring is forbidden, and Sol already blocks at three of five seeded detections.",
+    "Reviewer workload ledger rows use agent dispatch and therefore leave provider empty and variant resolved; the retained resolved-config snapshots establish the concrete Copilot model and variant identities.",
+    "The freeze was manifest-bound but deliberately uncommitted under the task constraint; Git HEAD does not contain the protocol files."
+  ]
+}

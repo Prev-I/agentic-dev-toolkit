@@ -1,0 +1,46 @@
+Using test-driven-development to drive this fix. Let me look at the code.
+Now writing the tests first (RED).
+IFS is `$'\n\t'` in the test file, so word-splitting a space-separated string won't work; switch to an array.
+Now register the tests in the run list.
+Verify RED: run each new test individually against the unmodified installer (driver in /tmp/opencode, repo untouched).
+Full suite green. Running shellcheck and a mutation check: if the guards were broken, would the tests catch it?
+Mutation checks on a disposable copy (repo files untouched):
+Each mutation is caught, and the unmutated control run passes. Final verification:
+That call got blocked, probably by the `rm` of the scratch dirs. I'll run the verification without it:
+The installer now adds each of the three directories to PATH only if it exists and isn't already a PATH entry, at all three sites. The full test suite passes, and the new tests failed against the old code before the fix.
+
+## Change
+
+**`environments/linux/install.sh`**
+- **New `prepend_managed_path_dirs()`**, defined just before the bootstrap. It walks `$HOME/.opencode/bin`, `$HOME/bin`, `$HOME/.local/bin` in that order (lowest priority first). For each one it runs `[[ -d "$dir" && ":$PATH:" != *":$dir:"* ]]` and, if true, sets `PATH="$dir:$PATH"`. The quoted `$dir` is matched literally, so only a complete, exact entry counts as present. When all three are added the order is still `.local/bin`, `bin`, `.opencode/bin`, then the original PATH. If PATH starts empty, its empty entry is kept: `…/.opencode/bin:`.
+- **Bootstrap:** the unconditional `export PATH=…` is replaced by a call to `prepend_managed_path_dirs`.
+- **Managed Bash block:** the same loop is written inline, using a variable named `__adt_path_dir` that is unset afterwards. This way nothing extra is left behind in the user's shell. The markers, the `OPENCODE_ENABLE_EXA` line, mise and direnv activation, backup and dry-run behaviour are unchanged.
+- **Refresh at the end of `ensure_shell_configuration`:** now calls `prepend_managed_path_dirs`. It runs after the existing `mkdir -p ~/.local/bin`, so `.local/bin` still gets added.
+- `main "$@"` is still the last line.
+
+**`tests/install.sh`**
+- A helper, `path_after <site> <home> <path>`, returns the resulting PATH for each site:
+  - **bootstrap:** sources the installer in a fresh bash process.
+  - **bashrc:** sources the generated `.bashrc` with direnv stubbed out.
+  - **refresh:** runs `ensure_shell_configuration` in a subshell. The commands it calls are resolved via `command -p`, so the PATH being tested can even be empty.
+- Each test HOME is disposable and lives under `path guard [x]/`. The space covers paths with spaces, and the brackets make a glob-based match fail.
+- Eight new tests:
+  - empty PATH gives all three directories in priority order plus the kept empty entry (every site)
+  - missing directories are skipped
+  - existing, duplicate and empty entries are kept exactly, with no duplicates added
+  - only exact entries count as present: a trailing slash, a subdirectory, a glob lookalike or a longer path ending in the same name do not
+  - running again, or sourcing `.bashrc` twice, adds nothing
+  - mise and direnv still activate (using a stub `mise` executable)
+  - re-running keeps user content, a single pair of markers and the backup, and removes the old unconditional line
+  - dry-run writes nothing and leaves PATH unchanged
+
+## Verification
+- **Before the fix:** 5 of the 8 new tests failed because the old code prepended unconditionally. The other 3 passed: the empty-PATH, dry-run and exact-match tests check behaviour the old code already met.
+- **After the fix:** `setsid bash tests/install.sh < /dev/null` prints `PASS: installer compatibility tests`, exit 0, including all existing tests.
+- `bash -n` passes for both files, and shellcheck 0.11.0 reports nothing for either.
+- **Mutation checks** on a throwaway copy: six deliberate breakages each made the suite fail. They were glob matching in the function, glob matching in the Bash block, no directory check in the block, wrong order in the block, the old unconditional refresh, and a `${PATH:+…}` form that drops the empty entry. An unchanged copy passed.
+
+## Notes
+- Copies used for the before-fix runs and mutation checks are still in `/tmp/opencode/red` and `/tmp/opencode/mut`. The command to delete them was blocked by a permission rule; you can remove them by hand.
+- The test file's own temp directory isn't removed at the end of a run. Sourcing the installer replaces the test's `trap cleanup EXIT` with the installer's own cleanup. I left this alone because it's outside the scope of this task.
+- If PATH is unset (not empty), the guard behaves as it does for an empty PATH, the same as the old code did.

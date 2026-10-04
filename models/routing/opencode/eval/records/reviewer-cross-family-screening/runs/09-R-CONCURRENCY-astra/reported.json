@@ -1,0 +1,22 @@
+{
+  "findings": [
+    {
+      "file": "counter.sh",
+      "severity": "material",
+      "summary": "Counter contents are evaluated as Bash arithmetic without integer validation, allowing crafted array-subscript expressions to execute shell commands.",
+      "evidence": "\"$((n+1))\""
+    },
+    {
+      "file": "counter.sh",
+      "severity": "material",
+      "summary": "A failed counter read is ignored, so a missing or unreadable but writable counter can be overwritten with 1 and the function can report success.",
+      "evidence": "n=$(<\"$1\"); printf '%s\\n' \"$((n+1))\" >\"$1\";"
+    },
+    {
+      "file": "counter.sh",
+      "severity": "material",
+      "summary": "The unlocked read-modify-write operation loses increments when concurrent callers read the same counter value before writing their results.",
+      "evidence": "n=$(<\"$1\"); printf '%s\\n' \"$((n+1))\" >\"$1\";"
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "reviewer-astra": {
+      "mode": "primary",
+      "model": "github-copilot/gpt-6-astra",
+      "variant": "xhigh",
+      "temperature": 0.1,
+      "prompt": "{file:./reviewer-prompt.md}",
+      "permission": {
+        "edit": "deny",
+        "task": "deny",
+        "external_directory": "deny",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "skill": "allow",
+        "bash": {
+          "*": "deny",
+          "git status*": "allow",
+          "git diff*": "allow",
+          "git log*": "allow",
+          "git show*": "allow"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,108 @@
+{
+  "model_key": "sol61",
+  "seeded": [
+    {
+      "id": "R-API",
+      "severity": "material",
+      "files": [
+        "api.sh"
+      ],
+      "summary": "public_response emits \"name\" instead of the \"displayName\" field required by assert_public_response_contract, so its responses always fail the supplied contract check.",
+      "all_reported": [
+        {
+          "file": "api.sh",
+          "severity": "material",
+          "summary": "public_response emits \"name\" instead of the \"displayName\" field required by assert_public_response_contract, so its responses always fail the supplied contract check.",
+          "evidence": "{\"name\": sys.argv[1]}"
+        }
+      ]
+    },
+    {
+      "id": "R-AUTH",
+      "severity": "blocking",
+      "files": [
+        "authorization.sh"
+      ],
+      "summary": "read_resource returns the resource value without checking whether the caller matches the owner, allowing unauthorized disclosure.",
+      "all_reported": [
+        {
+          "file": "authorization.sh",
+          "severity": "blocking",
+          "summary": "read_resource returns the resource value without checking whether the caller matches the owner, allowing unauthorized disclosure.",
+          "evidence": "local caller=$1 owner=$2 value=$3; printf '%s\\n' \"$value\";"
+        }
+      ]
+    },
+    {
+      "id": "R-BOUNDARY",
+      "severity": "none",
+      "files": [
+        "pagination.sh"
+      ],
+      "summary": "",
+      "all_reported": []
+    },
+    {
+      "id": "R-CONCURRENCY",
+      "severity": "material",
+      "files": [
+        "counter.sh"
+      ],
+      "summary": "Unvalidated counter contents are evaluated as Bash arithmetic, allowing embedded array-index command substitutions to execute shell commands.",
+      "all_reported": [
+        {
+          "file": "counter.sh",
+          "severity": "material",
+          "summary": "Unvalidated counter contents are evaluated as Bash arithmetic, allowing embedded array-index command substitutions to execute shell commands.",
+          "evidence": "n=$(<\"$1\"); printf '%s\\n' \"$((n+1))\""
+        },
+        {
+          "file": "counter.sh",
+          "severity": "material",
+          "summary": "A failed read is ignored, so an unreadable but writable counter file can be overwritten with 1 instead of preserving its existing value and reporting failure.",
+          "evidence": "n=$(<\"$1\"); printf '%s\\n' \"$((n+1))\" >\"$1\";"
+        },
+        {
+          "file": "counter.sh",
+          "severity": "material",
+          "summary": "Concurrent increments can read the same value and overwrite each other's results because the read-modify-write operation has no locking.",
+          "evidence": "n=$(<\"$1\"); printf '%s\\n' \"$((n+1))\" >\"$1\";"
+        }
+      ]
+    },
+    {
+      "id": "R-ERROR",
+      "severity": "material",
+      "files": [
+        "storage.sh"
+      ],
+      "summary": "Storage errors are suppressed and converted into a successful empty-list response, preventing callers from distinguishing failure from genuinely empty storage.",
+      "all_reported": [
+        {
+          "file": "counter.sh",
+          "severity": "material",
+          "summary": "A failed counter-file read is ignored, so an unreadable but writable counter file is overwritten with 1 instead of preserving its value and returning an error.",
+          "evidence": "n=$(<\"$1\"); printf \"%s\\n\" \"$((n+1))\" >\"$1\""
+        },
+        {
+          "file": "storage.sh",
+          "severity": "material",
+          "summary": "Storage errors are suppressed and converted into a successful empty-list response, preventing callers from distinguishing failure from genuinely empty storage.",
+          "evidence": "\"$storage\" list 2>/dev/null || printf '[]\\n'"
+        }
+      ]
+    }
+  ],
+  "clean": [
+    {
+      "severity": "material",
+      "file": "counter.sh",
+      "summary": "A failed counter read is ignored, allowing an unreadable but writable counter to be overwritten with 1 while the function reports success."
+    }
+  ],
+  "normalization": "unchanged Reviewer adapter shape; scorer determines detection from all_reported, files, and fixture witnesses",
+  "runner_decides_gate_outcome": false,
+  "scorer": "eval/scoring/reviewer.sh::reviewer_structured_gate",
+  "fixture_revision": "b67a2d3cb709ceab4693ba12121b32a032f0f603",
+  "fixture_integrity_checked": true
+}

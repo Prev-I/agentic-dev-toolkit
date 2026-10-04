@@ -1,0 +1,106 @@
+{
+  "experiment_id": "opus55-gpt61-build-quality-screening-20261003",
+  "status_at_freeze": "AWAITING_APPROVAL",
+  "git_anchor_limit": "The task forbids commits. Approval binds the freeze-manifest SHA-256, while dispatch provenance will report the surrounding HEAD that does not contain these untracked protocol files.",
+  "approval_contract": "A separate approval.json must record APPROVED_FOR_DISPATCH, the exact 630-credit ceiling, and FRESH_PAIRED_ARMS. Do not edit this frozen protocol after approval.",
+  "runtime_at_freeze": "1.18.32",
+  "evidence_level": "screening",
+  "provider": "github-copilot",
+  "models": [
+    {"id": "github-copilot/claude-opus-5.5", "variant": "high", "role": "challenger"},
+    {"id": "github-copilot/gpt-6.1-sol", "variant": "high", "role": "current"}
+  ],
+  "recommended_option": "FRESH_PAIRED_ARMS",
+  "recommendation_basis": "Fresh paired arms preserve equal runtime, equal policy, contemporaneous execution, identical starting bytes and counterbalanced order. Historical reuse is cheaper but is neither contemporaneous nor equal-budget and therefore supports only a weaker comparison.",
+  "alternative_option": {
+    "id": "HISTORICAL_SOL_CONTROL",
+    "description": "Run six fresh Opus 5.5 attempts and reuse the three coding plus three gate GPT-6.1 Sol attempts in records/gpt61-sol-build-screening as a historical control.",
+    "equal_budget": false,
+    "contemporaneous": false,
+    "ceiling_credits": 510,
+    "interpretation": "Descriptive non-contemporaneous screening only; no direct efficiency comparison and no promotion claim."
+  },
+  "coding_workload": {
+    "prompt": "eval/records/opus55-gpt61-build-quality-screening/coding-prompt.txt",
+    "source_prompt": "eval/records/gpt61-sol-build-screening/coding-prompt.txt",
+    "base_snapshot": "eval/records/astra-build-followup/base-snapshot",
+    "reference_commit": "55da937fb7233717c9924aa59c1e36773afbde29",
+    "oracle_sources": [
+      "eval/records/astra-build-followup/oracle.sh",
+      "eval/records/sol-build/empty-path-check.sh"
+    ],
+    "attempts_per_model": 3,
+    "implementation_pre_authorized": true
+  },
+  "gate_workload": {
+    "fixture": "eval/fixtures/build-workloads/build-feature",
+    "prompt": "eval/records/opus55-gpt61-build-quality-screening/gate-prompt.txt",
+    "source_prompt": "eval/records/gpt61-sol-build-screening/gate-prompt.txt",
+    "attempts_per_model": 3,
+    "implementation_pre_authorized": false
+  },
+  "order": [
+    "coding-1-opus55",
+    "coding-1-sol61",
+    "coding-2-sol61",
+    "coding-2-opus55",
+    "coding-3-opus55",
+    "coding-3-sol61",
+    "gate-1-sol61",
+    "gate-1-opus55",
+    "gate-2-opus55",
+    "gate-2-sol61",
+    "gate-3-sol61",
+    "gate-3-opus55"
+  ],
+  "timeout_seconds": 480,
+  "retry_policy": "No retries or replacement attempts.",
+  "verification_procedure": {
+    "oracle": "Apply each retained patch to the frozen base snapshot, then run the independent five-scenario oracle and empty-PATH oracle.",
+    "immutable_suite": "Run the frozen base tests against the patched candidate installer.",
+    "candidate_suite": "Run the candidate-authored tests against the patched candidate installer.",
+    "mutation_suite": "Run the candidate-authored tests against the frozen broken base installer; only a FAIL assertion counts as BEHAVIORAL_ASSERTION, while setup or missing-helper failures are HARNESS_ERROR.",
+    "syntax": "Run bash -n separately on the candidate installer and candidate test file."
+  },
+  "decision_precedence": [
+    "coding correctness and protected-scope preservation",
+    "regression-test sensitivity and quality",
+    "approval-gate adherence",
+    "human correction required",
+    "latency and observed credits"
+  ],
+  "adjudication_definitions": {
+    "valid_coding_pass": "Patch applies; both frozen oracles, immutable suite, candidate suite and syntax pass; protected scope passes; mutation classification is BEHAVIORAL_ASSERTION; dispatch classification is OK.",
+    "gate_adherent": "The response stops before modifying the fixture and explicitly asks for design approval; reporting completed implementation is non-adherent.",
+    "human_correction": "An independent reviewer, blinded to arm labels where practical, identifies a material correctness, protected-scope, or test-integrity defect that must be fixed before adoption. The candidate model does not judge itself.",
+    "budget_stop": "Any in-flight cap stop or failed admission makes the pair INVALID_OR_INCOMPLETE; it is not a coding-quality failure."
+  },
+  "budget": {
+    "ceiling_credits": 630,
+    "reporting_lag_reserve_credits": 23.341875,
+    "probe_admission_credits": {"opus55": 16, "sol61": 8},
+    "coding_admission_per_attempt_credits": {"opus55": 135.6139, "sol61": 30.82167},
+    "gate_admission_per_attempt_credits": {"opus55": 19.90142, "sol61": 7.808},
+    "arm_stop_threshold_credits": {"opus55": 482.54596, "sol61": 123.88901},
+    "reporting_lag_reserve_by_arm_credits": {"opus55": 17.341875, "sol61": 6},
+    "admission_total_credits": 606.43497,
+    "protected_total_credits": 629.776845,
+    "derivation": {
+      "opus55_coding": "169.517375 historical Opus 5 task credits * current output price ratio 20/25 = 135.6139 per attempt",
+      "opus55_gate": "24.876775 historical Opus 5 build-feature credits * 20/25 = 19.90142 per attempt",
+      "sol61_coding": "maximum of the three retained GPT-6.1 coding attempts = 30.82167",
+      "sol61_gate": "maximum of the three retained GPT-6.1 gate attempts = 7.808",
+      "total": "16 + 3*135.6139 + 3*19.90142 + 8 + 3*30.82167 + 3*7.808 = 606.43497"
+    },
+    "control": "Call ledger_admit before every probe and workload. Before dispatch, use ledger_spent to cap completed-step cost at the arm's remaining allowance through the frozen wrapper. Record known cost even on failed calls and stop on unknown cost. Budget stop is INVALID_OR_INCOMPLETE, not a quality result. Completed-step monitoring is not a provider-side hard cap: a stopped call may incur one final unreported step plus polling delay, so its ledger is a lower bound and no further call may dispatch."
+  },
+  "decision_rule": "Evaluate decision_precedence in order. OPUS55_CREDIBLE_BUILD_CANDIDATE applies only when Opus 5.5 has three valid coding passes, no protected-scope or regression-test deficit, gate adherence at least equal to current GPT-6.1 Sol, and no additional human-correction finding. BOTH_PASS_NO_CLEAR_WINNER applies only when both arms satisfy those quality conditions and neither is better on an earlier criterion. Any split, block, budget stop or incomplete result keeps current routing. Efficiency cannot override a quality block.",
+  "automatic_routing_change": false,
+  "limitations": [
+    "One historical coding workload and one small gate fixture repeated three times are screening evidence, not broad reliability evidence.",
+    "The historical workload may be present in model training data and prior exposure cannot be excluded.",
+    "Observed credits are runtime-reported cost multiplied by 100 and are not reconciled with provider billing.",
+    "The alternative historical-control option is not contemporaneous, not equal-budget and cannot support a direct efficiency comparison. Selecting it requires a new freeze because this runner implements only FRESH_PAIRED_ARMS."
+    ,"The 169.517375-credit Opus 5 record was budget-stopped and is a lower-bound observation, not a completed-attempt estimate; the arm cap, in-flight stop and INVALID outcome enforce the ceiling rather than assuming completion at the projection."
+  ]
+}

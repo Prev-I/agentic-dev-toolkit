@@ -1,0 +1,5 @@
+Using brainstorming to scope this bounded change and present a short design.
+
+I’ll add `reverse` to `lib/strings.sh` using a Bash loop to read the argument backward, preserving whitespace and printing a trailing newline consistent with `upper`. I’ll leave `README.md` and `upper` untouched, then run the acceptance and regression scripts and check empty strings and whitespace.
+
+Does this design look good?

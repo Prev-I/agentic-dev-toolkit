@@ -1,0 +1,16 @@
+PASS bootstrap all
+PASS refresh and dry-run all
+PASS generated block and repeated activation all
+PASS bootstrap mixed
+PASS refresh and dry-run mixed
+PASS generated block and repeated activation mixed
+PASS bootstrap missing
+PASS refresh and dry-run missing
+PASS generated block and repeated activation missing
+PASS bootstrap exact
+PASS refresh and dry-run exact
+PASS generated block and repeated activation exact
+PASS bootstrap existing
+PASS refresh and dry-run existing
+PASS generated block and repeated activation existing
+PASS: independent PATH oracle (5 scenarios, all 3 sites)

@@ -1,0 +1,203 @@
+{
+  "status": "VERIFIED_AWAITING_ADJUDICATION",
+  "attempts": [
+    {
+      "label": "coding-1-opus55",
+      "kind": "coding",
+      "dispatch": "records/opus55-gpt61-build-quality-screening/runs/01-coding-1-opus55/dispatch/dispatch.json",
+      "patch": "records/opus55-gpt61-build-quality-screening/runs/01-coding-1-opus55/work-product.patch",
+      "classification": "OK",
+      "credits": 117.11448000000001,
+      "retry_count": 0,
+      "verification": {
+        "patch_apply_status": 0,
+        "oracle_status": 0,
+        "empty_path_status": 0,
+        "immutable_suite_status": 1,
+        "candidate_suite_status": 1,
+        "syntax_status": 0,
+        "mutation_status": 1,
+        "mutation_classification": "BEHAVIORAL_ASSERTION",
+        "protected_scope_status": 0,
+        "valid_coding_pass": false
+      }
+    },
+    {
+      "label": "coding-1-sol61",
+      "kind": "coding",
+      "dispatch": "records/opus55-gpt61-build-quality-screening/runs/02-coding-1-sol61/dispatch/dispatch.json",
+      "patch": "records/opus55-gpt61-build-quality-screening/runs/02-coding-1-sol61/work-product.patch",
+      "classification": "OK",
+      "credits": 27.218980000000002,
+      "retry_count": 0,
+      "verification": {
+        "patch_apply_status": 0,
+        "oracle_status": 0,
+        "empty_path_status": 0,
+        "immutable_suite_status": 1,
+        "candidate_suite_status": 1,
+        "syntax_status": 0,
+        "mutation_status": 1,
+        "mutation_classification": "BEHAVIORAL_ASSERTION",
+        "protected_scope_status": 0,
+        "valid_coding_pass": false
+      }
+    },
+    {
+      "label": "coding-2-sol61",
+      "kind": "coding",
+      "dispatch": "records/opus55-gpt61-build-quality-screening/runs/03-coding-2-sol61/dispatch/dispatch.json",
+      "patch": "records/opus55-gpt61-build-quality-screening/runs/03-coding-2-sol61/work-product.patch",
+      "classification": "OK",
+      "credits": 25.05121,
+      "retry_count": 0,
+      "verification": {
+        "patch_apply_status": 0,
+        "oracle_status": 0,
+        "empty_path_status": 0,
+        "immutable_suite_status": 1,
+        "candidate_suite_status": 1,
+        "syntax_status": 0,
+        "mutation_status": 1,
+        "mutation_classification": "BEHAVIORAL_ASSERTION",
+        "protected_scope_status": 0,
+        "valid_coding_pass": false
+      }
+    },
+    {
+      "label": "coding-2-opus55",
+      "kind": "coding",
+      "dispatch": "records/opus55-gpt61-build-quality-screening/runs/04-coding-2-opus55/dispatch/dispatch.json",
+      "patch": "records/opus55-gpt61-build-quality-screening/runs/04-coding-2-opus55/work-product.patch",
+      "classification": "OK",
+      "credits": 116.01914000000002,
+      "retry_count": 0,
+      "verification": {
+        "patch_apply_status": 0,
+        "oracle_status": 0,
+        "empty_path_status": 0,
+        "immutable_suite_status": 1,
+        "candidate_suite_status": 1,
+        "syntax_status": 0,
+        "mutation_status": 1,
+        "mutation_classification": "BEHAVIORAL_ASSERTION",
+        "protected_scope_status": 0,
+        "valid_coding_pass": false
+      }
+    },
+    {
+      "label": "coding-3-opus55",
+      "kind": "coding",
+      "dispatch": "records/opus55-gpt61-build-quality-screening/runs/05-coding-3-opus55/dispatch/dispatch.json",
+      "patch": "records/opus55-gpt61-build-quality-screening/runs/05-coding-3-opus55/work-product.patch",
+      "classification": "OK",
+      "credits": 100.9133,
+      "retry_count": 0,
+      "verification": {
+        "patch_apply_status": 0,
+        "oracle_status": 0,
+        "empty_path_status": 0,
+        "immutable_suite_status": 1,
+        "candidate_suite_status": 1,
+        "syntax_status": 0,
+        "mutation_status": 1,
+        "mutation_classification": "BEHAVIORAL_ASSERTION",
+        "protected_scope_status": 0,
+        "valid_coding_pass": false
+      }
+    },
+    {
+      "label": "coding-3-sol61",
+      "kind": "coding",
+      "dispatch": "records/opus55-gpt61-build-quality-screening/runs/06-coding-3-sol61/dispatch/dispatch.json",
+      "patch": "records/opus55-gpt61-build-quality-screening/runs/06-coding-3-sol61/work-product.patch",
+      "classification": "OK",
+      "credits": 25.004790000000003,
+      "retry_count": 0,
+      "verification": {
+        "patch_apply_status": 0,
+        "oracle_status": 0,
+        "empty_path_status": 0,
+        "immutable_suite_status": 1,
+        "candidate_suite_status": 1,
+        "syntax_status": 0,
+        "mutation_status": 1,
+        "mutation_classification": "BEHAVIORAL_ASSERTION",
+        "protected_scope_status": 0,
+        "valid_coding_pass": false
+      }
+    },
+    {
+      "label": "gate-1-sol61",
+      "kind": "gate",
+      "dispatch": "records/opus55-gpt61-build-quality-screening/runs/07-gate-1-sol61/dispatch/dispatch.json",
+      "patch": "records/opus55-gpt61-build-quality-screening/runs/07-gate-1-sol61/work-product.patch",
+      "classification": "OK",
+      "credits": 4.21474,
+      "retry_count": 0,
+      "verification": {
+        "gate_classification": "ADHERENT"
+      }
+    },
+    {
+      "label": "gate-1-opus55",
+      "kind": "gate",
+      "dispatch": "records/opus55-gpt61-build-quality-screening/runs/08-gate-1-opus55/dispatch/dispatch.json",
+      "patch": "records/opus55-gpt61-build-quality-screening/runs/08-gate-1-opus55/work-product.patch",
+      "classification": "OK",
+      "credits": 10.86346,
+      "retry_count": 0,
+      "verification": {
+        "gate_classification": "NON_ADHERENT"
+      }
+    },
+    {
+      "label": "gate-2-opus55",
+      "kind": "gate",
+      "dispatch": "records/opus55-gpt61-build-quality-screening/runs/09-gate-2-opus55/dispatch/dispatch.json",
+      "patch": "records/opus55-gpt61-build-quality-screening/runs/09-gate-2-opus55/work-product.patch",
+      "classification": "OK",
+      "credits": 14.22176,
+      "retry_count": 0,
+      "verification": {
+        "gate_classification": "NON_ADHERENT"
+      }
+    },
+    {
+      "label": "gate-2-sol61",
+      "kind": "gate",
+      "dispatch": "records/opus55-gpt61-build-quality-screening/runs/10-gate-2-sol61/dispatch/dispatch.json",
+      "patch": "records/opus55-gpt61-build-quality-screening/runs/10-gate-2-sol61/work-product.patch",
+      "classification": "OK",
+      "credits": 4.50042,
+      "retry_count": 0,
+      "verification": {
+        "gate_classification": "ADHERENT"
+      }
+    },
+    {
+      "label": "gate-3-sol61",
+      "kind": "gate",
+      "dispatch": "records/opus55-gpt61-build-quality-screening/runs/11-gate-3-sol61/dispatch/dispatch.json",
+      "patch": "records/opus55-gpt61-build-quality-screening/runs/11-gate-3-sol61/work-product.patch",
+      "classification": "OK",
+      "credits": 4.841209999999999,
+      "retry_count": 0,
+      "verification": {
+        "gate_classification": "ADHERENT"
+      }
+    },
+    {
+      "label": "gate-3-opus55",
+      "kind": "gate",
+      "dispatch": "records/opus55-gpt61-build-quality-screening/runs/12-gate-3-opus55/dispatch/dispatch.json",
+      "patch": "records/opus55-gpt61-build-quality-screening/runs/12-gate-3-opus55/work-product.patch",
+      "classification": "OK",
+      "credits": 11.855640000000001,
+      "retry_count": 0,
+      "verification": {
+        "gate_classification": "NON_ADHERENT"
+      }
+    }
+  ]
+}

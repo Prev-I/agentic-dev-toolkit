@@ -1,0 +1,7 @@
+{
+  "experiment_id": "opus55-gpt61-build-quality-screening-20261003",
+  "status": "APPROVED_FOR_DISPATCH",
+  "approved_ceiling_credits": 630,
+  "execution_option": "FRESH_PAIRED_ARMS",
+  "freeze_manifest_sha256": "068f73e9f3cfce018eaf6319110131ec2cb093dec782871d03e53345825c430c"
+}

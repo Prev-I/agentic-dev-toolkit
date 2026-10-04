@@ -1,0 +1,7 @@
+Using brainstorming to scope this bounded change and present a short design.
+
+I’ll add `reverse` to `lib/strings.sh` using a Bash loop to read the argument’s characters from last to first, then print the result with a trailing newline, matching `upper`’s output style. Empty strings and whitespace will be preserved.
+
+I’ll leave `README.md` and `upper` unchanged, then run the acceptance and regression tests plus edge-case checks.
+
+Does this design look good?

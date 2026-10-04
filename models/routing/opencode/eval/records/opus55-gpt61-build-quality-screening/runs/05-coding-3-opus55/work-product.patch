@@ -1,0 +1,234 @@
+diff --git a/environments/linux/install.sh b/environments/linux/install.sh
+index fdff7ec..606064b 100644
+--- a/environments/linux/install.sh
++++ b/environments/linux/install.sh
+@@ -59,7 +59,22 @@ CODEX_STANDALONE_ROOT="$CODEX_HOME/packages/standalone"
+ GCM_WINDOWS_PATH="${ADT_GCM_PATH:-/mnt/c/Program Files/Git/mingw64/bin/git-credential-manager.exe}"
+ GIT_CREDENTIAL_WRAPPER="${GIT_CREDENTIAL_WRAPPER:-$HOME/.local/bin/git-credential-manager-wsl}"
+ 
+-export PATH="$HOME/.local/bin:$HOME/bin:$HOME/.opencode/bin:$PATH"
++# Prepends each managed bin directory that exists and is not already a complete
++# PATH entry. Walking the list in reverse keeps .local/bin first when all three
++# are added. Existing entries are never touched, including the single empty
++# entry an empty PATH consists of. ensure_shell_configuration emits the same
++# loop into ~/.bashrc; keep the two in step.
++prepend_managed_path_directories() {
++  local dir
++  for dir in "$HOME/.opencode/bin" "$HOME/bin" "$HOME/.local/bin"; do
++    if [[ -d "$dir" && ":${PATH-}:" != *":$dir:"* ]]; then
++      PATH="$dir:${PATH-}"
++    fi
++  done
++  export PATH
++}
++
++prepend_managed_path_directories
+ 
+ TEMP_PATHS=()
+ DOWNLOADED_INSTALLER=""
+@@ -393,7 +408,13 @@ ensure_shell_configuration() {
+   cat >> "$temp_file" <<'EOF_BASHRC'
+ 
+ # >>> agentic-dev-toolkit >>>
+-export PATH="$HOME/.local/bin:$HOME/bin:$HOME/.opencode/bin:$PATH"
++for __adt_path_dir in "$HOME/.opencode/bin" "$HOME/bin" "$HOME/.local/bin"; do
++  if [[ -d "$__adt_path_dir" && ":${PATH-}:" != *":$__adt_path_dir:"* ]]; then
++    PATH="$__adt_path_dir:${PATH-}"
++  fi
++done
++unset __adt_path_dir
++export PATH
+ export OPENCODE_ENABLE_EXA=true
+ if [[ -x "$HOME/.local/bin/mise" ]]; then
+   eval "$("$HOME/.local/bin/mise" activate bash)"
+@@ -410,7 +431,7 @@ EOF_BASHRC
+     rm -f "$temp_file"
+   fi
+ 
+-  export PATH="$HOME/.local/bin:$HOME/bin:$HOME/.opencode/bin:$PATH"
++  prepend_managed_path_directories
+ }
+ 
+ install_mise() {
+diff --git a/tests/install.sh b/tests/install.sh
+index 45cf219..c0c63cb 100644
+--- a/tests/install.sh
++++ b/tests/install.sh
+@@ -105,6 +105,163 @@ test_shell_configuration_enables_direnv() {
+   HOME="$original_home"
+ }
+ 
++# The managed PATH directories are prepended at three sites: the installer's
++# bootstrap, the Bash block written to ~/.bashrc, and the refresh at the end of
++# ensure_shell_configuration. They must all honour the same contract, so every
++# case below runs against each of them.
++readonly MANAGED_PATH_SITES=(bootstrap bashrc refresh)
++
++# Creates a disposable HOME whose name contains spaces, plus the listed
++# subdirectories, and prints its path.
++make_managed_path_home() {
++  local home="$TEMP_DIR/managed path/$1 home"
++  shift
++  local dir
++  mkdir -p "$home"
++  for dir in "$@"; do
++    mkdir -p "$home/$dir"
++  done
++  printf '%s' "$home"
++}
++
++# Prints PATH after the given site has run ACTIVATIONS times, starting from
++# INITIAL_PATH with HOME pointing at a disposable directory.
++path_after_site() {
++  local site="$1" home="$2" result="$3" activations="${4:-1}"
++  local i
++
++  case "$site" in
++    bootstrap)
++      # A fresh process per activation: the installer is a script, so running
++      # it again from a shell that already carries its PATH is the repeat case.
++      for (( i = 0; i < activations; i++ )); do
++        result="$(env -i HOME="$home" PATH="$result" "$BASH" --norc --noprofile -c \
++          'source "$1"; printf "%s" "$PATH"' bootstrap "$TEMP_DIR/install-functions.sh")"
++      done
++      ;;
++    bashrc)
++      ( HOME="$home"; DRY_RUN=0; ensure_shell_configuration >/dev/null )
++      # direnv is stubbed so the block runs without the real hook, and mise is
++      # absent from the disposable HOME, so only the PATH logic has effect.
++      result="$(env -i HOME="$home" PATH="$result" "$BASH" --norc --noprofile -c '
++        direnv() { :; }
++        for (( i = 0; i < $1; i++ )); do source "$HOME/.bashrc"; done
++        printf "%s" "$PATH"' bashrc "$activations")"
++      ;;
++    refresh)
++      result="$(
++        HOME="$home"
++        DRY_RUN=0
++        declare -A resolved=()
++        for cmd in mkdir touch mktemp awk cat cmp cp mv rm; do
++          resolved[$cmd]="$(command -v "$cmd")"
++        done
++        PATH="$result"
++        for (( i = 0; i < activations; i++ )); do
++          # The function's own commands must run whatever PATH holds, including
++          # nothing at all. Assigning PATH clears the hash, so re-hash each time.
++          for cmd in "${!resolved[@]}"; do hash -p "${resolved[$cmd]}" "$cmd"; done
++          ensure_shell_configuration >/dev/null
++        done
++        printf '%s' "$PATH"
++      )"
++      ;;
++    *) fail "unknown managed PATH site: $site" ;;
++  esac
++
++  printf '%s' "$result"
++}
++
++test_managed_path_prepends_existing_directories_in_priority_order() {
++  local site home
++  for site in "${MANAGED_PATH_SITES[@]}"; do
++    home="$(make_managed_path_home "priority-$site" .local/bin bin .opencode/bin)"
++    assert_equal "$(path_after_site "$site" "$home" "/usr/bin:/bin")" \
++      "$home/.local/bin:$home/bin:$home/.opencode/bin:/usr/bin:/bin" \
++      "$site must prepend .local/bin, bin, .opencode/bin in that order"
++  done
++}
++
++test_managed_path_preserves_the_empty_entry_of_an_empty_path() {
++  local site home
++  for site in "${MANAGED_PATH_SITES[@]}"; do
++    home="$(make_managed_path_home "empty-$site" .local/bin bin .opencode/bin)"
++    assert_equal "$(path_after_site "$site" "$home" "")" \
++      "$home/.local/bin:$home/bin:$home/.opencode/bin:" \
++      "$site must keep the empty entry an empty PATH consists of"
++  done
++}
++
++test_managed_path_skips_directories_that_do_not_exist() {
++  local site home
++  for site in "${MANAGED_PATH_SITES[@]}"; do
++    home="$(make_managed_path_home "missing-$site" .local/bin .opencode/bin)"
++    # A regular file is not a directory and must not be added either.
++    : > "$home/bin"
++    assert_equal "$(path_after_site "$site" "$home" "/usr/bin")" \
++      "$home/.local/bin:$home/.opencode/bin:/usr/bin" \
++      "$site must not prepend a managed directory that does not exist"
++  done
++}
++
++test_managed_path_skips_exact_entries_and_preserves_existing_ones() {
++  local site home initial
++  for site in "${MANAGED_PATH_SITES[@]}"; do
++    home="$(make_managed_path_home "present-$site" .local/bin bin .opencode/bin)"
++    # $home/bin is present exactly (twice); the other two appear only as
++    # near-misses, which are not the same entry and must not suppress them.
++    # Empty entries and existing duplicates are kept exactly as they are.
++    initial="/opt/tools::$home/bin:$home/.local/bin/:$home/.opencode/bin-old:/usr/bin:$home/bin:"
++    assert_equal "$(path_after_site "$site" "$home" "$initial")" \
++      "$home/.local/bin:$home/.opencode/bin:$initial" \
++      "$site must only skip complete, exact PATH entries and leave the rest untouched"
++  done
++}
++
++test_managed_path_repeated_activation_adds_no_duplicates() {
++  local site home
++  for site in "${MANAGED_PATH_SITES[@]}"; do
++    home="$(make_managed_path_home "repeat-$site" .local/bin bin .opencode/bin)"
++    assert_equal "$(path_after_site "$site" "$home" "/usr/bin" 3)" \
++      "$home/.local/bin:$home/bin:$home/.opencode/bin:/usr/bin" \
++      "$site must not add managed directories again on repeated activation"
++  done
++}
++
++test_shell_configuration_dry_run_leaves_home_and_path_unchanged() {
++  local home observed
++  home="$(make_managed_path_home dry-run bin .opencode/bin)"
++
++  observed="$(
++    HOME="$home"
++    DRY_RUN=1
++    PATH="/usr/bin:/bin"
++    ensure_shell_configuration >/dev/null
++    printf '%s' "$PATH"
++  )"
++
++  assert_equal "$observed" "/usr/bin:/bin" "dry-run must not change PATH"
++  [[ ! -e "$home/.bashrc" ]] || fail "dry-run must not write .bashrc"
++  [[ ! -e "$home/.local" ]] || fail "dry-run must not create .local/bin"
++}
++
++test_shell_configuration_keeps_one_marked_block_and_backs_up_once() {
++  local home bashrc
++  home="$(make_managed_path_home block)"
++  bashrc="$home/.bashrc"
++  printf '%s\n' 'alias ll="ls -l"' > "$bashrc"
++
++  ( HOME="$home"; DRY_RUN=0; ensure_shell_configuration >/dev/null; ensure_shell_configuration >/dev/null )
++
++  assert_equal "$(<"$bashrc.pre-agentic-dev-toolkit")" 'alias ll="ls -l"' "the backup must hold the original .bashrc"
++  assert_equal "$(grep -cxF '# >>> agentic-dev-toolkit >>>' "$bashrc")" "1" "re-running must keep exactly one start marker"
++  assert_equal "$(grep -cxF '# <<< agentic-dev-toolkit <<<' "$bashrc")" "1" "re-running must keep exactly one end marker"
++  grep -qxF 'alias ll="ls -l"' "$bashrc" || fail "user content outside the managed block must be preserved"
++  # shellcheck disable=SC2016
++  grep -qF 'eval "$("$HOME/.local/bin/mise" activate bash)"' "$bashrc" || fail "the managed block must still activate mise"
++  bash -n "$bashrc" || fail "the managed block must be valid bash"
++}
++
+ test_project_configuration_creates_direnv_file_when_missing() {
+   local project_root="$TEMP_DIR/project-with-direnv"
+   PROJECT_PATH="$project_root"
+@@ -986,6 +1143,13 @@ test_lttng_selector_prefers_time64_package_when_available
+ test_lttng_selector_falls_back_to_legacy_package
+ test_dry_run_does_not_probe_apt_package_metadata
+ test_shell_configuration_enables_direnv
++test_managed_path_prepends_existing_directories_in_priority_order
++test_managed_path_preserves_the_empty_entry_of_an_empty_path
++test_managed_path_skips_directories_that_do_not_exist
++test_managed_path_skips_exact_entries_and_preserves_existing_ones
++test_managed_path_repeated_activation_adds_no_duplicates
++test_shell_configuration_dry_run_leaves_home_and_path_unchanged
++test_shell_configuration_keeps_one_marked_block_and_backs_up_once
+ test_project_configuration_creates_direnv_file_when_missing
+ test_project_configuration_preserves_existing_direnv_file
+ test_project_configuration_dry_run_previews_direnv_file_without_creating_it

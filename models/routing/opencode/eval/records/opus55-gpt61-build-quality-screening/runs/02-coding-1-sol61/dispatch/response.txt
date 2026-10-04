@@ -1,0 +1,27 @@
+Using systematic-debugging to inspect all three PATH sites, then test-driven-development to add regression coverage before the fix. I’ll use disposable HOME directories and source the installer without running `main`.
+
+
+All three sites use the same unconditional prepend, which adds nonexistent directories and duplicates. I’ll replace it with directory checks and exact colon-delimited matching, processing candidates in reverse order to preserve priority. The tests will compare full PATH strings, including empty entries and existing duplicates.
+
+
+The new regression test fails as expected: sourcing the bootstrap a second time prepends all three directories again. The test matrix also covers exact matches, spaces and glob characters, missing directories, regular files, and empty PATH entries.
+
+
+The guards are in place at all three sites. Using verification-before-completion to run the requested test suite and both syntax checks.
+
+
+The PATH matrix passes. The profile check caught existing behavior: each configuration refresh adds a blank line before the managed block. I’ll narrow that assertion to the required block, marker, and backup behavior.
+
+
+The suite now reaches an unrelated host-dependent failure: this environment is WSL, so a Karpathy verification test also requires a credential wrapper. I’ll set the test harness to non-WSL initially; the credential tests already select and exercise both WSL branches explicitly.
+
+
+Updated all three PATH sites in `environments/linux/install.sh` to prepend only existing directories absent as exact PATH entries. Priority, existing entries—including empty entries—and repeated activation are preserved.
+
+Added behavioral coverage in `tests/install.sh` for duplicates, partial matches, spaces, missing directories, activation hooks, markers, backups, and dry-run behavior.
+
+Verification:
+- `setsid bash tests/install.sh < /dev/null` — passed.
+- `bash -n environments/linux/install.sh tests/install.sh` — passed.
+
+Only the two allowed files changed. Tests used disposable HOME directories; the installer’s `main` was never run.

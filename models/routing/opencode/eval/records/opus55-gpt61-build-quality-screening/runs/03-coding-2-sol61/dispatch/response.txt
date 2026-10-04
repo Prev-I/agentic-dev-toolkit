@@ -1,0 +1,17 @@
+Using systematic-debugging to inspect the three PATH setup sites, then test-driven-development to add regression coverage before the fix. I’ll follow the approved design and use disposable HOME directories for verification.
+All three sites use the same unconditional prepend. I’ll replace it with directory-existence and exact colon-delimited entry guards, processing candidates in reverse order to preserve priority. The guards will retain the original PATH verbatim, including its empty entry when PATH is empty.
+
+This is a bounded change with an approved design. Regression cases will exercise bootstrap, current-process refresh, and the emitted Bash block, including repeated activation and paths with spaces.
+The regression failed as expected: a second current-process refresh prepended all three directories again. I’ll now add the guards at all three sites; the new tests also cover empty PATH, exact matching, missing directories, profile backups, and activation hooks.
+Using verification-before-completion to check the fix with the full requested test run and syntax checks for both files.
+Verification caught an overstrict test assertion: the existing profile writer adds a blank line before the managed block on each refresh. I’ll leave that behavior unchanged and check that refresh leaves one managed block while preserving the custom profile and original backup.
+Updated all three PATH setup sites in `environments/linux/install.sh` to prepend only existing directories absent as exact colon-delimited entries. The guards preserve priority, existing entries, empty PATH entries, and repeated-activation behavior.
+
+Added regression coverage in `tests/install.sh` for all three sites, spaces, missing directories/files, exact matching, activation hooks, backups, and dry-run non-mutation.
+
+Verification:
+- `setsid bash tests/install.sh < /dev/null` — passed.
+- `bash -n environments/linux/install.sh tests/install.sh` — passed.
+- `main "$@"` remains the installer’s final line.
+
+Only the two permitted files changed. The installer itself was not run.

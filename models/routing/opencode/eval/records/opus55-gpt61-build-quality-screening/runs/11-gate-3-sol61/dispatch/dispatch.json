@@ -1,0 +1,35 @@
+{
+  "timestamp": "2026-10-04T06:43:46.885138+02:00",
+  "label": "gate-3-sol61",
+  "attempt": 3,
+  "routing_profile_id": "direct-model-evaluation",
+  "routing_profile_commit": "97a8e8740b404384ba950dabe199f12c1caaccd5",
+  "runtime_version": "1.18.32",
+  "eval_runner_version": "phase-r-dispatch-v2",
+  "environment": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+  "dispatch_target": "github-copilot/gpt-6.1-sol",
+  "variant": "high",
+  "timeout_seconds": 480,
+  "exit_status": 0,
+  "classification": "OK",
+  "failure_class": null,
+  "provider_error_text": null,
+  "provider_status_code": null,
+  "observed_cost": 0.04841209999999999,
+  "derived_credits": 4.841209999999999,
+  "normalized_steady_state_cost": null,
+  "tokens": {
+    "total": 14218,
+    "input": 279,
+    "output": 91,
+    "reasoning": 13,
+    "cache": {
+      "write": 0,
+      "read": 13835
+    }
+  },
+  "wall_clock_ms": 26718,
+  "retry_count": 0,
+  "raw_evidence": "raw.jsonl",
+  "decides_gate_outcome": false
+}

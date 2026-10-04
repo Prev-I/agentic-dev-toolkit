@@ -1,0 +1,35 @@
+{
+  "timestamp": "2026-10-04T06:13:26.115751+02:00",
+  "label": "reviewer-R-API-sol61",
+  "attempt": 1,
+  "routing_profile_id": "unresolved-runtime-profile",
+  "routing_profile_commit": "97a8e8740b404384ba950dabe199f12c1caaccd5",
+  "runtime_version": "1.18.32",
+  "eval_runner_version": "phase-r-dispatch-v2",
+  "environment": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+  "dispatch_target": "agent:reviewer-sol61",
+  "variant": "resolved",
+  "timeout_seconds": 480,
+  "exit_status": 0,
+  "classification": "OK",
+  "failure_class": null,
+  "provider_error_text": null,
+  "provider_status_code": null,
+  "observed_cost": 0.0179805,
+  "derived_credits": 1.79805,
+  "normalized_steady_state_cost": null,
+  "tokens": {
+    "total": 4610,
+    "input": 250,
+    "output": 66,
+    "reasoning": 76,
+    "cache": {
+      "write": 0,
+      "read": 4218
+    }
+  },
+  "wall_clock_ms": 17472,
+  "retry_count": 0,
+  "raw_evidence": "raw.jsonl",
+  "decides_gate_outcome": false
+}

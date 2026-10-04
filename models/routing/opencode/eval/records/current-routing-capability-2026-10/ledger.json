@@ -1,0 +1,42 @@
+{
+  "caps": {
+    "current_routing_capability": 150
+  },
+  "entries": [
+    {
+      "timestamp": "2026-10-04T09:56:26.761247+02:00",
+      "account": "current_routing_capability",
+      "label": "plan-capability",
+      "provider": "github-copilot",
+      "credits": 1.3711
+    },
+    {
+      "timestamp": "2026-10-04T09:56:31.673494+02:00",
+      "account": "current_routing_capability",
+      "label": "general-capability",
+      "provider": "github-copilot",
+      "credits": 0.1888
+    },
+    {
+      "timestamp": "2026-10-04T09:56:36.234478+02:00",
+      "account": "current_routing_capability",
+      "label": "compaction-capability",
+      "provider": "github-copilot",
+      "credits": 0.68655
+    },
+    {
+      "timestamp": "2026-10-04T09:56:40.890587+02:00",
+      "account": "current_routing_capability",
+      "label": "title-capability",
+      "provider": "github-copilot",
+      "credits": 0.00942
+    },
+    {
+      "timestamp": "2026-10-04T09:56:45.231551+02:00",
+      "account": "current_routing_capability",
+      "label": "summary-capability",
+      "provider": "github-copilot",
+      "credits": 0.00942
+    }
+  ]
+}

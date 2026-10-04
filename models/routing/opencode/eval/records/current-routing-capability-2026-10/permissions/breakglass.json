@@ -1,0 +1,23 @@
+{
+  "name": "breakglass",
+  "mode": "primary",
+  "model": "openai/gpt-6.1-sol",
+  "variant": "max",
+  "tools": {
+    "apply_patch": false,
+    "bash": false,
+    "task": false,
+    "webfetch": true,
+    "websearch": true
+  },
+  "permissions": {
+    "edit": "deny",
+    "task": "deny",
+    "bash": {
+      "wildcard": "deny",
+      "allowed": []
+    },
+    "webfetch": null,
+    "websearch": "allow"
+  }
+}

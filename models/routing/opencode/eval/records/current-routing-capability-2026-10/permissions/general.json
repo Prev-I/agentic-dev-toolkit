@@ -1,0 +1,23 @@
+{
+  "name": "general",
+  "mode": "subagent",
+  "model": "github-copilot/gpt-6.1-sol",
+  "variant": "medium",
+  "tools": {
+    "apply_patch": true,
+    "bash": true,
+    "task": true,
+    "webfetch": true,
+    "websearch": true
+  },
+  "permissions": {
+    "edit": null,
+    "task": "allow",
+    "bash": {
+      "wildcard": null,
+      "allowed": []
+    },
+    "webfetch": null,
+    "websearch": "allow"
+  }
+}

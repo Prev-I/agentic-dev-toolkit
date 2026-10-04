@@ -1,0 +1,7 @@
+{
+  "role": "plan",
+  "successful_inference": true,
+  "stop_reason": null,
+  "observed_cost": 0.013711,
+  "derived_credits": 1.3711
+}

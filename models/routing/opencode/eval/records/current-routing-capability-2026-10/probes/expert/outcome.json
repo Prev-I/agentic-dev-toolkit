@@ -1,0 +1,7 @@
+{
+  "role": "expert",
+  "successful_inference": true,
+  "stop_reason": "COST_ACCOUNTING_UNAVAILABLE",
+  "observed_cost": 0,
+  "derived_credits": null
+}

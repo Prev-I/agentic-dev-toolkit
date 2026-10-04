@@ -1,0 +1,23 @@
+{
+  "name": "plan",
+  "mode": "primary",
+  "model": "github-copilot/claude-opus-5.5",
+  "variant": "xhigh",
+  "tools": {
+    "apply_patch": null,
+    "bash": true,
+    "task": true,
+    "webfetch": true,
+    "websearch": true
+  },
+  "permissions": {
+    "edit": "deny",
+    "task": "allow",
+    "bash": {
+      "wildcard": "ask",
+      "allowed": []
+    },
+    "webfetch": null,
+    "websearch": "allow"
+  }
+}

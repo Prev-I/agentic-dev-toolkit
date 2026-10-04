@@ -1,0 +1,40 @@
+{
+  "name": "plan",
+  "model": {
+    "providerID": "github-copilot",
+    "modelID": "claude-opus-5.5"
+  },
+  "variant": "xhigh",
+  "mode": "primary",
+  "tools": {
+    "task": true
+  },
+  "permission": [
+    {
+      "permission": "task",
+      "pattern": "general",
+      "action": "deny"
+    },
+    {
+      "permission": "task",
+      "pattern": "*",
+      "action": "allow"
+    },
+    {
+      "permission": "task",
+      "pattern": "breakglass",
+      "action": "deny"
+    },
+    {
+      "permission": "task",
+      "pattern": "*",
+      "action": "allow"
+    },
+    {
+      "permission": "task",
+      "pattern": "breakglass",
+      "action": "deny"
+    }
+  ],
+  "capture_projection": "debug agent output reduced to model inventory and ordered Task rules; external-directory paths and prompt omitted"
+}

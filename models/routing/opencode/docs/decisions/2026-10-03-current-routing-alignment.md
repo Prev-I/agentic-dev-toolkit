@@ -69,3 +69,24 @@ permissions and modes to the restored reference profile.
 
 Activation remains a separate backup-and-merge operation. It must preserve all
 user-owned global configuration outside the routing-owned keys.
+
+## Addendum — 2026-10-04 successful-call capability
+
+The historical discovery and evidence-gap statements above are retained as
+written. New evidence is in `eval/records/current-routing-capability-2026-10/`.
+Plan Opus 5.5 xhigh, General GPT-6.1 Sol medium, Compaction Sonnet 5.5 low,
+and separate Title/Summary GPT-6 Luna low probes returned `CAPABILITY_OK` on
+Copilot. Expert GPT-6 Astra xhigh also returned `CAPABILITY_OK` on direct OpenAI.
+These are direct model/variant calls, not agent or role-quality fixtures.
+
+The five Copilot probes spent 2.26529 observed credits. Execution stopped on
+Expert because the existing dispatcher's direct-OpenAI credit accounting is
+unavailable (`derived_credits: null`); its zero runtime cost is not proof of
+zero billing. Breakglass Sol 6.1 max was therefore not dispatched and its
+successful-call gap remains open. Resolved permission/inventory checks confirm
+Breakglass remains direct OpenAI primary and Task-denied without a model call.
+
+Routing and global configuration remain unchanged. The quality-profile cycle
+is closed by the ACCEPTED `2026-10-04-quality-profile-closure.md`; General
+screening is DEFERRED. No capability evidence here promotes a model or revises
+any existing quality adjudication.

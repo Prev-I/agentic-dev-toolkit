@@ -1,0 +1,21 @@
+{
+  "status": "STOPPED_ACCOUNTING_UNAVAILABLE",
+  "stop_role": "expert",
+  "successful_inference_roles": ["plan", "general", "compaction", "title", "summary", "expert"],
+  "not_run_roles": ["breakglass"],
+  "observed_copilot_credits": 2.26529,
+  "reconciled_overall_credits": null,
+  "approved_ceiling_credits": 150,
+  "admission_per_probe": 20,
+  "accounting_unavailable": {
+    "role": "expert",
+    "provider": "openai",
+    "runtime_observed_cost": 0,
+    "derived_credits": null,
+    "zero_is_not_proof_of_free_usage": true
+  },
+  "breakglass_task_exclusion": true,
+  "routing_changed": false,
+  "role_fitness_established": false,
+  "retry_count": 0
+}

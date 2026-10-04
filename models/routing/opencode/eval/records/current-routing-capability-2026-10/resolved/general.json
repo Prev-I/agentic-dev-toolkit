@@ -1,0 +1,35 @@
+{
+  "name": "general",
+  "model": {
+    "providerID": "github-copilot",
+    "modelID": "gpt-6.1-sol"
+  },
+  "variant": "medium",
+  "mode": "subagent",
+  "tools": {
+    "task": true
+  },
+  "permission": [
+    {
+      "permission": "task",
+      "pattern": "*",
+      "action": "allow"
+    },
+    {
+      "permission": "task",
+      "pattern": "breakglass",
+      "action": "deny"
+    },
+    {
+      "permission": "task",
+      "pattern": "*",
+      "action": "allow"
+    },
+    {
+      "permission": "task",
+      "pattern": "breakglass",
+      "action": "deny"
+    }
+  ],
+  "capture_projection": "debug agent output reduced to model inventory and ordered Task rules; external-directory paths and prompt omitted"
+}

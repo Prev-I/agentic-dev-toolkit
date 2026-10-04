@@ -1,0 +1,35 @@
+{
+  "timestamp": "2026-10-04T09:56:26.818863+02:00",
+  "label": "plan-capability",
+  "attempt": 1,
+  "routing_profile_id": "direct-model-evaluation",
+  "routing_profile_commit": "73f878d4836a81917bdc9cf7b21a1002f1b2986e",
+  "runtime_version": "1.18.32",
+  "eval_runner_version": "phase-r-dispatch-v2",
+  "environment": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+  "dispatch_target": "github-copilot/claude-opus-5.5",
+  "variant": "xhigh",
+  "timeout_seconds": 120,
+  "exit_status": 0,
+  "classification": "OK",
+  "failure_class": null,
+  "provider_error_text": null,
+  "provider_status_code": null,
+  "observed_cost": 0.013711,
+  "derived_credits": 1.3711,
+  "normalized_steady_state_cost": null,
+  "tokens": {
+    "total": 2707,
+    "input": 4,
+    "output": 12,
+    "reasoning": 0,
+    "cache": {
+      "write": 2691,
+      "read": 0
+    }
+  },
+  "wall_clock_ms": 3753,
+  "retry_count": 0,
+  "raw_evidence": "raw.jsonl",
+  "decides_gate_outcome": false
+}

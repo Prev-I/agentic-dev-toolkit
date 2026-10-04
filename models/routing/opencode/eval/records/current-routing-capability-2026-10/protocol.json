@@ -1,0 +1,14 @@
+{
+  "experiment_id": "current-routing-capability-2026-10",
+  "status": "APPROVED_FOR_DISPATCH",
+  "authorization": "User explicitly authorized current-routing capability probes on 2026-10-04, 20-credit admission per probe, 150-credit total ceiling, no routing/global changes or push.",
+  "order": ["plan", "general", "compaction", "title", "summary", "expert", "breakglass"],
+  "expected_response": "CAPABILITY_OK",
+  "timeout_seconds": 120,
+  "admission_credits_per_probe": 20,
+  "ceiling_credits": 150,
+  "stop_policy": "Stop at first non-OK dispatch, provider error, non-exact response or unknown/accounting-unavailable cost. No retry or provider substitution.",
+  "evidence_boundary": "Direct model/variant successful-call evidence only; not role fitness, agent invocation, or quality adjudication. Current agent resolution captured before dispatch. Expert and Breakglass must use openai provider.",
+  "accounting_boundary": "Existing dispatcher derives credits only for GitHub Copilot. Direct OpenAI derived_credits is null by design; preserve observed_cost and stop rather than invent a Copilot conversion or assume subscription usage is free.",
+  "routing_changed": false
+}

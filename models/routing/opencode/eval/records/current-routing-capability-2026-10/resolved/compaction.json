@@ -1,0 +1,25 @@
+{
+  "name": "compaction",
+  "model": {
+    "providerID": "github-copilot",
+    "modelID": "claude-sonnet-5.5"
+  },
+  "variant": "low",
+  "mode": "primary",
+  "tools": {
+    "task": true
+  },
+  "permission": [
+    {
+      "permission": "task",
+      "pattern": "*",
+      "action": "allow"
+    },
+    {
+      "permission": "task",
+      "pattern": "breakglass",
+      "action": "deny"
+    }
+  ],
+  "capture_projection": "debug agent output reduced to model inventory and ordered Task rules; external-directory paths and prompt omitted"
+}

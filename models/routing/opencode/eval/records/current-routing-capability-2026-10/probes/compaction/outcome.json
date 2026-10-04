@@ -1,0 +1,7 @@
+{
+  "role": "compaction",
+  "successful_inference": true,
+  "stop_reason": null,
+  "observed_cost": 0.0068655,
+  "derived_credits": 0.68655
+}

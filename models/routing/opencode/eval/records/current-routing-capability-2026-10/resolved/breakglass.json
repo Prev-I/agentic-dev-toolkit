@@ -1,0 +1,30 @@
+{
+  "name": "breakglass",
+  "model": {
+    "providerID": "openai",
+    "modelID": "gpt-6.1-sol"
+  },
+  "variant": "max",
+  "mode": "primary",
+  "tools": {
+    "task": false
+  },
+  "permission": [
+    {
+      "permission": "task",
+      "pattern": "*",
+      "action": "allow"
+    },
+    {
+      "permission": "task",
+      "pattern": "breakglass",
+      "action": "deny"
+    },
+    {
+      "permission": "task",
+      "action": "deny",
+      "pattern": "*"
+    }
+  ],
+  "capture_projection": "debug agent output reduced to model inventory and ordered Task rules; external-directory paths and prompt omitted"
+}

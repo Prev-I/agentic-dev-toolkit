@@ -101,3 +101,18 @@ range of 15 to 20.
 
 The review list, thresholds and checkpoint are production-only. Dispatcher
 findings are emitted in a separate informational list that requires no review.
+
+## Activation and repository audit — approved 2026-10-04
+
+Prefer the active configuration mtime when routing matches the manifest and the
+mtime is on the alignment date; otherwise retain the date fallback or explicit
+override. This dates configuration writing, not runtime reload. Routing audit
+rows carry request timestamps, expected/observed models, and PRE_ACTIVATION,
+SESSION_SPANNING_ACTIVATION, or POST_ACTIVATION. Only POST_ACTIVATION routing
+flags are reviewable/triggerable; older and spanning evidence is informational.
+
+Split production counters into toolkit/product/unknown normalized repository
+classes without absolute paths. The Build checkpoint counts only product.
+For each distinct observed Expert child, output only its direct parent hash,
+repository class and presence of the seven structured decision-packet headings.
+No prompt content is emitted and packet presence is not a quality adjudication.

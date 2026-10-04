@@ -258,6 +258,8 @@ def build_fixture(base):
 
 
 def run(*args):
+    if args and args[0] == "report" and "--activation-config" not in args:
+        args = (*args, "--activation-config", "")
     return subprocess.run([sys.executable, str(OBSERVE), *args], text=True, capture_output=True)
 
 

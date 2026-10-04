@@ -29,13 +29,44 @@ aliases for existing consumers. Only production contributes to triggers,
 checkpoint progress and the pending review list; dispatcher findings are
 informational and never inherit human review decisions.
 
-The default `--since` comes from the current manifest's alignment decision
-record date. The 2026-10-03 record does not attest an exact machine activation
-time, so its date is a day-precision proxy (UTC midnight), disclosed in
-`profile_boundary`. `--profile-effective` overrides that proxy when a precise
-local activation time is known. Use an explicit earlier `--since` to count
+The default `--since` uses the mtime of the local active configuration when all
+manifest agent models/variants match and that mtime falls on the alignment
+record date. `profile_boundary.source` is then `aligned_config_mtime`. This is
+evidence of configuration writing, not proof of a running session's reload.
+If it cannot be validated, the alignment record date is a day-precision proxy
+(UTC midnight), disclosed as `alignment_record_date`. `--activation-config`
+selects the local file (an empty value disables this evidence), and
+`--profile-effective` supplies an explicit timestamp. Use an earlier `--since` to count
 historical populations; historical activity in a resumed session is excluded
 from current-profile counters.
+
+Routing audit metadata uses the actual message/stream timestamp and contains
+expected/observed models and an activation class. `PRE_ACTIVATION` requests
+precede configuration writing; `SESSION_SPANNING_ACTIVATION` requests follow it
+in a requesting session created earlier; `POST_ACTIVATION` requests originate
+in a new requesting session. Only confirmed post-activation routing flags can
+trigger action. The other two classes are informational. An explicit earlier
+window exposes same-day pre-activation evidence for audit, without adding it to
+current-profile request counters. Root-model metadata uses session creation
+time as a proxy; it is not an independently timestamped request.
+
+Production counters are also split by normalized working repository: `toolkit`
+for an `agentic-dev-toolkit` path component, `product` for other Git roots, and
+`unknown` for unresolved/deleted roots. No complete path is serialized.
+The Build gate checkpoint includes **product only**, excluding toolkit and
+unknown work. `expert_escalations` has one row per distinct observed Expert
+Task child: parent hash, repository class, and decision-packet boolean only.
+Packet presence requires all seven structured headings and does not assess
+their content, correctness, or whether escalation was justified.
+
+### Local activation evidence inspected on 2026-10-04
+
+`opencode.jsonc.bak-20261003` preserves a 2026-09-29 modification time; its
+2026-10-03 19:09:38 UTC creation time proves backup creation, not activation.
+The active `opencode.jsonc` has matching birth/mtime/ctime at approximately
+**2026-10-03 19:36:38.291 UTC**, twenty seconds after alignment commit `ff7a09f`.
+The observer validates the live routing against the target manifest before
+using that mtime. It does not read or modify credentials or global settings.
 
 For each pending item:
 

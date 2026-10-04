@@ -1,0 +1,4 @@
+timestamp=2026-10-04T10:08:26.542Z level=INFO run=9879f9c4 message=stream providerID=github-copilot modelID=gpt-6-luna session.id=ses_ef99d2383ffe5kmy5YzdllvTtl small=true agent=title mode=primary
+timestamp=2026-10-04T10:08:26.730Z level=INFO run=9879f9c4 message=stream providerID=github-copilot modelID=gpt-6.1-sol session.id=ses_ef99d2383ffe5kmy5YzdllvTtl small=false agent=build mode=primary
+timestamp=2026-10-04T10:08:31.973Z level=INFO run=9879f9c4 message=stream providerID=openai modelID=gpt-6-astra session.id=ses_ef99d0781ffe8ctrqhFoTL1tRT small=false agent=expert mode=subagent
+timestamp=2026-10-04T10:08:46.414Z level=INFO run=9879f9c4 message=stream providerID=github-copilot modelID=gpt-6.1-sol session.id=ses_ef99d2383ffe5kmy5YzdllvTtl small=false agent=build mode=primary

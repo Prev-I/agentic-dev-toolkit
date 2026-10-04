@@ -51,7 +51,7 @@ else:
 with tempfile.TemporaryDirectory() as tmp:
     import os
     if os.geteuid() == 0:
-        print('SKIP: read-permission proof requires non-root; all other fixture assertions still execute')
+        print('SKIP: historical and per-variant unreadable-counter proofs require non-root; all other fixture assertions still execute')
     else:
         counter = Path(tmp) / 'unreadable'
         counter.write_text('41\n')

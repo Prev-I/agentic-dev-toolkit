@@ -3,7 +3,6 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
-import shutil
 import subprocess
 import sys
 
@@ -46,4 +45,5 @@ def snapshot(commit, target):
 
 
 module.snapshot = snapshot
-module.main()
+if __name__ == '__main__':
+    module.main()

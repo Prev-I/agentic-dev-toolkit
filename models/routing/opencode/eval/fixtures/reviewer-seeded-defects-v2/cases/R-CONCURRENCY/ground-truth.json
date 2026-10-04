@@ -1,0 +1,9 @@
+{
+  "base": "../../clean",
+  "overrides": ["counter.sh"],
+  "expected_material_defect": {
+    "id": "R-CONCURRENCY",
+    "description": "The exclusive lock is released before read-modify-write; concurrent increments can lose updates."
+  },
+  "witness": "fcntl.flock(lock, fcntl.LOCK_UN)"
+}

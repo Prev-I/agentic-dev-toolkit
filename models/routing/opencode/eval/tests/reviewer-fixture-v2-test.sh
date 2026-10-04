@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+source "$root/tests/prerequisites.sh"
+require_system_python
 bash "$root/scoring/fixture-integrity-v2.sh"
 /usr/bin/python3 - "$root" <<'PY'
 import importlib.util
@@ -48,15 +50,17 @@ else:
 # Run as the owning non-root user: writable but unreadable is the reported case.
 with tempfile.TemporaryDirectory() as tmp:
     import os
-    assert os.geteuid() != 0, 'read-permission proof requires a non-root user'
-    counter = Path(tmp) / 'unreadable'
-    counter.write_text('41\n')
-    counter.chmod(0o200)
-    old = subprocess.run(['bash', '-c', 'source "$1"; increment_counter "$2"', '_',
-                          str(root / 'fixtures/reviewer-seeded-defects/clean/counter.sh'), str(counter)],
-                         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    counter.chmod(0o600)
-    assert old.returncode == 0 and counter.read_text() == '1\n' and old.stderr
+    if os.geteuid() == 0:
+        print('SKIP: historical and per-variant unreadable-counter proofs require non-root; all other fixture assertions still execute')
+    else:
+        counter = Path(tmp) / 'unreadable'
+        counter.write_text('41\n')
+        counter.chmod(0o200)
+        old = subprocess.run(['bash', '-c', 'source "$1"; increment_counter "$2"', '_',
+                              str(root / 'fixtures/reviewer-seeded-defects/clean/counter.sh'), str(counter)],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        counter.chmod(0o600)
+        assert old.returncode == 0 and counter.read_text() == '1\n' and old.stderr
     for variant in ('clean', 'cases/R-CONCURRENCY'):
         file = v2 / variant / 'counter.sh'
         missing = Path(tmp) / 'missing'
@@ -64,12 +68,13 @@ with tempfile.TemporaryDirectory() as tmp:
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         assert result.returncode != 0 and not missing.exists()
         counter = Path(tmp) / 'counter'
-        counter.write_text('41\n')
-        counter.chmod(0o200)
-        result = subprocess.run(['bash', '-c', 'source "$1"; increment_counter "$2"', '_', str(file), str(counter)],
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        counter.chmod(0o600)
-        assert result.returncode != 0 and counter.read_text() == '41\n'
+        if os.geteuid() != 0:
+            counter.write_text('41\n')
+            counter.chmod(0o200)
+            result = subprocess.run(['bash', '-c', 'source "$1"; increment_counter "$2"', '_', str(file), str(counter)],
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            counter.chmod(0o600)
+            assert result.returncode != 0 and counter.read_text() == '41\n'
         counter.write_text('malicious[0]\n')
         result = subprocess.run(['bash', '-c', 'source "$1"; increment_counter "$2"', '_', str(file), str(counter)],
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)

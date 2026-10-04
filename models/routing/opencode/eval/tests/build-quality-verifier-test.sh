@@ -4,6 +4,8 @@ IFS=$'\n\t'
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 source "$root/tests/test-lib.sh"
+source "$root/tests/prerequisites.sh"
+require_system_python
 source_record="$root/records/opus55-gpt61-build-quality-screening"
 
 w=$(mktemp -d)

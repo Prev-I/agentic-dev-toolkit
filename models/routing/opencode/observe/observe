@@ -15,7 +15,7 @@ import sqlite3
 import sys
 
 
-PROFILE_EFFECTIVE = "2026-10-03T19:41:04Z"
+POPULATIONS = ("production", "eval_dispatcher", "pre_profile")
 SIGNALS = {"routing", "provider_error", "gate", "scope", "rework", "escalation"}
 APPROVAL = re.compile(r"(?i)\b(approved?|accepted|proceed|go ahead|looks good|lgtm|s[iì]|ok(?:ay)?)\b")
 CORRECTION = re.compile(r"(?i)\b(no|wrong|fix|revert|undo|rollback|correggi|sbagliat[oa]|rivedi)\b")
@@ -137,6 +137,30 @@ def classify_gate_turn(response, has_edits):
     return "AMBIGUOUS"
 
 
+def preauthorized(text):
+    # Only explicit human authorization, not requests to propose a design.
+    if re.search(r"(?i)\b(not approved|not authorized|do not implement|non approvato|non autorizzat[oa]|non implementare)\b", text):
+        return False
+    return bool(re.search(
+        r"(?i)\b(pre[- ]authorized|explicitly authorized to implement|design is approved|"
+        r"design (?:già |gia )?approvato|autorizz[oa] (?:esplicitamente )?(?:l['’])?implementazione|"
+        r"implement without (?:further |additional )?approval)\b", text))
+
+
+def profile_boundary(manifest, override=None):
+    if override:
+        return {"timestamp": iso_ms(utc_ms(override)), "source": "explicit_override"}
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    reference = data.get("decision_reference", "")
+    record = manifest.parent.parent.parent / reference
+    if not record.is_file():
+        raise ObserveError("profile_alignment_record_missing")
+    match = re.search(r"(\d{4}-\d{2}-\d{2})", Path(reference).name)
+    if not match:
+        raise ObserveError("profile_activation_date_unavailable")
+    return {"timestamp": match.group(1) + "T00:00:00Z", "source": "alignment_record_date"}
+
+
 def parse_session_model(raw):
     if not raw:
         return None
@@ -254,8 +278,10 @@ def parse_log_files(log_dir, since):
 
 
 def collect(args):
+    boundary = profile_boundary(Path(args.manifest), args.profile_effective)
+    args.since = args.since or boundary["timestamp"]
     since = utc_ms(args.since)
-    profile_effective = utc_ms(args.profile_effective)
+    profile_effective = utc_ms(boundary["timestamp"])
     state = ensure_state(Path(args.state_dir))
     key = key_for(state)
     targets = load_manifest(Path(args.manifest))
@@ -264,13 +290,9 @@ def collect(args):
     db.execute("BEGIN")
     sessions = {}
     for row in db.execute(
-        "SELECT id,parent_id,directory,version,agent,model,time_created,time_updated FROM session WHERE time_updated>=?",
-        (since,),
+        "SELECT id,parent_id,directory,version,agent,model,time_created,time_updated FROM session",
     ):
         sessions[row[0]] = dict(zip(("id", "parent", "directory", "version", "agent", "model", "created", "updated"), row))
-    if not sessions:
-        db.close()
-        return empty_report(state)
 
     def root_id(sid):
         seen = set()
@@ -285,11 +307,13 @@ def collect(args):
         root_members[rid].append(sid)
     root_info = {}
     for rid, members in root_members.items():
+        if not any(sessions[sid]["updated"] >= since for sid in members):
+            continue
         root = sessions[rid]
         wt = worktree_root(root["directory"])
         if rid in known_dispatchers or root["agent"] not in targets:
             category = "eval_dispatcher"
-        elif root["updated"] < profile_effective:
+        elif max(sessions[sid]["updated"] for sid in members) < profile_effective:
             category = "pre_profile"
         else:
             category = "production"
@@ -299,6 +323,8 @@ def collect(args):
     message_root = {}
     session_ids = json.dumps(list(sessions))
     for mid, sid, when, raw in db.execute("SELECT id,session_id,time_created,data FROM message WHERE session_id IN (SELECT value FROM json_each(?))", (session_ids,)):
+        if roots[sid] not in root_info:
+            continue
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
@@ -339,7 +365,7 @@ def collect(args):
         if tool == "skill":
             message["skills"].append(inp.get("name"))
         elif tool == "task":
-            message["tasks"].append(inp.get("subagent_type"))
+            message["tasks"].append({"agent": inp.get("subagent_type"), "child": meta.get("sessionId")})
         elif tool == "question":
             for group in meta.get("answers") or []:
                 if isinstance(group, list):
@@ -356,16 +382,14 @@ def collect(args):
     db.close()
     reviews = load_reviews(state)
     flags = []
-    signal_counts = Counter()
-    agent_counts = Counter()
-    escalations = Counter()
-    agent_signals = defaultdict(Counter)
-    provider_errors = defaultdict(lambda: defaultdict(Counter))
-    routing_requests = Counter()
-    provider_retries = defaultdict(lambda: Counter())
-    requests_by_class = defaultdict(Counter)
-    gate_outcomes = Counter()
-    gate_parity_outcomes = Counter()
+    counters = {category: {
+        "signals": Counter(), "agents": Counter(), "escalations": Counter(),
+        "agent_signals": defaultdict(Counter),
+        "provider_errors": defaultdict(lambda: defaultdict(Counter)),
+        "routing_requests": Counter(), "provider_retries": defaultdict(Counter),
+        "gate_outcomes": Counter(), "gate_parity_outcomes": Counter(),
+        "children": defaultdict(set),
+    } for category in POPULATIONS}
     checkpoint = 0
 
     def add_flag(rid, signal, reason, agent=None, provider=None, model=None, variant=None, paths=None):
@@ -376,11 +400,14 @@ def collect(args):
         ):
             return
         public = root_info[rid]["hash"]
-        review = reviews.get((public, signal, reason))
+        category = root_info[rid]["class"]
+        bucket = counters[category]
+        review = reviews.get((public, signal, reason)) if category == "production" else None
         item = {
             "root": rid, "session": public, "timestamp": iso_ms(sessions[rid]["created"]),
             "agent": agent or sessions[rid]["agent"], "signal": signal, "reason": reason,
-            "status": review["decision"] if review else "pending",
+            "status": review["decision"] if review else ("pending" if category == "production" else "informational"),
+            "population": category,
         }
         for name, value in (("provider", provider), ("model", model), ("variant", variant)):
             if value is not None:
@@ -391,17 +418,27 @@ def collect(args):
         if review and review.get("rollback"):
             item["rollback"] = True
         flags.append(item)
-        signal_counts[signal] += 1
-        agent_signals[item["agent"]][signal] += 1
+        bucket["signals"][signal] += 1
+        bucket["agent_signals"][item["agent"]][signal] += 1
         if signal == "provider_error":
-            provider_errors[provider or "unknown"][item["agent"]][reason] += 1
+            bucket["provider_errors"][provider or "unknown"][item["agent"]][reason] += 1
 
     for rid, info in root_info.items():
         root = sessions[rid]
+        if info["class"] == "pre_profile":
+            continue
+        bucket = counters[info["class"]]
+        agent_counts = bucket["agents"]
+        routing_requests = bucket["routing_requests"]
+        gate_outcomes = bucket["gate_outcomes"]
+        gate_parity_outcomes = bucket["gate_parity_outcomes"]
         agent_counts[root["agent"]] += 1
+        for sid in info["members"]:
+            if sessions[sid]["parent"] and sessions[sid]["created"] >= max(since, profile_effective):
+                bucket["children"][sessions[sid]["agent"]].add(sid)
         target = targets.get(root["agent"])
         observed_model = parse_session_model(root["model"])
-        if info["class"] == "production" and root["created"] >= profile_effective and target and observed_model:
+        if root["created"] >= max(since, profile_effective) and target and observed_model:
             provider, model = target["model"].split("/", 1)
             if (observed_model["provider"], observed_model["model"], observed_model["variant"]) != (provider, model, target.get("variant")):
                 add_flag(rid, "routing", "root_model_differs", provider=observed_model["provider"], model=observed_model["model"], variant=observed_model["variant"])
@@ -411,11 +448,17 @@ def collect(args):
             member_root = info["worktree"]
             for message in messages.get(sid, []):
                 data = message["data"]
+                if message["time"] < max(since, profile_effective):
+                    # Earlier human context may authorize a later gate, but is
+                    # never included in counters or current-profile comparisons.
+                    if sid == rid and data.get("role") == "user":
+                        timeline.append({"sid": sid, "time": message["time"], "role": "user",
+                                         "text": "\n".join(message["texts"]), "answers": [],
+                                         "skills": [], "tasks": [], "edits": []})
+                    continue
                 if data.get("role") == "assistant" and data.get("providerID") and data.get("modelID"):
                     request_key = (data.get("agent") or sessions[sid]["agent"], data["providerID"], data["modelID"], data.get("variant"))
-                    requests_by_class[info["class"]][request_key] += 1
-                    if info["class"] == "production" and message["time"] >= profile_effective:
-                        routing_requests[request_key] += 1
+                    routing_requests[request_key] += 1
                 edits = []
                 raw_edits = message["edits"] or message["snapshot_edits"]
                 for raw_path, kind in raw_edits:
@@ -427,7 +470,7 @@ def collect(args):
                     "text": "\n".join(message["texts"]), "answers": message["answers"],
                     "skills": message["skills"], "tasks": message["tasks"], "edits": edits,
                 })
-                if data.get("role") == "assistant" and message["time"] >= profile_effective and info["class"] == "production":
+                if data.get("role") == "assistant":
                     target = targets.get(data.get("agent") or sessions[sid]["agent"])
                     if target:
                         expected_provider, expected_model = target["model"].split("/", 1)
@@ -440,24 +483,27 @@ def collect(args):
                             provider=data.get("providerID"), model=data.get("modelID"), variant=data.get("variant"),
                         )
                 for subagent in message["tasks"]:
-                    if subagent in ("expert", "reviewer"):
-                        escalations[subagent] += 1
+                    if isinstance(subagent, dict) and subagent.get("child"):
+                        bucket["children"][subagent["agent"]].add(subagent["child"])
                 if sessions[sid]["parent"] and sessions[sid]["agent"] == "breakglass":
                     add_flag(rid, "escalation", "breakglass_child", agent="breakglass")
                 error = data.get("error")
-                if isinstance(error, dict) and error.get("name") in ("APIError", "UnknownError") and message["time"] >= profile_effective and info["class"] == "production":
+                if isinstance(error, dict) and error.get("name") in ("APIError", "UnknownError"):
                     provider = data.get("providerID")
                     add_flag(rid, "provider_error", classify_error(error), agent=data.get("agent"), provider=provider)
 
         timeline.sort(key=lambda item: item["time"])
         brainstorming = [i for i, item in enumerate(timeline) if "brainstorming" in item["skills"]]
-        if info["class"] == "production" and root["agent"] == "build" and brainstorming:
-            checkpoint += 1
-            for start in brainstorming:
-                approved = False
+        if root["agent"] == "build" and brainstorming:
+            checkpoint += info["class"] == "production"
+            for episode, start in enumerate(brainstorming):
+                previous_users = [item for item in timeline[:start] if item["role"] == "user" and item["sid"] == rid]
+                authorized = bool(previous_users and preauthorized(previous_users[-1]["text"]))
+                approved = authorized
                 verdict = "AMBIGUOUS"
                 gate_parity_outcomes[classify_gate_turn(timeline[start]["text"], bool(timeline[start]["edits"]))] += 1
-                for item in timeline[start:]:
+                end = brainstorming[episode + 1] if episode + 1 < len(brainstorming) else len(timeline)
+                for item in timeline[start:end]:
                     if item["role"] == "user" and item["sid"] == rid and APPROVAL.search(item["text"]):
                         approved = True
                     if item["answers"] and APPROVAL.search("\n".join(item["answers"])):
@@ -468,10 +514,10 @@ def collect(args):
                         verdict = "NON_ADHERENT"
                         break
                     if item["edits"] and approved:
-                        verdict = "ADHERENT"
+                        verdict = "PRE_AUTHORIZED" if authorized else "ADHERENT"
                 gate_outcomes[verdict] += 1
 
-        if info["class"] == "production":
+        if info["class"] != "pre_profile":
             for item in timeline:
                 shared = [path for path, kind in item["edits"] if kind in ("update", "delete", "move") and SHARED.search(path)]
                 if shared:
@@ -507,23 +553,24 @@ def collect(args):
 
     for sid, entries in log_errors.items():
         rid = roots.get(sid)
-        if rid and root_info[rid]["class"] == "production" and entries:
+        if rid in root_info and root_info[rid]["class"] != "pre_profile" and entries:
+            provider_retries = counters[root_info[rid]["class"]]["provider_retries"]
             for reason, event in entries:
+                if event["time"] < max(since, profile_effective):
+                    continue
                 add_flag(rid, "provider_error", reason, agent=event["agent"], provider=event["provider"])
-            if any(
-                stream["sid"] == sid and stream["agent"] == event["agent"] and stream["time"] > event["time"]
-                for stream in streams
-            ):
-                provider_retries[event["provider"] or "unknown"][event["agent"] or "unknown"] += 1
+                if any(stream["sid"] == sid and stream["agent"] == event["agent"] and stream["time"] > event["time"] for stream in streams):
+                    provider_retries[event["provider"] or "unknown"][event["agent"] or "unknown"] += 1
 
     for stream in streams:
         rid = roots.get(stream["sid"])
-        if not rid:
+        if rid not in root_info or root_info[rid]["class"] == "pre_profile" or stream["time"] < max(since, profile_effective):
             continue
-        if root_info[rid]["class"] == "production" and stream["time"] >= profile_effective and stream["agent"] == "title":
+        routing_requests = counters[root_info[rid]["class"]]["routing_requests"]
+        if stream["agent"] == "title":
             routing_requests[(stream["agent"], stream["provider"], stream["model"], None)] += 1
         target = targets.get(stream["agent"])
-        if root_info[rid]["class"] == "production" and stream["time"] >= profile_effective and target:
+        if target:
             expected_provider, expected_model = target["model"].split("/", 1)
             if (stream["provider"], stream["model"]) != (expected_provider, expected_model):
                 add_flag(rid, "routing", "request_model_differs", agent=stream["agent"], provider=stream["provider"], model=stream["model"])
@@ -540,41 +587,41 @@ def collect(args):
         "gates_skipped": sum(item["signal"] == "gate" for item in confirmed) >= 2,
         "rollback_required": any(item["signal"] == "rework" and item.get("rollback") for item in confirmed),
     }
+    populations = {}
+    for category in POPULATIONS:
+        bucket = counters[category]
+        populations[category] = {"sessions": sum(info["class"] == category for info in root_info.values())}
+        if category == "pre_profile":
+            continue
+        populations[category].update({
+            "agents": dict(sorted(bucket["agents"].items())),
+            "signals": {name: bucket["signals"].get(name, 0) for name in sorted(SIGNALS)},
+            "gate_outcomes": dict(sorted(bucket["gate_outcomes"].items())),
+            "gate_parity_outcomes": dict(sorted(bucket["gate_parity_outcomes"].items())),
+            "agent_signals": {agent: dict(sorted(counts.items())) for agent, counts in sorted(bucket["agent_signals"].items())},
+            "provider_errors": {provider: {agent: dict(sorted(counts.items())) for agent, counts in sorted(agents.items())} for provider, agents in sorted(bucket["provider_errors"].items())},
+            "provider_retries": {provider: dict(sorted(agents.items())) for provider, agents in sorted(bucket["provider_retries"].items())},
+            "routing_requests": [{"agent": agent, "provider": provider, "model": model, "variant": variant, "requests": count} for (agent, provider, model, variant), count in sorted(bucket["routing_requests"].items(), key=lambda item: tuple(str(v) for v in item[0]))],
+            "escalations": {agent: len(bucket["children"].get(agent, set())) for agent in ("expert", "reviewer", "breakglass")},
+            "task_children": {agent: len(children) for agent, children in sorted(bucket["children"].items()) if agent},
+        })
+    production = populations["production"]
     report = {
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "since": args.since,
+        "profile_boundary": boundary,
+        "populations": populations,
         "coverage": {
             "database": True, "log_files": log_count,
             "dispatcher_ids_loaded": len(known_dispatchers),
             "opencode_versions": sorted({s["version"] for s in sessions.values() if s["version"]}),
         },
-        "session_classes": dict(sorted(Counter(info["class"] for info in root_info.values()).items())),
-        "agents": dict(sorted(agent_counts.items())),
-        "signals": {name: signal_counts.get(name, 0) for name in ("routing", "provider_error", "escalation", "gate", "scope", "rework")},
-        "gate_outcomes": dict(sorted(gate_outcomes.items())),
-        "gate_parity_outcomes": dict(sorted(gate_parity_outcomes.items())),
-        "agent_signals": {agent: dict(sorted(counts.items())) for agent, counts in sorted(agent_signals.items())},
-        "provider_errors": {
-            provider: {agent: dict(sorted(counts.items())) for agent, counts in sorted(agents.items())}
-            for provider, agents in sorted(provider_errors.items())
-        },
-        "provider_retries": {
-            provider: dict(sorted(agents.items())) for provider, agents in sorted(provider_retries.items())
-        },
-        "routing_requests": [
-            {"agent": agent, "provider": provider, "model": model, "variant": variant, "requests": count}
-            for (agent, provider, model, variant), count in sorted(routing_requests.items(), key=lambda item: tuple(str(v) for v in item[0]))
-        ],
-        "routing_requests_by_class": {
-            category: [
-                {"agent": agent, "provider": provider, "model": model, "variant": variant, "requests": count}
-                for (agent, provider, model, variant), count in sorted(counts.items(), key=lambda item: tuple(str(v) for v in item[0]))
-            ] for category, counts in sorted(requests_by_class.items())
-        },
-        "escalations": {"expert": escalations.get("expert", 0), "reviewer": escalations.get("reviewer", 0), "breakglass": sum(s["agent"] == "breakglass" for s in sessions.values())},
+        "session_classes": {category: populations[category]["sessions"] for category in POPULATIONS},
+        **{name: production[name] for name in ("agents", "signals", "gate_outcomes", "gate_parity_outcomes", "agent_signals", "provider_errors", "provider_retries", "routing_requests", "escalations")},
         "checkpoint": {"build_sessions_with_gate": checkpoint, "minimum": 15, "maximum": 20},
         "triggers": triggers,
-        "review": public_flags,
+        "review": [item for item in public_flags if item["population"] == "production"],
+        "informational": [item for item in public_flags if item["population"] != "production"],
     }
     (state / "latest-report.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return report
@@ -605,8 +652,15 @@ def report_command(args):
         return
     print(f"Sessions: {sum(report['session_classes'].values())}")
     print("Coverage: database=yes, log_files=%s, dispatcher_ids=%s" % (report["coverage"]["log_files"], report["coverage"]["dispatcher_ids_loaded"]))
-    print("Classes: " + ", ".join(f"{k}={v}" for k, v in report["session_classes"].items()))
-    print("Signals: " + ", ".join(f"{k}={v}" for k, v in report["signals"].items()))
+    print("Profile boundary: %s (%s)" % (report["profile_boundary"]["timestamp"], report["profile_boundary"]["source"]))
+    for category, population in report["populations"].items():
+        print(f"\n{category}: sessions={population['sessions']}")
+        if category == "pre_profile":
+            continue
+        print("Agents (root sessions): " + ", ".join(f"{k}={v}" for k, v in population["agents"].items()))
+        print("Signals: " + ", ".join(f"{k}={v}" for k, v in population["signals"].items()))
+        print("Distinct Task children: " + ", ".join(f"{k}={v}" for k, v in population["task_children"].items()))
+        print("Gate outcomes: " + ", ".join(f"{k}={v}" for k, v in population["gate_outcomes"].items()))
     cp = report["checkpoint"]
     print(f"Build gate checkpoint: {cp['build_sessions_with_gate']} of {cp['minimum']}-{cp['maximum']}")
     print("Triggers: " + ", ".join(f"{k}={'yes' if v else 'no'}" for k, v in report["triggers"].items()))
@@ -616,6 +670,9 @@ def report_command(args):
     for item in report["review"]:
         if item["status"] == "pending":
             print(f"- {item['session']} {item['signal']} {item['reason']}")
+    print(f"Informational (no review): {len(report['informational'])}")
+    for item in report["informational"]:
+        print(f"- {item['population']} {item['session']} {item['signal']} {item['reason']}")
 
 
 def review_command(args):
@@ -652,8 +709,8 @@ def parser():
     main = argparse.ArgumentParser(prog="observe")
     sub = main.add_subparsers(dest="command", required=True)
     report = sub.add_parser("report")
-    report.add_argument("--since", required=True)
-    report.add_argument("--profile-effective", default=PROFILE_EFFECTIVE)
+    report.add_argument("--since")
+    report.add_argument("--profile-effective")
     report.add_argument("--db", default=str(default_db()))
     report.add_argument("--log-dir", default=str(default_db().parent / "log"))
     report.add_argument("--state-dir", default=str(default_state()))

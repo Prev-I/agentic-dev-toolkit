@@ -42,7 +42,7 @@ source coverage and fails closed when required schema is absent.
 
 ## Session classes
 
-- `pre_profile`: no activity reaches the 2026-10-03 profile merge timestamp;
+- `pre_profile`: no activity reaches the current alignment record boundary;
   never a current routing mismatch. Requests before that boundary are excluded
   even when the session continues afterward.
 - `eval_dispatcher`: temporary-directory or experiment-agent sessions. These
@@ -55,6 +55,12 @@ reviewable because storage cannot distinguish config drift from an intentional
 TUI model selection. Title and child differences are stronger evidence but
 still require human confirmation before triggering action.
 
+All counter groups are population-specific. Pre-profile output is session
+count only and never uses the current manifest. The default observation window
+derives from the current manifest's alignment record date, with day precision
+unless an explicit activation timestamp override is supplied. Events before the
+window/profile boundary are excluded even in resumed production trees.
+
 ## Signals
 
 - `routing`: provider/model/variant requests compared with
@@ -62,12 +68,14 @@ still require human confirmation before triggering action.
 - `provider_error`: API and stream errors classified as `rate_limit`,
   `timeout`, `server`, or `other`; user aborts are excluded. A retry is inferred
   only from a later stream for the same session and agent.
-- `escalation`: Expert and Reviewer Task calls and Breakglass use. Breakglass as
+- `escalation`: distinct Expert and Reviewer child sessions and Breakglass use. Breakglass as
   a child is reviewable.
 - `gate`: Build trees invoking `brainstorming` are classified
   `ADHERENT`, `NON_ADHERENT`, or `AMBIGUOUS` according to whether repository
   edits precede an approval. Tests preserve parity with the six retained
   `classify_gate` results without editing frozen evidence.
+  Explicit implementation preauthorization in the preceding human prompt yields
+  `PRE_AUTHORIZED` and is not a skipped gate.
 - `scope`: updates/deletes to existing shared test or setup files, and files
   outside one identifiable active OpenSpec change, are reviewable flags only.
 - `rework`: a user turn between two edit sets that overlap by path is a flag
@@ -90,3 +98,6 @@ Only confirmed production evidence in the report window triggers action:
 A single skipped gate remains visible as progress toward the two-event trigger.
 The Build checkpoint reports observed gate-bearing sessions against the target
 range of 15 to 20.
+
+The review list, thresholds and checkpoint are production-only. Dispatcher
+findings are emitted in a separate informational list that requires no review.

@@ -272,7 +272,7 @@ def main():
         assert db.read_bytes() == original_db
         report = json.loads(result.stdout)
         assert report["coverage"]["opencode_versions"] == ["1.18.32"]
-        assert report["session_classes"] == {"eval_dispatcher": 1, "production": 12}
+        assert report["session_classes"] == {"eval_dispatcher": 1, "production": 12, "pre_profile": 0}
         assert report["signals"]["routing"] == 3
         assert report["signals"]["escalation"] == 1
         assert report["signals"]["provider_error"] == 1

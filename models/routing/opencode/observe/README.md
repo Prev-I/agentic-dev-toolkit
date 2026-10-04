@@ -15,12 +15,27 @@ default.
 Run the report from the routing bundle directory:
 
 ```bash
-./observe/observe report --since 2026-09-20
+./observe/observe report
 ```
 
 The output first shows source coverage, session classes, signal counts and Build
 gate checkpoint progress. It then lists pending items as a keyed session hash,
 signal and reason code. It never prints session titles or transcript content.
+
+Every counter belongs to a `production`, `eval_dispatcher`, or `pre_profile`
+section. Pre-profile sessions are counted only: their requests are not compared
+with the current manifest. Top-level JSON counter fields are production-only
+aliases for existing consumers. Only production contributes to triggers,
+checkpoint progress and the pending review list; dispatcher findings are
+informational and never inherit human review decisions.
+
+The default `--since` comes from the current manifest's alignment decision
+record date. The 2026-10-03 record does not attest an exact machine activation
+time, so its date is a day-precision proxy (UTC midnight), disclosed in
+`profile_boundary`. `--profile-effective` overrides that proxy when a precise
+local activation time is known. Use an explicit earlier `--since` to count
+historical populations; historical activity in a resumed session is excluded
+from current-profile counters.
 
 For each pending item:
 
@@ -69,6 +84,12 @@ Reports also include provider/model/variant request counters. Title requests
 come from logs and therefore have no variant. OpenCode 1.18.32 automatic
 snapshot summaries do not invoke the Summary agent; explicit Summary or
 Compaction requests remain observable through session messages.
+
+Explicit authorization to implement in the preceding human prompt yields
+`PRE_AUTHORIZED`, not `NON_ADHERENT`, and produces no skipped-gate flag.
+Negated authorization is rejected. Each brainstorming episode ends when the
+next one starts. Task counts use distinct child session IDs per agent;
+continuations of an existing child and bare agent mentions do not inflate them.
 
 ## Storage discovery
 
@@ -123,8 +144,8 @@ key and database can resolve it. State directory and key modes are `0700` and
   text. Declared paths are extracted from backtick-delimited artifact paths.
 - Rework means overlapping paths across a user turn. It does not prove the
   first implementation was wrong.
-- The default profile boundary is the PR #65 merge timestamp, not a proven
-  machine activation timestamp. Override it with `--profile-effective` when
+- The default profile boundary is derived from the alignment record, not an
+  attested machine activation time. Override it with `--profile-effective` when
   local activation evidence gives a more precise boundary.
 
 ## Tests

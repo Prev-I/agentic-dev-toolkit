@@ -118,7 +118,9 @@ PY
   # timeout(1) with --preserve-status does NOT return 124 on expiry; it forwards
   # the terminated command's own status (128+signal — 143 for the default TERM).
   # Verified empirically in this environment: GNU coreutils 9.4 timeout.
-  if (( status == 124 || status == 143 || status == 137 )); then
+  if grep -q 'EVAL_BUDGET_STOP:' "$raw"; then
+    classification=BUDGET_STOP
+  elif (( status == 124 || status == 143 || status == 137 )); then
     classification=TIMEOUT
   elif (( status != 0 )); then
     if [[ "$(capability_stop_class "$failure_class")" == CAPABILITY_REGRESSION ]]; then

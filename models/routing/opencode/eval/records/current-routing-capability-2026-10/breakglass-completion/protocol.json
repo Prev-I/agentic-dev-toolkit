@@ -1,0 +1,20 @@
+{
+  "status": "APPROVED_FOR_SINGLE_CALL",
+  "authorization": "User confirmed one new Breakglass subscription call; the retrospective Expert call is excluded from this new allowance.",
+  "model": "openai/gpt-6.1-sol",
+  "variant": "max",
+  "agent": "breakglass-capability-only",
+  "mode": "primary",
+  "permission": {"edit": "deny", "bash": "deny", "task": "deny"},
+  "account": "openai_subscription",
+  "unit": "calls",
+  "ceiling_new_calls": 1,
+  "accounting_basis": "subscription quota, not metered consumption spend",
+  "expected_response": "CAPABILITY_OK",
+  "retry_policy": "No retries. Reserve the call before dispatch, including interrupted or quota-blocked requests; an existing reservation or output prevents a second call.",
+  "auth_precondition": "OpenAI OAuth credential with account ID, no API-key credential field, no OPENAI_API_KEY, and no OpenAI API-key/provider override in resolved config. Do not persist credentials or account identifier.",
+  "isolation": "Transient OPENCODE_CONFIG fragment adds only an experiment primary. It inherits global defaults exactly as Breakglass does; resolved permissions are compared with active Breakglass before dispatch. No global config write and no Task invocation.",
+  "stop_policy": "Rate limit or quota error is QUOTA_BLOCKED, not model failure; stop immediately. Other provider errors stop too. Null derived_credits is allowed only as subscription-call accounting, never converted to credits.",
+  "evidence_boundary": "Successful primary inference with requested model/variant, not role fitness or provider attestation of reasoning effort. Runtime token metadata retained as reported, not billing measurement. Current OAuth authentication is observed; historical Expert authentication was not independently captured at its dispatch time.",
+  "routing_changed": false
+}

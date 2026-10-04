@@ -1,0 +1,209 @@
+diff --git a/environments/linux/install.sh b/environments/linux/install.sh
+index fdff7ec..2b73958 100644
+--- a/environments/linux/install.sh
++++ b/environments/linux/install.sh
+@@ -59,7 +59,17 @@ CODEX_STANDALONE_ROOT="$CODEX_HOME/packages/standalone"
+ GCM_WINDOWS_PATH="${ADT_GCM_PATH:-/mnt/c/Program Files/Git/mingw64/bin/git-credential-manager.exe}"
+ GIT_CREDENTIAL_WRAPPER="${GIT_CREDENTIAL_WRAPPER:-$HOME/.local/bin/git-credential-manager-wsl}"
+ 
+-export PATH="$HOME/.local/bin:$HOME/bin:$HOME/.opencode/bin:$PATH"
++# Prepend in reverse priority, preserving every existing PATH entry.
++for managed_bin in "$HOME/.opencode/bin" "$HOME/bin" "$HOME/.local/bin"; do
++  if [[ -d "$managed_bin" ]]; then
++    case ":$PATH:" in
++      *:"$managed_bin":*) ;;
++      *) PATH="$managed_bin:$PATH" ;;
++    esac
++  fi
++done
++unset managed_bin
++export PATH
+ 
+ TEMP_PATHS=()
+ DOWNLOADED_INSTALLER=""
+@@ -370,7 +380,7 @@ ensure_shell_configuration() {
+   local bashrc="$HOME/.bashrc"
+   local start_marker='# >>> agentic-dev-toolkit >>>'
+   local end_marker='# <<< agentic-dev-toolkit <<<'
+-  local temp_file backup_file
++  local temp_file backup_file managed_bin
+ 
+   log "Configuring Bash PATH, mise, and direnv activation"
+ 
+@@ -393,7 +403,16 @@ ensure_shell_configuration() {
+   cat >> "$temp_file" <<'EOF_BASHRC'
+ 
+ # >>> agentic-dev-toolkit >>>
+-export PATH="$HOME/.local/bin:$HOME/bin:$HOME/.opencode/bin:$PATH"
++for managed_bin in "$HOME/.opencode/bin" "$HOME/bin" "$HOME/.local/bin"; do
++  if [[ -d "$managed_bin" ]]; then
++    case ":$PATH:" in
++      *:"$managed_bin":*) ;;
++      *) PATH="$managed_bin:$PATH" ;;
++    esac
++  fi
++done
++unset managed_bin
++export PATH
+ export OPENCODE_ENABLE_EXA=true
+ if [[ -x "$HOME/.local/bin/mise" ]]; then
+   eval "$("$HOME/.local/bin/mise" activate bash)"
+@@ -410,7 +429,15 @@ EOF_BASHRC
+     rm -f "$temp_file"
+   fi
+ 
+-  export PATH="$HOME/.local/bin:$HOME/bin:$HOME/.opencode/bin:$PATH"
++  for managed_bin in "$HOME/.opencode/bin" "$HOME/bin" "$HOME/.local/bin"; do
++    if [[ -d "$managed_bin" ]]; then
++      case ":$PATH:" in
++        *:"$managed_bin":*) ;;
++        *) PATH="$managed_bin:$PATH" ;;
++      esac
++    fi
++  done
++  export PATH
+ }
+ 
+ install_mise() {
+diff --git a/tests/install.sh b/tests/install.sh
+index 45cf219..0a38cb7 100644
+--- a/tests/install.sh
++++ b/tests/install.sh
+@@ -105,6 +105,120 @@ test_shell_configuration_enables_direnv() {
+   HOME="$original_home"
+ }
+ 
++assert_managed_path() (
++  local site="$1" initial="$2" expected="$3"
++  local system_path="$PATH" bash_bin
++  bash_bin="$(command -v bash)"
++
++  if [[ "$site" == bootstrap ]]; then
++    local actual
++    actual="$("$bash_bin" -c 'PATH="$2"; source "$1"; printf "%s" "$PATH"' \
++      bash "$TEMP_DIR/install-functions.sh" "$initial")"
++    assert_equal "$actual" "$expected" "$site managed PATH"
++    actual="$("$bash_bin" -c 'PATH="$2"; source "$1"; printf "%s" "$PATH"' \
++      bash "$TEMP_DIR/install-functions.sh" "$actual")"
++    assert_equal "$actual" "$expected" "$site repeated managed PATH"
++    return
++  fi
++
++  # Keep file-management commands available even when testing an empty PATH.
++  mkdir() { PATH="$system_path" command mkdir "$@"; }
++  touch() { PATH="$system_path" command touch "$@"; }
++  mktemp() { PATH="$system_path" command mktemp "$@"; }
++  awk() { PATH="$system_path" command awk "$@"; }
++  cat() { PATH="$system_path" command cat "$@"; }
++  cmp() { PATH="$system_path" command cmp "$@"; }
++  cp() { PATH="$system_path" command cp "$@"; }
++  mv() { PATH="$system_path" command mv "$@"; }
++  rm() { PATH="$system_path" command rm "$@"; }
++  direnv() { printf ':\n'; }
++
++  PATH="$initial"
++  local activation
++  for activation in 1 2; do
++    if [[ "$site" == refresh ]]; then
++      ensure_shell_configuration >/dev/null
++    else
++      # shellcheck disable=SC1091
++      source "$HOME/.bashrc"
++    fi
++    assert_equal "$PATH" "$expected" "$site managed PATH activation $activation"
++  done
++)
++
++test_managed_path_guards_at_all_sites() (
++  local site initial managed
++  DRY_RUN=0
++  for site in bootstrap refresh bashrc; do
++    HOME="$TEMP_DIR/path $site [literal]"
++    export HOME
++    mkdir -p "$HOME"
++
++    # The refresh intentionally creates .local/bin before updating PATH.
++    if [[ "$site" == bashrc ]]; then
++      ( ensure_shell_configuration >/dev/null )
++      rmdir "$HOME/.local/bin"
++    fi
++    if [[ "$site" == refresh ]]; then
++      assert_managed_path "$site" '/usr/bin::/bin:' "$HOME/.local/bin:/usr/bin::/bin:"
++    else
++      assert_managed_path "$site" '/usr/bin::/bin:' '/usr/bin::/bin:'
++    fi
++
++    mkdir -p "$HOME/.local/bin" "$HOME/.opencode"
++    touch "$HOME/bin" "$HOME/.opencode/bin"
++    assert_managed_path "$site" '/usr/bin:/bin' "$HOME/.local/bin:/usr/bin:/bin"
++    rm "$HOME/bin" "$HOME/.opencode/bin"
++    mkdir -p "$HOME/bin" "$HOME/.opencode/bin"
++    managed="$HOME/.local/bin:$HOME/bin:$HOME/.opencode/bin"
++
++    assert_managed_path "$site" '/usr/bin:/bin' "$managed:/usr/bin:/bin"
++    assert_managed_path "$site" '' "$managed:"
++
++    initial="$HOME/bin:/usr/bin:$HOME/.opencode/bin::$HOME/.local/bin:$HOME/bin:"
++    assert_managed_path "$site" "$initial" "$initial"
++    initial="/usr/bin:$HOME/bin:/bin"
++    assert_managed_path "$site" "$initial" "$HOME/.local/bin:$HOME/.opencode/bin:$initial"
++
++    # Similar prefixes, suffixes, and trailing slashes are not exact entries.
++    initial="$HOME/.local/bin-extra:/prefix$HOME/bin:$HOME/.opencode/bin/"
++    assert_managed_path "$site" "$initial" "$managed:$initial"
++  done
++)
++
++test_shell_configuration_preserves_profile_and_backup() (
++  HOME="$TEMP_DIR/path-profile-backup"
++  DRY_RUN=0
++  mkdir -p "$HOME"
++  printf '%s\n' '# existing profile' > "$HOME/.bashrc"
++  ensure_shell_configuration >/dev/null
++  assert_equal "$(<"$HOME/.bashrc.pre-agentic-dev-toolkit")" '# existing profile' "original profile backup"
++  local profile
++  profile="$(<"$HOME/.bashrc")"
++  [[ "$profile" == '# existing profile'* ]] || fail "existing profile must be preserved"
++  [[ "$profile" == *'mise" activate bash)'* ]] || fail "mise activation must be preserved"
++  assert_equal "$(grep -c '^# >>> agentic-dev-toolkit >>>$' "$HOME/.bashrc")" 1 "managed start marker"
++  assert_equal "$(grep -c '^# <<< agentic-dev-toolkit <<<$' "$HOME/.bashrc")" 1 "managed end marker"
++  ensure_shell_configuration >/dev/null
++  assert_equal "$(<"$HOME/.bashrc.pre-agentic-dev-toolkit")" '# existing profile' "backup must not be replaced"
++)
++
++test_shell_configuration_dry_run_does_not_mutate() (
++  HOME="$TEMP_DIR/path-dry-run"
++  DRY_RUN=1
++  local original_path="$PATH"
++  ensure_shell_configuration >/dev/null
++  assert_equal "$PATH" "$original_path" "dry-run must not refresh PATH"
++  [[ ! -e "$HOME" ]] || fail "dry-run must not create HOME or shell configuration"
++
++  mkdir -p "$HOME"
++  printf '%s\n' '# untouched profile' > "$HOME/.bashrc"
++  ensure_shell_configuration >/dev/null
++  assert_equal "$(<"$HOME/.bashrc")" '# untouched profile' "dry-run must preserve existing profile"
++  [[ ! -e "$HOME/.bashrc.pre-agentic-dev-toolkit" ]] || fail "dry-run must not create a backup"
++  [[ ! -e "$HOME/.local" ]] || fail "dry-run must not create managed directories"
++)
++
+ test_project_configuration_creates_direnv_file_when_missing() {
+   local project_root="$TEMP_DIR/project-with-direnv"
+   PROJECT_PATH="$project_root"
+@@ -981,7 +1095,16 @@ test_git_credential_wrapper_is_valid_shell_and_rewritten_on_change() {
+ 
+ TEMP_DIR="$(mktemp -d)"
+ test_claude_template_resolves_after_copying_to_project_root
++# Bootstrap is also exercised under a disposable HOME.
++HOME="$TEMP_DIR/initial-home"
++export HOME
+ load_installer_functions
++# Non-credential tests must not depend on whether the host is WSL.
++# shellcheck disable=SC2034
++ADT_FORCE_WSL=0
++test_managed_path_guards_at_all_sites
++test_shell_configuration_preserves_profile_and_backup
++test_shell_configuration_dry_run_does_not_mutate
+ test_lttng_selector_prefers_time64_package_when_available
+ test_lttng_selector_falls_back_to_legacy_package
+ test_dry_run_does_not_probe_apt_package_metadata

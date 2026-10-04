@@ -1,0 +1,19 @@
+The acceptance test already exists. I'll confirm it fails before writing any code (RED).
+The test fails because `reverse` doesn't exist yet, which is what I expected. Next I'll write the code to make it pass (GREEN):
+I added `reverse` to `lib/strings.sh`. Both test scripts pass: `tests/acceptance.sh` checks `reverse abc` → `cba`, and `tests/regression.sh` checks that `upper` still works.
+
+```bash
+reverse() {
+  local s=$1 out='' i
+  for ((i = ${#s} - 1; i >= 0; i--)); do
+    out+=${s:i:1}
+  done
+  printf '%s\n' "$out"
+}
+```
+
+- **Test first:** `tests/acceptance.sh` already existed. I ran it before writing any code and it failed (exit 1) because `reverse` wasn't defined. After adding the function it exits 0.
+- **Other inputs I tried by hand:** an empty string prints an empty line, spaces are kept (`"a b  c"` → `"c  b a"`), and with a UTF-8 locale accented characters reverse correctly (`héllo` → `olléh`).
+- **Files left alone:** `README.md` has the same checksum as before, and `upper` is unchanged.
+
+The function is pure bash and doesn't call `rev` or any other outside command.

@@ -1,0 +1,14 @@
+{
+  "evidence_mechanism": "resolved_permission_and_inventory",
+  "candidate_dispatches": 0,
+  "task_actions": {
+    "build": "deny",
+    "plan": "deny",
+    "general": "deny",
+    "breakglass": "deny"
+  },
+  "breakglass_model": "openai/gpt-6.1-sol",
+  "variant": "max",
+  "mode": "primary",
+  "non_exposure": true
+}

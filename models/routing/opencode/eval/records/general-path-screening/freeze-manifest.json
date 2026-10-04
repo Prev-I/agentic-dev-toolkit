@@ -1,0 +1,73 @@
+{
+  "status": "AWAITING_APPROVAL",
+  "files": [
+    {
+      "path": "records/general-path-screening/protocol.json",
+      "sha256": "adac1a56269f3faa5e6230499cced628e41e20832a78943e1d959e6cbe7aeeab"
+    },
+    {
+      "path": "records/general-path-screening/catalog-snapshot.json",
+      "sha256": "48f6b07491d108ed5af8dd5c2b32381cbef35aa95a485db4ee54ed1aee61bb83"
+    },
+    {
+      "path": "records/general-path-screening/freeze-inputs.py",
+      "sha256": "21b568a26d8f440ee74da53adde4263b0e4fdfcdf21630f631c4450c57900c49"
+    },
+    {
+      "path": "records/gpt61-sol-build-screening/coding-prompt.txt",
+      "sha256": "1c19ed6a6d00f2d3f855fff69661c5575e4bbddf04221b406a4a218cba0faf89"
+    },
+    {
+      "path": "records/astra-build-followup/oracle.sh",
+      "sha256": "aff6bd94843ea1da921549aa380bb49c2bcdc3915a8e8d47d7ca3b8a720278a1"
+    },
+    {
+      "path": "records/sol-build/empty-path-check.sh",
+      "sha256": "0c4d5328f9799282e83e2d672ee00bd1c93f9ae57bb6800258ee52d8c38be6c5"
+    },
+    {
+      "path": "records/opus55-gpt61-build-quality-screening/verify-results-v2.py",
+      "sha256": "986d48dc27886bd8b77c15ef22f1c71ced67ee2fffd65b821022d7d6c2f9c4fe"
+    },
+    {
+      "path": "records/opus55-gpt61-build-quality-screening/verify-results-v2.sh",
+      "sha256": "11711e2cdbd7c375f53b3ea570834ed787a60ff67ea3177188f78a3de20c1aeb"
+    },
+    {
+      "path": "records/astra-build-followup/base-snapshot/environments/linux/install.sh",
+      "sha256": "c552aaebf314bb4df25c2e32cf30ec2dd6cae9da0ae5ccd551c1e8db583ca0a7"
+    },
+    {
+      "path": "records/astra-build-followup/base-snapshot/instructions/adapters/claude-code/CLAUDE.md",
+      "sha256": "336cc4fbf19beaada7ccf9986414fa91851a8d7a07dfb3ccbe800a69eed0ab49"
+    },
+    {
+      "path": "records/astra-build-followup/base-snapshot/tests/install.sh",
+      "sha256": "371b01ecc1980ad6090a2952fe433fd024ed6d48add82ae0b93ac9dd697cecfb"
+    },
+    {
+      "path": "records/opus55-gpt61-build-quality-screening/runs/01-coding-1-opus55/dispatch/raw.jsonl",
+      "sha256": "04872f8694b5d174eb57463a3c2b4a6626730937e29c9c4a6e8f360d4edfb424"
+    },
+    {
+      "path": "records/opus55-gpt61-build-quality-screening/runs/02-coding-1-sol61/dispatch/raw.jsonl",
+      "sha256": "1e13d8745f5603b166dec1933f05316a994fa22f61c94b9385706ad8bd59629e"
+    },
+    {
+      "path": "records/opus55-gpt61-build-quality-screening/runs/03-coding-2-sol61/dispatch/raw.jsonl",
+      "sha256": "3eb738b6fd476db864c9dcdd765c95a7540852a4db16b80a9e82de5790ffa92c"
+    },
+    {
+      "path": "records/opus55-gpt61-build-quality-screening/runs/04-coding-2-opus55/dispatch/raw.jsonl",
+      "sha256": "61e2eca780c4fd4bb1b1bacda01d7bcce5d632921bb71a9f73477766094e4993"
+    },
+    {
+      "path": "records/opus55-gpt61-build-quality-screening/runs/05-coding-3-opus55/dispatch/raw.jsonl",
+      "sha256": "188bc3f13d4fe845e46cca566b558090be432378b2510455d3b3e09c6660593b"
+    },
+    {
+      "path": "records/opus55-gpt61-build-quality-screening/runs/06-coding-3-sol61/dispatch/raw.jsonl",
+      "sha256": "d3d165f356e49ba5441246e9bda410b2a0a498d204056c48efd4ed90c788c9e9"
+    }
+  ]
+}

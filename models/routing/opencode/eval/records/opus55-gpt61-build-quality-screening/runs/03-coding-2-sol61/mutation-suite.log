@@ -1,0 +1,5 @@
+FAIL: repeated current-process refresh: expected '/tmp/tmp.WH0uKtWlvs/path home [literal]/.local/bin:/tmp/tmp.WH0uKtWlvs/path home [literal]/bin:/tmp/tmp.WH0uKtWlvs/path home [literal]/.opencode/bin:/usr/bin:/bin', got '/tmp/tmp.WH0uKtWlvs/path home [literal]/.local/bin:/tmp/tmp.WH0uKtWlvs/path home [literal]/bin:/tmp/tmp.WH0uKtWlvs/path home [literal]/.opencode/bin:/tmp/tmp.WH0uKtWlvs/path home [literal]/.local/bin:/tmp/tmp.WH0uKtWlvs/path home [literal]/bin:/tmp/tmp.WH0uKtWlvs/path home [literal]/.opencode/bin:/usr/bin:/bin'
+
+ERROR: setup failed near line 141 (exit code 1).
+
+ERROR: setup failed near line 162 (exit code 1).

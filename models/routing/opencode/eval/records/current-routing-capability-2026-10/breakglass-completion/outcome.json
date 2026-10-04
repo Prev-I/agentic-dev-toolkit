@@ -1,0 +1,22 @@
+{
+  "result": "PASS",
+  "model": "openai/gpt-6.1-sol",
+  "requested_variant": "max",
+  "agent": "breakglass-capability-only",
+  "task_dispatches": 0,
+  "calls": 1,
+  "derived_credits": null,
+  "accounting_basis": "subscription quota, not metered consumption spend",
+  "tokens": {
+    "total": 9650,
+    "input": 9589,
+    "output": 9,
+    "reasoning": 52,
+    "cache": {
+      "write": 0,
+      "read": 0
+    }
+  },
+  "role_fitness_established": false,
+  "routing_changed": false
+}

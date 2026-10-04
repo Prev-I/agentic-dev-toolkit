@@ -1,0 +1,35 @@
+{
+  "timestamp": "2026-10-04T06:41:35.300380+02:00",
+  "label": "coding-3-sol61",
+  "attempt": 3,
+  "routing_profile_id": "direct-model-evaluation",
+  "routing_profile_commit": "97a8e8740b404384ba950dabe199f12c1caaccd5",
+  "runtime_version": "1.18.32",
+  "eval_runner_version": "phase-r-dispatch-v2",
+  "environment": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+  "dispatch_target": "github-copilot/gpt-6.1-sol",
+  "variant": "high",
+  "timeout_seconds": 480,
+  "exit_status": 0,
+  "classification": "OK",
+  "failure_class": null,
+  "provider_error_text": null,
+  "provider_status_code": null,
+  "observed_cost": 0.25004790000000005,
+  "derived_credits": 25.004790000000003,
+  "normalized_steady_state_cost": null,
+  "tokens": {
+    "total": 52017,
+    "input": 268,
+    "output": 135,
+    "reasoning": 0,
+    "cache": {
+      "write": 0,
+      "read": 51614
+    }
+  },
+  "wall_clock_ms": 128545,
+  "retry_count": 0,
+  "raw_evidence": "raw.jsonl",
+  "decides_gate_outcome": false
+}

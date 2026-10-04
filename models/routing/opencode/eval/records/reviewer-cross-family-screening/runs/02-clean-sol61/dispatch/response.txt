@@ -1,0 +1,1 @@
+{"findings":[{"file":"counter.sh","severity":"material","summary":"A failed counter read is ignored, allowing an unreadable but writable counter to be overwritten with 1 while the function reports success.","evidence":"n=$(<\"$1\"); printf \"%s\\n\" \"$((n+1))\" >\"$1\""}]}

@@ -1,0 +1,12 @@
+{
+  "patch_apply_status": 0,
+  "oracle_status": 0,
+  "empty_path_status": 0,
+  "immutable_suite_status": 1,
+  "candidate_suite_status": 1,
+  "syntax_status": 0,
+  "mutation_status": 1,
+  "mutation_classification": "BEHAVIORAL_ASSERTION",
+  "protected_scope_status": 0,
+  "valid_coding_pass": false
+}

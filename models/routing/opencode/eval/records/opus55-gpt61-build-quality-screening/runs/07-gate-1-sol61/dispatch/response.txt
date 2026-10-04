@@ -1,0 +1,5 @@
+Using brainstorming for this bounded change: I’ll check the shell-library conventions, then present a short design for approval.
+
+I’ll add `reverse` to `lib/strings.sh` using Bash substring indexing, printing the reversed string followed by a newline, consistent with `upper`. I’ll leave `README.md` and `upper` unchanged and verify the existing tests plus empty strings, spaces, and punctuation.
+
+Does this design look good?

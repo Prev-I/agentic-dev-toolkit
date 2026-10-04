@@ -1,0 +1,103 @@
+{
+  "caps": {
+    "current_routing_capability": 150
+  },
+  "subscription_account": {
+    "name": "openai_subscription",
+    "provider": "openai",
+    "unit": "calls",
+    "unit_definition": "primary probe dispatches, not all provider requests; auxiliary title requests are recorded separately",
+    "accounting_basis": "subscription quota, not metered consumption spend",
+    "derived_credits_null_allowed": true,
+    "allowance": {
+      "id": "breakglass-successful-call-completion",
+      "ceiling_calls": 1,
+      "historical_calls_excluded": true,
+      "authorization": "Explicit user confirmation: the one-call ceiling applies only to the new Breakglass probe; Expert is historical usage in the same account."
+    },
+    "auxiliary_requests": [
+      {"parent_probe": "expert-capability", "scope": "historical", "provider": "openai", "model": "gpt-6-astra", "agent": "title", "provider_requests": 1, "tokens": null, "cost": null, "source": "breakglass-completion/auxiliary-request-evidence.json"},
+      {"parent_probe": "breakglass-capability", "scope": "new_allowance", "provider": "github-copilot", "model": "gpt-6-luna", "agent": "title", "provider_requests": 1, "tokens": null, "cost": null, "source": "breakglass-completion/auxiliary-request-evidence.json"}
+    ],
+    "entries": [
+      {
+        "label": "expert-capability",
+        "recorded_retroactively": true,
+        "scope": "historical",
+        "calls": 1,
+        "dispatch": "probes/expert/dispatch.json",
+        "original_timestamp": "2026-10-04T09:56:51.706693+02:00",
+        "derived_credits": null,
+        "runtime_reported_cost": 0,
+        "tokens": {
+          "total": 927,
+          "input": 905,
+          "output": 9,
+          "reasoning": 13,
+          "cache": {
+            "write": 0,
+            "read": 0
+          }
+        }
+      },
+      {
+        "label": "breakglass-capability",
+        "scope": "new_allowance",
+        "calls": 1,
+        "status": "PASS",
+        "timestamp": "2026-10-04T10:44:52.582612+02:00",
+        "derived_credits": null,
+        "tokens": {
+          "total": 9650,
+          "input": 9589,
+          "output": 9,
+          "reasoning": 52,
+          "cache": {
+            "write": 0,
+            "read": 0
+          }
+        },
+        "dispatch": "breakglass-completion/dispatch/dispatch.json",
+        "runtime_reported_cost": 0,
+        "dispatch_timestamp": "2026-10-04T10:45:02.548970+02:00"
+      }
+    ]
+  },
+  "entries": [
+    {
+      "timestamp": "2026-10-04T09:56:26.761247+02:00",
+      "account": "current_routing_capability",
+      "label": "plan-capability",
+      "provider": "github-copilot",
+      "credits": 1.3711
+    },
+    {
+      "timestamp": "2026-10-04T09:56:31.673494+02:00",
+      "account": "current_routing_capability",
+      "label": "general-capability",
+      "provider": "github-copilot",
+      "credits": 0.1888
+    },
+    {
+      "timestamp": "2026-10-04T09:56:36.234478+02:00",
+      "account": "current_routing_capability",
+      "label": "compaction-capability",
+      "provider": "github-copilot",
+      "credits": 0.68655
+    },
+    {
+      "timestamp": "2026-10-04T09:56:40.890587+02:00",
+      "account": "current_routing_capability",
+      "label": "title-capability",
+      "provider": "github-copilot",
+      "credits": 0.00942
+    },
+    {
+      "timestamp": "2026-10-04T09:56:45.231551+02:00",
+      "account": "current_routing_capability",
+      "label": "summary-capability",
+      "provider": "github-copilot",
+      "credits": 0.00942
+    }
+  ]
+}

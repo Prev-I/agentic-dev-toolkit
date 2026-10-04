@@ -1,0 +1,38 @@
+Using test-driven-development to drive this fix with regression tests first.
+Baseline first.
+Checking whether `hash -p` can resolve commands while PATH is empty (needed to exercise the refresh site with an empty PATH):
+`hash -p` works with empty PATH, and reassigning PATH clears it (so I re-hash per activation). shellcheck isn't usable on this machine (mise shim has no version), so I'll rely on `bash -n`.
+Run the suite to see RED, then run each new test individually so I can see how each one fails:
+The bootstrap site now passes and the bashrc site fails as expected. Next, the managed block:
+Now the refresh site:
+All green. One last check: does the suite leave its temp directories behind? (The sourced installer redefines `cleanup` and the EXIT trap.)
+The installer now adds each managed directory to PATH only if the directory exists and isn't already an exact PATH entry. This works at all three sites, and the full test suite passes.
+
+## What changed in `environments/linux/install.sh`
+- **New helper `prepend_managed_path_directories`** (defined just before the bootstrap): it goes through `.opencode/bin`, `bin`, `.local/bin` in that order and puts each one at the front of PATH if `[[ -d dir ]]` is true and `":${PATH-}:" != *":$dir:"*`. Going through the list backwards keeps `.local/bin` → `bin` → `.opencode/bin` → original PATH when all three are added. Existing entries are never touched, so an empty PATH becomes `…/.local/bin:…/bin:…/.opencode/bin:`. The directory is quoted inside the pattern, so paths with spaces or glob characters are compared literally.
+- **Bootstrap**: the unconditional `export PATH=…` is replaced by a call to the helper.
+- **Managed `.bashrc` block**: the same loop is written inline, since `.bashrc` can't call installer functions. Its loop variable is `__adt_path_dir` and is unset afterwards. The block markers, `OPENCODE_ENABLE_EXA`, mise activation, direnv hook, backup and dry-run early-return are unchanged.
+- **Refresh at the end of `ensure_shell_configuration`**: now calls the helper.
+- `main "$@"` is still the last line.
+
+## Tests added to `tests/install.sh`
+`path_after_site` runs each case against all three sites. Every test uses a throwaway HOME whose name contains spaces:
+- **Bootstrap:** the sourced function file runs under `env -i`, in a new process for each activation.
+- **`.bashrc` block:** the block is generated, then sourced with `direnv` stubbed out.
+- **Refresh:** `ensure_shell_configuration` runs in a subshell with its commands pre-loaded via `hash -p`, so it still works when PATH is empty.
+
+Cases covered:
+- all three added in priority order
+- empty PATH keeps its empty entry
+- a missing directory (or a regular file named `bin`) is skipped
+- exact entries are skipped, while near-misses (`bin/`, `bin-old`), empty middle entries and existing duplicates are kept as they are
+- three activations produce no duplicates
+- dry-run leaves PATH, `.bashrc` and `.local` untouched
+- a re-run keeps one pair of markers, keeps user content and mise activation, and backs up the original once
+
+## Verification
+- **Red:** before the change, the missing-directory, exact-entry and repeat-activation tests failed at the bootstrap site. After each site was fixed, they failed at the next site (`.bashrc` block, then refresh) until all three were done. The priority, empty-PATH, dry-run and block tests passed from the start, which is expected because they protect behavior that must stay the same.
+- **Green:** `bash -n` passes for both files, and `setsid bash tests/install.sh < /dev/null` prints `PASS: installer compatibility tests` with exit 0.
+- **Not run:** shellcheck. The mise shim here has no version set, so it errors out.
+
+**Existing test problem I didn't fix:** each test run leaves about 7 `/tmp/tmp.*` entries behind. This happens because the sourced installer replaces the test file's `cleanup` function and its EXIT trap. It's outside the scope of this task, so I left it alone.

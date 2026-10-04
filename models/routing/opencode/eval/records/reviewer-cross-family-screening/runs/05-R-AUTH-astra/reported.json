@@ -1,0 +1,10 @@
+{
+  "findings": [
+    {
+      "file": "authorization.sh",
+      "severity": "blocking",
+      "summary": "read_resource returns the resource value without checking the caller against the owner, allowing unauthorized callers to read another owner's resource.",
+      "evidence": "read_resource() { local caller=$1 owner=$2 value=$3; printf '%s\\n' \"$value\"; }"
+    }
+  ]
+}

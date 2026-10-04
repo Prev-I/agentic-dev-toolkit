@@ -1,0 +1,35 @@
+{
+  "timestamp": "2026-10-04T06:13:45.466325+02:00",
+  "label": "reviewer-R-API-astra",
+  "attempt": 1,
+  "routing_profile_id": "unresolved-runtime-profile",
+  "routing_profile_commit": "97a8e8740b404384ba950dabe199f12c1caaccd5",
+  "runtime_version": "1.18.32",
+  "eval_runner_version": "phase-r-dispatch-v2",
+  "environment": "Linux 6.18.33.2-microsoft-standard-WSL2 x86_64",
+  "dispatch_target": "agent:reviewer-astra",
+  "variant": "resolved",
+  "timeout_seconds": 480,
+  "exit_status": 0,
+  "classification": "OK",
+  "failure_class": null,
+  "provider_error_text": null,
+  "provider_status_code": null,
+  "observed_cost": 0.08896599999999999,
+  "derived_credits": 8.8966,
+  "normalized_steady_state_cost": null,
+  "tokens": {
+    "total": 4485,
+    "input": 194,
+    "output": 65,
+    "reasoning": 47,
+    "cache": {
+      "write": 0,
+      "read": 4179
+    }
+  },
+  "wall_clock_ms": 18500,
+  "retry_count": 0,
+  "raw_evidence": "raw.jsonl",
+  "decides_gate_outcome": false
+}

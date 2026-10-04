@@ -1,0 +1,106 @@
+{
+  "caps": {
+    "build_opus55": 482.54596,
+    "build_sol61": 123.88901
+  },
+  "entries": [
+    {
+      "timestamp": "2026-10-04T06:22:29.852724+02:00",
+      "account": "build_opus55",
+      "label": "build-quality-opus55-capability",
+      "provider": "github-copilot",
+      "credits": 6.368600000000001
+    },
+    {
+      "timestamp": "2026-10-04T06:22:44.038331+02:00",
+      "account": "build_sol61",
+      "label": "build-quality-sol61-capability",
+      "provider": "github-copilot",
+      "credits": 1.6581
+    },
+    {
+      "timestamp": "2026-10-04T06:27:22.554332+02:00",
+      "account": "build_opus55",
+      "label": "coding-1-opus55",
+      "provider": "github-copilot",
+      "credits": 117.11448000000001
+    },
+    {
+      "timestamp": "2026-10-04T06:29:59.710425+02:00",
+      "account": "build_sol61",
+      "label": "coding-1-sol61",
+      "provider": "github-copilot",
+      "credits": 27.218980000000002
+    },
+    {
+      "timestamp": "2026-10-04T06:31:59.859379+02:00",
+      "account": "build_sol61",
+      "label": "coding-2-sol61",
+      "provider": "github-copilot",
+      "credits": 25.05121
+    },
+    {
+      "timestamp": "2026-10-04T06:36:08.548260+02:00",
+      "account": "build_opus55",
+      "label": "coding-2-opus55",
+      "provider": "github-copilot",
+      "credits": 116.01914000000002
+    },
+    {
+      "timestamp": "2026-10-04T06:39:25.878687+02:00",
+      "account": "build_opus55",
+      "label": "coding-3-opus55",
+      "provider": "github-copilot",
+      "credits": 100.9133
+    },
+    {
+      "timestamp": "2026-10-04T06:41:35.246193+02:00",
+      "account": "build_sol61",
+      "label": "coding-3-sol61",
+      "provider": "github-copilot",
+      "credits": 25.004790000000003
+    },
+    {
+      "timestamp": "2026-10-04T06:42:01.766020+02:00",
+      "account": "build_sol61",
+      "label": "gate-1-sol61",
+      "provider": "github-copilot",
+      "credits": 4.21474
+    },
+    {
+      "timestamp": "2026-10-04T06:42:25.223628+02:00",
+      "account": "build_opus55",
+      "label": "gate-1-opus55",
+      "provider": "github-copilot",
+      "credits": 10.86346
+    },
+    {
+      "timestamp": "2026-10-04T06:42:52.776802+02:00",
+      "account": "build_opus55",
+      "label": "gate-2-opus55",
+      "provider": "github-copilot",
+      "credits": 14.22176
+    },
+    {
+      "timestamp": "2026-10-04T06:43:19.281047+02:00",
+      "account": "build_sol61",
+      "label": "gate-2-sol61",
+      "provider": "github-copilot",
+      "credits": 4.50042
+    },
+    {
+      "timestamp": "2026-10-04T06:43:46.831421+02:00",
+      "account": "build_sol61",
+      "label": "gate-3-sol61",
+      "provider": "github-copilot",
+      "credits": 4.841209999999999
+    },
+    {
+      "timestamp": "2026-10-04T06:44:16.437287+02:00",
+      "account": "build_opus55",
+      "label": "gate-3-opus55",
+      "provider": "github-copilot",
+      "credits": 11.855640000000001
+    }
+  ]
+}

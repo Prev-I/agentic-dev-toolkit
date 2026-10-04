@@ -1,0 +1,58 @@
+{
+  "experiment_id": "general-path-screening-20261004",
+  "status_at_freeze": "AWAITING_APPROVAL",
+  "evidence_level": "screening",
+  "provider": "github-copilot",
+  "runtime_version": "1.18.32",
+  "models": [
+    {"key": "sol61", "id": "github-copilot/gpt-6.1-sol", "variant": "medium", "role": "incumbent"},
+    {"key": "sonnet55", "id": "github-copilot/claude-sonnet-5.5", "variant": "high", "role": "challenger"},
+    {"key": "grok47", "id": "github-copilot/grok-4.7", "variant": "high", "role": "challenger"}
+  ],
+  "role_contract": "General executes a previously approved plan. Implementation is pre-authorized. A request to stop for approval counts as non-completion, not as general coding inability.",
+  "workload": {
+    "base_snapshot": "records/astra-build-followup/base-snapshot",
+    "prompt": "records/gpt61-sol-build-screening/coding-prompt.txt",
+    "oracle": "records/astra-build-followup/oracle.sh",
+    "empty_path_oracle": "records/sol-build/empty-path-check.sh",
+    "verifier": "records/opus55-gpt61-build-quality-screening/verify-results-v2.py",
+    "positive_control": "55da937fb7233717c9924aa59c1e36773afbde29",
+    "negative_control": "7605022b86dd9f4040f272cca59224f2e568a943",
+    "attempts_per_model": 3,
+    "gate_workload": false
+  },
+  "order": [
+    "path-1-sol61", "path-1-sonnet55", "path-1-grok47",
+    "path-2-sonnet55", "path-2-grok47", "path-2-sol61",
+    "path-3-grok47", "path-3-sol61", "path-3-sonnet55"
+  ],
+  "decision_precedence": [
+    "coding correctness and protected-scope preservation",
+    "regression-test sensitivity and quality",
+    "approved-plan completion (approval stop is non-completion)",
+    "human correction required",
+    "latency and observed credits"
+  ],
+  "verification": "Before any dispatch, reference must pass immutable and reference suites, both oracles and syntax; reference tests against the broken installer must fail through a PATH behavioral assertion. Use the explicit verifier-v2 interpreter and fixed cwd. For every submitted patch run both oracles, immutable suite, candidate suite, mutation, separate syntax and scope checks in the same environment. HARNESS_ERROR and infrastructure failures are INVALID, not model failures.",
+  "dispatch_contract": "Design only: no executable dispatch runner is supplied. A future execution must use isolated primary copies of General to avoid subagent fallback, resolved model/variant/permission captures, neutral external no-history workspaces, ledger_admit and ledger_spent, completed-step budget stops, no retries, and refuse any fallback warning or unknown cost. Execution implementation and approval must bind the freeze before any model call.",
+  "timeout_seconds_per_attempt": 480,
+  "retry_policy": "No retries or replacement attempts.",
+  "budget": {
+    "proposed_ceiling_credits": 765,
+    "probe_projection": {"sol61": 8, "sonnet55": 10, "grok47": 20},
+    "coding_projection_per_attempt": {"sol61": 54.66834, "sonnet55": 67.00584, "grok47": 96.20010},
+    "arm_admission_caps": {"sol61": 172.00502, "sonnet55": 211.01752, "grok47": 308.60030},
+    "admission_total": 691.62284,
+    "reporting_lag_reserve_per_arm": 23.341875,
+    "reporting_lag_reserve_total": 70.025625,
+    "protected_total": 761.648465,
+    "source_ledger": "records/opus55-gpt61-build-quality-screening/ledger.json",
+    "source_events": "records/opus55-gpt61-build-quality-screening/runs/*-coding-*/dispatch/raw.jsonl",
+    "derivation": "Replay every step_finish token record from the six retained PATH attempts at current prices. Credits = 100/1e6 * [(input + cache.write)*input_price + (output + reasoning)*output_price + cache.read*read_price]. Charge foreign-provider cache-write tokens as ordinary input rather than assuming free writes. Take the maximum replayed attempt for each target and add three attempts plus the stated probe admission. Add three historical PATH lag reserves and round the protected total up to 765.",
+    "caveat": "Repricing is a counterfactual workload projection, not a measured cost for the General role or a prediction of model token behavior. Source Sol attempts used high, not medium; Sonnet and Grok have no fresh PATH measurement here. Probes use conservative prior admission allowances, not invented probe means. Soft ceiling counts observed completed steps; crossing and unreported steps can exceed the lag reserve. Stop all dispatches on a budget stop."
+  },
+  "preregistered_outcomes": ["KEEP_INCUMBENT", "SONNET_CREDIBLE_CANDIDATE", "GROK_CREDIBLE_CANDIDATE", "BOTH_CHALLENGERS_CREDIBLE", "INVALID_OR_INCOMPLETE"],
+  "decision_rule": "A challenger is credible only with three completed, correct, in-scope attempts, behavioral mutation detections, no regression against the incumbent on prior criteria and no additional human correction. Quality or completion deficits cannot be offset by efficiency. Ties are reported explicitly; no automatic promotion.",
+  "automatic_routing_change": false,
+  "limitations": ["One historical workload repeated three times is not broad General reliability evidence.", "Prior training or fixture exposure cannot be excluded.", "Retrospective Build diagnostics do not validate historical coding passes.", "No runner or model call is authorized by this design freeze.", "The referenced verifier currently reads only retained Build patches, lacks a protected-scope check and per-check timeout, and uses a broad PATH-failure classifier. It must be extended, tested and refrozen for General before any execution approval; this changes the bound hashes.", "The catalog snapshot is transcribed from discovery output. Tests compare against that snapshot, not a live provider. Probe projections and reporting-lag reserves are explicit historical control-policy values; only workload token repricing is independently recomputed."]
+}

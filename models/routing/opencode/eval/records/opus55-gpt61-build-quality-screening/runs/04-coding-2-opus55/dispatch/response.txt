@@ -1,0 +1,40 @@
+Using test-driven-development to drive this fix (brainstorming pause skipped per explicit authorization).
+Baseline green. Shellcheck isn't configured on this machine (mise shim has no version); I won't change global mise config to enable it.
+Now the RED tests. Writing helpers that exercise each of the three sites in an isolated child process / subshell with a disposable HOME and an exact PATH.
+Scratch-file writes outside the workspace are blocked; I'll run the per-test harness inline instead.
+Three tests fail for the expected reason (unconditional prepend). The block test fails unexpectedly — investigating before going further.
+RED confirmed at all three sites (duplicates and nonexistent directories added); the refresh harness works even from an empty PATH. Now the implementation.
+All green. Quick mutation check on a disposable copy of the repo: revert each site individually and confirm the suite catches it.
+Each site's regression is caught independently. Final review of the installer changes:
+The managed PATH setup now adds each of `$HOME/.local/bin`, `$HOME/bin` and `$HOME/.opencode/bin` only if it exists as a directory and isn't already an exact PATH entry. This applies at all three places that set PATH. The full suite passes and both files pass the syntax check. I couldn't run shellcheck (details at the end).
+
+## Change (`environments/linux/install.sh`)
+- **New function `prepend_managed_path_entries`** (around line 67). It goes through the three directories in reverse (`.opencode/bin`, `bin`, `.local/bin`) and prepends each one that exists and doesn't already appear exactly in `":$PATH:"`. Going in reverse means new directories still end up in the order `.local/bin`, `bin`, `.opencode/bin`, ahead of the original PATH. The prepend uses `$dir${PATH+:$PATH}`, which keeps the original PATH exactly as it was, so an empty PATH becomes `…/.local/bin:…/bin:…/.opencode/bin:` with the trailing empty entry.
+- **Installer startup:** the old unconditional `export PATH=…` is replaced by a call to that function.
+- **Managed Bash block:** it contains its own copy of the same loop, because `.bashrc` can't call installer functions. The loop variable is `__adt_path_dir` and is unset afterwards. The mise/direnv activation, `OPENCODE_ENABLE_EXA`, the block markers and the backup logic are unchanged.
+- **Refresh at the end of `ensure_shell_configuration`:** now calls the function. This means a `~/.local/bin` the function just created gets added, and nothing is duplicated.
+- `main "$@"` is still the last line.
+
+**Assumptions:**
+- If PATH is completely unset (not just empty), no trailing empty entry is added. The spec doesn't cover this case.
+- If only some directories are already present, the missing ones are prepended in priority order and the existing entries stay where they are.
+
+## Tests (`tests/install.sh`)
+I added 7 tests. Each one checks the resulting PATH string exactly, at all three places, using a throwaway HOME that contains a space and a fixed starting PATH. Each place is tested in a separate child shell or subshell, so the suite's own PATH and the real HOME are never touched. The tests cover:
+- the priority order when all three directories are new;
+- an empty starting PATH;
+- directories that are already present, including an existing order that must not be changed;
+- near-misses that don't count as present (trailing slash, a longer name, existing duplicates, an empty entry in the middle);
+- directories that don't exist;
+- running it repeatedly from a normal and from an empty starting PATH;
+- the markers and backup still working, and mise/direnv still activating, all checked by running them;
+- dry-run leaving both `.bashrc` and PATH unchanged.
+
+## Verification
+- **Before the fix:** the already-present, missing-directory and repeated-run tests failed because duplicates and nonexistent directories were added. I confirmed this separately for all three places. The priority, empty-PATH, block and dry-run tests already passed; they protect behaviour that must stay the same.
+- **Mutation check:** on a temporary copy of the repo, I put back the old unconditional prepend at one place at a time. The suite failed each time with a message naming that place.
+- `setsid bash tests/install.sh < /dev/null` → `PASS: installer compatibility tests`, exit 0.
+- `bash -n` on both files → exit 0.
+- **Not run: shellcheck.** The mise shim has no version configured, and I didn't change the machine's mise config to fix that.
+
+**Existing issue, not fixed (out of scope):** every run of `ensure_shell_configuration` adds one more blank line before the managed block. The block starts with a blank line, and the step that removes the old block leaves that line behind. Because of this I removed an assertion that the file is byte-for-byte unchanged after a rerun.

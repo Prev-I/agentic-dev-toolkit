@@ -1,0 +1,17 @@
+{
+  "name": "breakglass-capability-only",
+  "mode": "primary",
+  "model": {
+    "providerID": "openai",
+    "modelID": "gpt-6.1-sol"
+  },
+  "variant": "max",
+  "permission": {
+    "edit": "deny",
+    "bash": "deny",
+    "task": "deny"
+  },
+  "effective_permissions_identical_to_active_breakglass": true,
+  "effective_tools_identical_to_active_breakglass": true,
+  "task_tool_available": false
+}

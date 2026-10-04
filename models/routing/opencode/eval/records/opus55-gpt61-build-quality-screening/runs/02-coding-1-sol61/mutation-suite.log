@@ -1,0 +1,5 @@
+FAIL: bootstrap: repeated new directory priority: expected '/tmp/tmp.SV7y71pN89/path home [x]*/.local/bin:/tmp/tmp.SV7y71pN89/path home [x]*/bin:/tmp/tmp.SV7y71pN89/path home [x]*/.opencode/bin:/usr/bin:/bin', got '/tmp/tmp.SV7y71pN89/path home [x]*/.local/bin:/tmp/tmp.SV7y71pN89/path home [x]*/bin:/tmp/tmp.SV7y71pN89/path home [x]*/.opencode/bin:/tmp/tmp.SV7y71pN89/path home [x]*/.local/bin:/tmp/tmp.SV7y71pN89/path home [x]*/bin:/tmp/tmp.SV7y71pN89/path home [x]*/.opencode/bin:/usr/bin:/bin'
+
+ERROR: setup failed near line 160 (exit code 1).
+
+ERROR: setup failed near line 200 (exit code 1).

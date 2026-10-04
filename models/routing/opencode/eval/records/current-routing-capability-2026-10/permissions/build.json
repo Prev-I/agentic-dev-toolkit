@@ -1,0 +1,25 @@
+{
+  "name": "build",
+  "mode": "primary",
+  "model": "github-copilot/gpt-6.1-sol",
+  "variant": "high",
+  "tools": {
+    "apply_patch": true,
+    "bash": true,
+    "task": true,
+    "webfetch": true,
+    "websearch": true
+  },
+  "permissions": {
+    "edit": "allow",
+    "task": "allow",
+    "bash": {
+      "wildcard": "allow",
+      "allowed": [
+        "*"
+      ]
+    },
+    "webfetch": null,
+    "websearch": "allow"
+  }
+}

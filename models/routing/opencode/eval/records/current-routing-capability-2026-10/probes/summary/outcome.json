@@ -1,0 +1,7 @@
+{
+  "role": "summary",
+  "successful_inference": true,
+  "stop_reason": null,
+  "observed_cost": 9.42e-05,
+  "derived_credits": 0.00942
+}

@@ -1,0 +1,96 @@
+{
+  "model_key": "astra",
+  "seeded": [
+    {
+      "id": "R-API",
+      "severity": "blocking",
+      "files": [
+        "api.sh"
+      ],
+      "summary": "public_response emits \"name\" instead of the \"displayName\" key required by assert_public_response_contract, so every generated response fails the contract check.",
+      "all_reported": [
+        {
+          "file": "api.sh",
+          "severity": "blocking",
+          "summary": "public_response emits \"name\" instead of the \"displayName\" key required by assert_public_response_contract, so every generated response fails the contract check.",
+          "evidence": "{\"name\": sys.argv[1]}"
+        }
+      ]
+    },
+    {
+      "id": "R-AUTH",
+      "severity": "blocking",
+      "files": [
+        "authorization.sh"
+      ],
+      "summary": "read_resource returns the resource value without checking the caller against the owner, allowing unauthorized callers to read another owner's resource.",
+      "all_reported": [
+        {
+          "file": "authorization.sh",
+          "severity": "blocking",
+          "summary": "read_resource returns the resource value without checking the caller against the owner, allowing unauthorized callers to read another owner's resource.",
+          "evidence": "read_resource() { local caller=$1 owner=$2 value=$3; printf '%s\\n' \"$value\"; }"
+        }
+      ]
+    },
+    {
+      "id": "R-BOUNDARY",
+      "severity": "none",
+      "files": [
+        "pagination.sh"
+      ],
+      "summary": "",
+      "all_reported": []
+    },
+    {
+      "id": "R-CONCURRENCY",
+      "severity": "material",
+      "files": [
+        "counter.sh"
+      ],
+      "summary": "Counter contents are evaluated as Bash arithmetic without integer validation, allowing crafted array-subscript expressions to execute shell commands.",
+      "all_reported": [
+        {
+          "file": "counter.sh",
+          "severity": "material",
+          "summary": "Counter contents are evaluated as Bash arithmetic without integer validation, allowing crafted array-subscript expressions to execute shell commands.",
+          "evidence": "\"$((n+1))\""
+        },
+        {
+          "file": "counter.sh",
+          "severity": "material",
+          "summary": "A failed counter read is ignored, so a missing or unreadable but writable counter can be overwritten with 1 and the function can report success.",
+          "evidence": "n=$(<\"$1\"); printf '%s\\n' \"$((n+1))\" >\"$1\";"
+        },
+        {
+          "file": "counter.sh",
+          "severity": "material",
+          "summary": "The unlocked read-modify-write operation loses increments when concurrent callers read the same counter value before writing their results.",
+          "evidence": "n=$(<\"$1\"); printf '%s\\n' \"$((n+1))\" >\"$1\";"
+        }
+      ]
+    },
+    {
+      "id": "R-ERROR",
+      "severity": "material",
+      "files": [
+        "storage.sh"
+      ],
+      "summary": "Storage failures are hidden and converted into a successful empty-list response, preventing callers from distinguishing an unavailable or failing backend from genuinely empty storage.",
+      "all_reported": [
+        {
+          "file": "storage.sh",
+          "severity": "material",
+          "summary": "Storage failures are hidden and converted into a successful empty-list response, preventing callers from distinguishing an unavailable or failing backend from genuinely empty storage.",
+          "evidence": "\"$storage\" list 2>/dev/null || printf '[]\\n'"
+        }
+      ]
+    }
+  ],
+  "clean": [],
+  "normalization": "unchanged Reviewer adapter shape; scorer determines detection from all_reported, files, and fixture witnesses",
+  "runner_decides_gate_outcome": false,
+  "scorer": "eval/scoring/reviewer.sh::reviewer_structured_gate",
+  "fixture_revision": "b67a2d3cb709ceab4693ba12121b32a032f0f603",
+  "fixture_integrity_checked": true
+}

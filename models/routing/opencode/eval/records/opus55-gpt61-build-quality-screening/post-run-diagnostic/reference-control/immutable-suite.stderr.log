@@ -1,0 +1,1 @@
+FAIL: --verify-only must report a skill that was never installed, got: ERROR: the Git credential wrapper is missing at /tmp/verifier-v2-home-m2t3t0_m/.local/bin/git-credential-manager-wsl

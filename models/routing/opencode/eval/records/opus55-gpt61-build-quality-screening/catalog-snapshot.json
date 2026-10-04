@@ -1,0 +1,9 @@
+{
+  "command": "opencode models github-copilot --verbose",
+  "runtime_version": "1.18.32",
+  "captured_at_freeze": "2026-10-03",
+  "models": {
+    "github-copilot/claude-opus-5.5": {"input": 4, "output": 20, "cache_read": 0.2, "cache_write": 0, "variants": ["low", "medium", "high", "xhigh", "max"]},
+    "github-copilot/gpt-6.1-sol": {"input": 2, "output": 10, "cache_read": 0.1, "cache_write": 0, "variants": ["none", "low", "medium", "high", "xhigh", "max"]}
+  }
+}

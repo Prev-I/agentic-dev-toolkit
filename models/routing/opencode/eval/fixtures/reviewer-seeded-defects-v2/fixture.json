@@ -1,0 +1,13 @@
+{
+  "id": "reviewer-seeded-defects-v2",
+  "provenance": "POST_RUN_DIAGNOSTIC fixture design; no historical rescoring",
+  "clean_control": "clean",
+  "seeded_cases": ["R-CONCURRENCY", "R-AUTH", "R-API", "R-BOUNDARY", "R-ERROR"],
+  "case_derivation": "Each case applies one override to the clean snapshot.",
+  "scoring": {
+    "required_seeded_detections": "5/5 independently",
+    "allowed_clean_material_findings": 0,
+    "non_material_clean_suggestions_are_gating": false,
+    "percentage_rate": false
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "command": "opencode models github-copilot --verbose",
+  "captured_date": "2026-10-04",
+  "runtime_version": "1.18.32",
+  "units": "USD per million tokens",
+  "models": {
+    "sol61": {"id": "github-copilot/gpt-6.1-sol", "input": 2, "output": 10, "cache_read": 0.1, "cache_write": 0, "requested_variant": "medium", "variant_exposed": true},
+    "sonnet55": {"id": "github-copilot/claude-sonnet-5.5", "input": 2, "output": 10, "cache_read": 0.2, "cache_write": 0, "requested_variant": "high", "variant_exposed": true},
+    "grok47": {"id": "github-copilot/grok-4.7", "input": 2, "output": 6, "cache_read": 0.5, "cache_write": 0, "requested_variant": "high", "variant_exposed": true}
+  }
+}

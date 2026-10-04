@@ -1,0 +1,25 @@
+{
+  "files": [
+    {
+      "path": "environments/linux/install.sh",
+      "source_commit": "55da937fb7233717c9924aa59c1e36773afbde29",
+      "source_ref": "refs/pull/34/head",
+      "source_blob": "6f7d1640de10b1c6862a1aaf547a0a1c616c8859",
+      "sha256": "e4520c703b6cb8d83b432278c2a663dcfb2d854f1a25f94353fb68eb01ee5172"
+    },
+    {
+      "path": "tests/install.sh",
+      "source_commit": "55da937fb7233717c9924aa59c1e36773afbde29",
+      "source_ref": "refs/pull/34/head",
+      "source_blob": "3b355e016a2d795d1d0df5db8c44ccc4b1fa8515",
+      "sha256": "b41bae9b97ab4e5dd4c902a3ffae7925ea6273ac3a725f482d460f3b5e1c865e"
+    },
+    {
+      "path": "instructions/adapters/claude-code/CLAUDE.md",
+      "source_commit": "55da937fb7233717c9924aa59c1e36773afbde29",
+      "source_ref": "refs/pull/34/head",
+      "source_blob": "43c994c2d3617f947bcb5adf1933e21dabe46bb5",
+      "sha256": "336cc4fbf19beaada7ccf9986414fa91851a8d7a07dfb3ccbe800a69eed0ab49"
+    }
+  ]
+}

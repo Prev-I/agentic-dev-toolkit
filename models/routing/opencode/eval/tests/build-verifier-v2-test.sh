@@ -2,11 +2,13 @@
 set -Eeuo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 source "$root/tests/test-lib.sh"
+source "$root/tests/prerequisites.sh"
+require_system_python
 script="$root/records/opus55-gpt61-build-quality-screening/verify-results-v2.sh"
 assert_file "$script"
 w=$(mktemp -d)
 trap 'rm -rf "$w"' EXIT
-bash "$script" --controls-only --out "$w/result"
+/usr/bin/python3 "$root/tools/snapshot-verifier.py" --controls-only --out "$w/result"
 /usr/bin/python3 - "$w/result/summary.json" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))

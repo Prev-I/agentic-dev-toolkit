@@ -4,6 +4,7 @@ IFS=$'\n\t'
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 source "$root/tests/test-lib.sh"
+source "$root/tests/prerequisites.sh"
 
 record="$root/records/gpt61-sol-build-screening"
 assert_file "$record/protocol.json"

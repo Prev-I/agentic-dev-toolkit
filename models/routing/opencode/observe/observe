@@ -2,6 +2,7 @@
 """Read-only OpenCode routing observation with metadata-only output."""
 
 import argparse
+import configparser
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 import hashlib
@@ -15,7 +16,9 @@ import sqlite3
 import sys
 
 
-PROFILE_EFFECTIVE = "2026-10-03T19:41:04Z"
+POPULATIONS = ("production", "eval_dispatcher", "pre_profile")
+REPOSITORIES = ("toolkit", "product", "workspace", "unknown")
+COMPACTION_REFERENCE = "docs/decisions/2026-10-03-current-routing-alignment.md#addendum--2026-10-04-compaction-variant-inheritance"
 SIGNALS = {"routing", "provider_error", "gate", "scope", "rework", "escalation"}
 APPROVAL = re.compile(r"(?i)\b(approved?|accepted|proceed|go ahead|looks good|lgtm|s[iì]|ok(?:ay)?)\b")
 CORRECTION = re.compile(r"(?i)\b(no|wrong|fix|revert|undo|rollback|correggi|sbagliat[oa]|rivedi)\b")
@@ -137,6 +140,86 @@ def classify_gate_turn(response, has_edits):
     return "AMBIGUOUS"
 
 
+def preauthorized(text):
+    # Only explicit human authorization, not requests to propose a design.
+    if re.search(r"(?i)\b(not approved|not authorized|do not implement|non approvato|non autorizzat[oa]|non implementare)\b", text):
+        return False
+    return bool(re.search(
+        r"(?i)\b(pre[- ]authorized|explicitly authorized to implement|design is approved|"
+        r"design (?:già |gia )?approvato|autorizz[oa] (?:esplicitamente )?(?:l['’])?implementazione|"
+        r"implement without (?:further |additional )?approval)\b", text))
+
+
+def read_jsonc(path):
+    text = path.read_text(encoding="utf-8")
+    tokens = re.compile(r'"(?:\\.|[^"\\])*"|//[^\n]*|/\*[\s\S]*?\*/')
+    text = tokens.sub(lambda match: match.group() if match.group().startswith('"') else '', text)
+    # Remove trailing commas outside strings only.
+    text = re.sub(r'("(?:\\.|[^"\\])*")|,(?=\s*[}\]])',
+                  lambda match: match.group(1) or '', text)
+    return json.loads(text)
+
+
+def profile_boundary(manifest, override=None, config=None):
+    if override:
+        return {"timestamp": iso_ms(utc_ms(override)), "source": "explicit_override"}
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    if config and config.is_file():
+        try:
+            live = read_jsonc(config)
+            aligned = all(
+                live.get("agent", {}).get(agent, {}).get("model") == target["model"]
+                and live.get("agent", {}).get(agent, {}).get("variant") == target.get("variant")
+                for agent, target in data["agents"].items())
+            date = re.search(r"\d{4}-\d{2}-\d{2}", data.get("decision_reference", ""))
+            when = config.stat().st_mtime_ns // 1000000
+            # A later edit must not silently redefine historical activation.
+            if aligned and date and iso_ms(when).startswith(date.group()):
+                return {"timestamp": iso_ms(when), "source": "aligned_config_mtime"}
+        except (OSError, ValueError, TypeError):
+            pass
+    reference = data.get("decision_reference", "")
+    record = manifest.parent.parent.parent / reference
+    if not record.is_file():
+        raise ObserveError("profile_alignment_record_missing")
+    match = re.search(r"(\d{4}-\d{2}-\d{2})", Path(reference).name)
+    if not match:
+        raise ObserveError("profile_activation_date_unavailable")
+    return {"timestamp": match.group(1) + "T00:00:00Z", "source": "alignment_record_date"}
+
+
+def repository_class(directory, root):
+    normalized = Path(directory).expanduser().resolve()
+    if root is None:
+        return "workspace" if normalized.is_dir() else "unknown"
+    if root:
+        gitdir = root / ".git"
+        try:
+            if gitdir.is_file():
+                gitdir = (root / gitdir.read_text().strip().split(":", 1)[1].strip()).resolve()
+            common = gitdir / "commondir"
+            if common.is_file():
+                gitdir = (gitdir / common.read_text().strip()).resolve()
+            config = configparser.RawConfigParser()
+            config.read(gitdir / "config")
+            urls = [config.get(section, "url") for section in config.sections() if section.startswith('remote "') and config.has_option(section, "url")]
+            if urls:
+                return "toolkit" if any(re.search(r"(?:github\.com[:/])Prev-I/agentic-dev-toolkit(?:\.git)?/?$", url, re.I) for url in urls) else "product"
+        except (OSError, ValueError, configparser.Error):
+            pass
+    if root.name == "agentic-dev-toolkit":
+        return "toolkit"
+    return "product" if root else "unknown"
+
+
+def packet_present(prompt):
+    headings = ("problem statement", "context", "options considered", "arguments",
+                "risks", "requesting agent", "desired output")
+    return all(re.search(r"(?im)^\s*(?:#{1,6}\s*|\d+[.)]\s*)?(?:\*\*)?" +
+                         heading + r"\b[^\n]*(?::|\*\*|$)", prompt)
+               for heading in headings)
+
+
 def parse_session_model(raw):
     if not raw:
         return None
@@ -211,8 +294,10 @@ def dispatcher_sessions(path):
 def parse_log_files(log_dir, since):
     streams = []
     errors = defaultdict(list)
+    starts = {}
+    session_runs = defaultdict(set)
     if log_dir is None or not log_dir.is_dir():
-        return streams, errors, 0
+        return streams, errors, 0, {}
     count = 0
     for path in sorted(log_dir.glob("*.log")):
         count += 1
@@ -226,6 +311,12 @@ def parse_log_files(log_dir, since):
                     when = utc_ms(timestamp)
                 except ValueError:
                     continue
+                run = values.get("run")
+                if run:
+                    starts[run] = min(starts.get(run, when), when)
+                sid = values.get("session.id") or values.get("sessionID")
+                if sid and run:
+                    session_runs[sid].add(run)
                 if when < since:
                     continue
                 sid = values.get("session.id")
@@ -233,7 +324,7 @@ def parse_log_files(log_dir, since):
                     continue
                 event = {
                     "sid": sid, "time": when, "agent": values.get("agent"),
-                    "provider": values.get("providerID"), "model": values.get("modelID"),
+                    "provider": values.get("providerID"), "model": values.get("modelID"), "run": run,
                 }
                 if values.get("message") == "stream":
                     streams.append(event)
@@ -250,27 +341,30 @@ def parse_log_files(log_dir, since):
                     else:
                         reason = "other"
                     errors[sid].append((reason, event))
-    return streams, errors, count
+    process_starts = {sid: min(starts[run] for run in runs) for sid, runs in session_runs.items()}
+    return streams, errors, count, process_starts
 
 
 def collect(args):
+    boundary = profile_boundary(Path(args.manifest), args.profile_effective,
+                                Path(args.activation_config).expanduser() if args.activation_config else None)
+    args.since = args.since or boundary["timestamp"]
     since = utc_ms(args.since)
-    profile_effective = utc_ms(args.profile_effective)
+    profile_effective = utc_ms(boundary["timestamp"])
     state = ensure_state(Path(args.state_dir))
     key = key_for(state)
     targets = load_manifest(Path(args.manifest))
+    previous = {}
+    if args.previous_config and Path(args.previous_config).expanduser().is_file():
+        previous = read_jsonc(Path(args.previous_config).expanduser()).get("agent", {})
     known_dispatchers = dispatcher_sessions(Path(args.eval_records) if args.eval_records else None)
     db = connect_readonly(Path(args.db))
     db.execute("BEGIN")
     sessions = {}
     for row in db.execute(
-        "SELECT id,parent_id,directory,version,agent,model,time_created,time_updated FROM session WHERE time_updated>=?",
-        (since,),
+        "SELECT id,parent_id,directory,version,agent,model,time_created,time_updated FROM session",
     ):
         sessions[row[0]] = dict(zip(("id", "parent", "directory", "version", "agent", "model", "created", "updated"), row))
-    if not sessions:
-        db.close()
-        return empty_report(state)
 
     def root_id(sid):
         seen = set()
@@ -285,20 +379,25 @@ def collect(args):
         root_members[rid].append(sid)
     root_info = {}
     for rid, members in root_members.items():
+        if not any(sessions[sid]["updated"] >= since for sid in members):
+            continue
         root = sessions[rid]
         wt = worktree_root(root["directory"])
         if rid in known_dispatchers or root["agent"] not in targets:
             category = "eval_dispatcher"
-        elif root["updated"] < profile_effective:
+        elif max(sessions[sid]["updated"] for sid in members) < profile_effective:
             category = "pre_profile"
         else:
             category = "production"
-        root_info[rid] = {"class": category, "worktree": wt, "hash": session_hash(key, rid), "members": members}
+        root_info[rid] = {"class": category, "worktree": wt, "hash": session_hash(key, rid), "members": members,
+                          "repository": repository_class(root["directory"], wt)}
 
     messages = defaultdict(list)
     message_root = {}
     session_ids = json.dumps(list(sessions))
     for mid, sid, when, raw in db.execute("SELECT id,session_id,time_created,data FROM message WHERE session_id IN (SELECT value FROM json_each(?))", (session_ids,)):
+        if roots[sid] not in root_info:
+            continue
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
@@ -339,7 +438,8 @@ def collect(args):
         if tool == "skill":
             message["skills"].append(inp.get("name"))
         elif tool == "task":
-            message["tasks"].append(inp.get("subagent_type"))
+            message["tasks"].append({"agent": inp.get("subagent_type"), "child": meta.get("sessionId"),
+                                     "packet": packet_present(str(inp.get("prompt", "")))})
         elif tool == "question":
             for group in meta.get("answers") or []:
                 if isinstance(group, list):
@@ -352,36 +452,112 @@ def collect(args):
             exists = meta.get("exists")
             message["edits"].append((inp.get("filePath"), "update" if tool == "edit" or exists else "add"))
 
-    streams, log_errors, log_count = parse_log_files(Path(args.log_dir) if args.log_dir else None, since)
+    streams, log_errors, log_count, process_starts = parse_log_files(Path(args.log_dir) if args.log_dir else None, since)
     db.close()
     reviews = load_reviews(state)
     flags = []
-    signal_counts = Counter()
-    agent_counts = Counter()
-    escalations = Counter()
-    agent_signals = defaultdict(Counter)
-    provider_errors = defaultdict(lambda: defaultdict(Counter))
-    routing_requests = Counter()
-    provider_retries = defaultdict(lambda: Counter())
-    requests_by_class = defaultdict(Counter)
-    gate_outcomes = Counter()
-    gate_parity_outcomes = Counter()
+    counters = {category: {
+        "signals": Counter(), "agents": Counter(), "escalations": Counter(),
+        "agent_signals": defaultdict(Counter),
+        "provider_errors": defaultdict(lambda: defaultdict(Counter)),
+        "routing_requests": Counter(), "provider_retries": defaultdict(Counter),
+        "gate_outcomes": Counter(), "gate_parity_outcomes": Counter(),
+        "children": defaultdict(set),
+    } for category in POPULATIONS}
     checkpoint = 0
+    routing_audit = []
+    expert_packets = {}
+    repository_gates = {name: Counter() for name in REPOSITORIES}
+    repository_requests = defaultdict(Counter)
+    repository_children = defaultdict(lambda: defaultdict(set))
+    behavior_episodes = []
+    manual_changes = defaultdict(list)
+    known_compactions = set()
+    for sid, rows in messages.items():
+        last = {}
+        for message in rows:
+            data = message["data"]
+            if data.get("role") != "assistant" or data.get("agent") not in targets:
+                continue
+            agent = data["agent"]
+            observed = f"{data.get('providerID')}/{data.get('modelID')}"
+            parent = message_root.get(data.get("parentID"))
+            parent_data = parent[1]["data"] if parent and parent[0] == sid else {}
+            parent_model = parent_data.get("model") or {}
+            if (sessions[sid]["version"] == "1.18.32" and agent == "compaction"
+                    and observed == targets[agent]["model"]
+                    and data.get("variant") and data["variant"] != targets[agent].get("variant")
+                    and parent_data.get("role") == "user" and isinstance(parent_model, dict)
+                    and data["variant"] == parent_model.get("variant")):
+                known_compactions.add((sid, message["time"], observed, data["variant"]))
+            if agent in last and last[agent] != observed and observed not in (targets[agent]["model"], previous.get(agent, {}).get("model")):
+                manual_changes[sid].append((message["time"], agent, observed))
+            last[agent] = observed
 
-    def add_flag(rid, signal, reason, agent=None, provider=None, model=None, variant=None, paths=None):
+    def activation_class(sid, when):
+        if when < profile_effective:
+            return "PRE_ACTIVATION"
+        if sessions[sid]["created"] < profile_effective:
+            return "SESSION_SPANNING_ACTIVATION"
+        if process_starts.get(sid, profile_effective) < profile_effective:
+            return "STALE_PROCESS"
+        return "POST_ACTIVATION"
+
+    def routing_class(sid, when, agent, provider, model, variant=None):
+        if agent == "compaction" and (sid, when, f"{provider}/{model}", variant) in known_compactions:
+            return "KNOWN_DEVIATION"
+        cls = activation_class(sid, when)
+        if cls != "STALE_PROCESS" and cls != "PRE_ACTIVATION" and any(time <= when and role == agent and observed == f"{provider}/{model}" for time, role, observed in manual_changes[sid]):
+            return "MANUAL_OVERRIDE"
+        return cls
+
+    def audit_route(rid, sid, when, reason, agent, provider, model, variant=None):
+        if root_info[rid]["class"] == "eval_dispatcher" or when < max(since, utc_ms(boundary["timestamp"][:10])):
+            return
+        target = targets.get(agent)
+        if not target:
+            return
+        cls = routing_class(sid, when, agent, provider, model, variant)
+        identity = (root_info[rid]["hash"], reason, agent, provider, model, variant, cls)
+        if any(item["identity"] == identity for item in routing_audit):
+            return
+        routing_audit.append({"identity": identity, "session": root_info[rid]["hash"], "reason": reason,
+                              "agent": agent, "timestamp": iso_ms(when), "activation_class": cls,
+                              "expected_model": target["model"], "observed_model": f"{provider}/{model}",
+                              "expected_variant": target.get("variant"), "variant": variant,
+                              "model": model, "repository": root_info[rid]["repository"]})
+        if sid in process_starts:
+            routing_audit[-1]["process_first_seen"] = iso_ms(process_starts[sid])
+        if cls == "KNOWN_DEVIATION":
+            routing_audit[-1]["reference"] = COMPACTION_REFERENCE
+
+    def add_flag(rid, signal, reason, agent=None, provider=None, model=None, variant=None, paths=None, when=None, sid=None):
         if any(
             item["root"] == rid and item["signal"] == signal and item["reason"] == reason
             and item.get("provider") == provider and item.get("agent") == (agent or sessions[rid]["agent"])
+            and (signal not in ("gate", "scope", "rework", "routing") or item.get("model") == model)
+            and (signal != "routing" or item.get("variant") == variant)
             for item in flags
         ):
             return
         public = root_info[rid]["hash"]
-        review = reviews.get((public, signal, reason))
+        category = root_info[rid]["class"]
+        bucket = counters[category]
+        review = reviews.get((public, signal, reason)) if category == "production" else None
         item = {
-            "root": rid, "session": public, "timestamp": iso_ms(sessions[rid]["created"]),
+            "root": rid, "session": public, "timestamp": iso_ms(when if when is not None else sessions[rid]["created"]),
             "agent": agent or sessions[rid]["agent"], "signal": signal, "reason": reason,
-            "status": review["decision"] if review else "pending",
+            "status": review["decision"] if review else ("pending" if category == "production" else "informational"),
+            "population": category,
+            "repository": root_info[rid]["repository"],
         }
+        if signal == "routing":
+            item["activation_class"] = routing_class(sid or rid, when if when is not None else sessions[rid]["created"], item["agent"], provider, model, variant)
+            item["expected_model"] = targets.get(item["agent"], {}).get("model")
+            item["observed_model"] = f"{provider}/{model}"
+            if item["activation_class"] == "KNOWN_DEVIATION":
+                item["reference"] = COMPACTION_REFERENCE
+                item["status"] = "informational"
         for name, value in (("provider", provider), ("model", model), ("variant", variant)):
             if value is not None:
                 item[name] = value
@@ -391,31 +567,76 @@ def collect(args):
         if review and review.get("rollback"):
             item["rollback"] = True
         flags.append(item)
-        signal_counts[signal] += 1
-        agent_signals[item["agent"]][signal] += 1
+        bucket["signals"][signal] += 1
+        bucket["agent_signals"][item["agent"]][signal] += 1
         if signal == "provider_error":
-            provider_errors[provider or "unknown"][item["agent"]][reason] += 1
+            bucket["provider_errors"][provider or "unknown"][item["agent"]][reason] += 1
 
     for rid, info in root_info.items():
         root = sessions[rid]
+        if info["class"] == "pre_profile":
+            observed = parse_session_model(root["model"])
+            target = targets.get(root["agent"])
+            if observed and target and (f"{observed['provider']}/{observed['model']}", observed["variant"]) != (target["model"], target.get("variant")):
+                audit_route(rid, rid, root["created"], "root_model_differs", root["agent"], observed["provider"], observed["model"], observed["variant"])
+            for sid in info["members"]:
+                for message in messages.get(sid, []):
+                    data = message["data"]
+                    target = targets.get(data.get("agent"))
+                    if data.get("role") == "assistant" and target and (f"{data.get('providerID')}/{data.get('modelID')}", data.get("variant")) != (target["model"], target.get("variant")):
+                        audit_route(rid, sid, message["time"], "request_route_differs", data.get("agent"), data.get("providerID"), data.get("modelID"), data.get("variant"))
+            continue
+        bucket = counters[info["class"]]
+        agent_counts = bucket["agents"]
+        routing_requests = bucket["routing_requests"]
+        gate_outcomes = bucket["gate_outcomes"]
+        gate_parity_outcomes = bucket["gate_parity_outcomes"]
         agent_counts[root["agent"]] += 1
+        for sid in info["members"]:
+            if sessions[sid]["parent"] and sessions[sid]["created"] >= max(since, profile_effective):
+                bucket["children"][sessions[sid]["agent"]].add(sid)
+                if info["class"] == "production":
+                    repository_children[info["repository"]][sessions[sid]["agent"]].add(sid)
         target = targets.get(root["agent"])
         observed_model = parse_session_model(root["model"])
-        if info["class"] == "production" and root["created"] >= profile_effective and target and observed_model:
+        if root["created"] >= since and target and observed_model:
             provider, model = target["model"].split("/", 1)
             if (observed_model["provider"], observed_model["model"], observed_model["variant"]) != (provider, model, target.get("variant")):
-                add_flag(rid, "routing", "root_model_differs", provider=observed_model["provider"], model=observed_model["model"], variant=observed_model["variant"])
+                audit_route(rid, rid, root["created"], "root_model_differs", root["agent"], observed_model["provider"], observed_model["model"], observed_model["variant"])
+                if root["created"] >= profile_effective:
+                    add_flag(rid, "routing", "root_model_differs", provider=observed_model["provider"], model=observed_model["model"], variant=observed_model["variant"], when=root["created"], sid=rid)
 
         timeline = []
         for sid in info["members"]:
             member_root = info["worktree"]
             for message in messages.get(sid, []):
                 data = message["data"]
+                if data.get("role") == "assistant":
+                    agent = data.get("agent") or sessions[sid]["agent"]
+                    target = targets.get(agent)
+                    if target and (f"{data.get('providerID')}/{data.get('modelID')}", data.get("variant")) != (target["model"], target.get("variant")):
+                        audit_route(rid, sid, message["time"], "request_route_differs", agent,
+                                    data.get("providerID"), data.get("modelID"), data.get("variant"))
+                # Preserve the original 15-child audit even when activation
+                # narrows the observation window: only booleans leave memory.
+                for task in message["tasks"]:
+                    if isinstance(task, dict) and task.get("agent") == "expert" and task.get("child") and message["time"] >= since and info["class"] == "production":
+                        child = task["child"]
+                        if child not in expert_packets:
+                            expert_packets[child] = {"parent": session_hash(key, sid), "repository": info["repository"], "decision_packet": task["packet"]}
+                if message["time"] < max(since, profile_effective):
+                    # Earlier human context may authorize a later gate, but is
+                    # never included in counters or current-profile comparisons.
+                    if sid == rid and data.get("role") == "user":
+                        timeline.append({"sid": sid, "time": message["time"], "role": "user",
+                                         "text": "\n".join(message["texts"]), "answers": [],
+                                         "skills": [], "tasks": [], "edits": []})
+                    continue
                 if data.get("role") == "assistant" and data.get("providerID") and data.get("modelID"):
                     request_key = (data.get("agent") or sessions[sid]["agent"], data["providerID"], data["modelID"], data.get("variant"))
-                    requests_by_class[info["class"]][request_key] += 1
-                    if info["class"] == "production" and message["time"] >= profile_effective:
-                        routing_requests[request_key] += 1
+                    routing_requests[request_key] += 1
+                    if info["class"] == "production":
+                        repository_requests[info["repository"]][request_key] += 1
                 edits = []
                 raw_edits = message["edits"] or message["snapshot_edits"]
                 for raw_path, kind in raw_edits:
@@ -426,8 +647,9 @@ def collect(args):
                     "sid": sid, "time": message["time"], "role": data.get("role"),
                     "text": "\n".join(message["texts"]), "answers": message["answers"],
                     "skills": message["skills"], "tasks": message["tasks"], "edits": edits,
+                    "agent": data.get("agent"), "provider": data.get("providerID"), "model": data.get("modelID"), "variant": data.get("variant"),
                 })
-                if data.get("role") == "assistant" and message["time"] >= profile_effective and info["class"] == "production":
+                if data.get("role") == "assistant":
                     target = targets.get(data.get("agent") or sessions[sid]["agent"])
                     if target:
                         expected_provider, expected_model = target["model"].split("/", 1)
@@ -438,44 +660,56 @@ def collect(args):
                             rid, "routing", "request_route_differs",
                             agent=data.get("agent") or sessions[sid]["agent"],
                             provider=data.get("providerID"), model=data.get("modelID"), variant=data.get("variant"),
+                            when=message["time"], sid=sid,
                         )
                 for subagent in message["tasks"]:
-                    if subagent in ("expert", "reviewer"):
-                        escalations[subagent] += 1
+                    if isinstance(subagent, dict) and subagent.get("child"):
+                        bucket["children"][subagent["agent"]].add(subagent["child"])
+                        if info["class"] == "production":
+                            repository_children[info["repository"]][subagent["agent"]].add(subagent["child"])
                 if sessions[sid]["parent"] and sessions[sid]["agent"] == "breakglass":
                     add_flag(rid, "escalation", "breakglass_child", agent="breakglass")
                 error = data.get("error")
-                if isinstance(error, dict) and error.get("name") in ("APIError", "UnknownError") and message["time"] >= profile_effective and info["class"] == "production":
+                if isinstance(error, dict) and error.get("name") in ("APIError", "UnknownError"):
                     provider = data.get("providerID")
                     add_flag(rid, "provider_error", classify_error(error), agent=data.get("agent"), provider=provider)
 
         timeline.sort(key=lambda item: item["time"])
         brainstorming = [i for i, item in enumerate(timeline) if "brainstorming" in item["skills"]]
-        if info["class"] == "production" and root["agent"] == "build" and brainstorming:
-            checkpoint += 1
-            for start in brainstorming:
-                approved = False
+        if root["agent"] == "build" and brainstorming:
+            for episode, start in enumerate(brainstorming):
+                gate_message = timeline[start]
+                aligned_gate = gate_message.get("agent") == "build" and f"{gate_message.get('provider')}/{gate_message.get('model')}" == targets["build"]["model"]
+                checkpoint += info["class"] == "production" and info["repository"] == "product" and aligned_gate
+                previous_users = [item for item in timeline[:start] if item["role"] == "user" and item["sid"] == rid]
+                authorized = bool(previous_users and preauthorized(previous_users[-1]["text"]))
+                approved = authorized
                 verdict = "AMBIGUOUS"
                 gate_parity_outcomes[classify_gate_turn(timeline[start]["text"], bool(timeline[start]["edits"]))] += 1
-                for item in timeline[start:]:
+                end = brainstorming[episode + 1] if episode + 1 < len(brainstorming) else len(timeline)
+                for item in timeline[start:end]:
                     if item["role"] == "user" and item["sid"] == rid and APPROVAL.search(item["text"]):
                         approved = True
                     if item["answers"] and APPROVAL.search("\n".join(item["answers"])):
                         approved = True
                     if item["edits"] and not approved:
                         paths = [path for path, _ in item["edits"]]
-                        add_flag(rid, "gate", "edit_before_approval", paths=paths)
+                        add_flag(rid, "gate", "edit_before_approval", paths=paths, agent=item.get("agent"), provider=item.get("provider"), model=item.get("model"), variant=item.get("variant"), when=item["time"])
                         verdict = "NON_ADHERENT"
                         break
                     if item["edits"] and approved:
-                        verdict = "ADHERENT"
+                        verdict = "PRE_AUTHORIZED" if authorized else "ADHERENT"
                 gate_outcomes[verdict] += 1
+                behavior_episodes.append({"session": info["hash"], "repository": info["repository"], "signal": "gate", "timestamp": iso_ms(gate_message["time"]), "observed_model": f"{gate_message.get('provider')}/{gate_message.get('model')}", "variant": gate_message.get("variant"), "outcome": verdict, "manifest_aligned": aligned_gate})
+                if info["class"] == "production":
+                    repository_gates[info["repository"]][verdict] += 1
 
-        if info["class"] == "production":
+        if info["class"] != "pre_profile":
             for item in timeline:
                 shared = [path for path, kind in item["edits"] if kind in ("update", "delete", "move") and SHARED.search(path)]
                 if shared:
-                    add_flag(rid, "scope", "shared_test_or_setup_modified", paths=shared)
+                    add_flag(rid, "scope", "shared_test_or_setup_modified", paths=shared, agent=item.get("agent"), provider=item.get("provider"), model=item.get("model"), variant=item.get("variant"), when=item["time"])
+                    behavior_episodes.append({"session": info["hash"], "repository": info["repository"], "signal": "scope", "timestamp": iso_ms(item["time"]), "observed_model": f"{item.get('provider')}/{item.get('model')}", "variant": item.get("variant")})
 
             conversation = "\n".join(item["text"] for item in timeline if item["role"] == "user" and item["sid"] == rid)
             edits = {path for item in timeline for path, _ in item["edits"]}
@@ -491,14 +725,19 @@ def collect(args):
                     allowed_prefix = f"openspec/changes/{candidates[0].name}/"
                     outside = sorted(path for path in edits if not path.startswith(allowed_prefix) and path not in declared)
                     if outside:
-                        add_flag(rid, "scope", "outside_active_openspec_change", paths=outside)
+                        for item in timeline:
+                            changed = sorted(set(outside) & {path for path, _ in item["edits"]})
+                            if changed:
+                                add_flag(rid, "scope", "outside_active_openspec_change", paths=changed, agent=item.get("agent"), provider=item.get("provider"), model=item.get("model"), variant=item.get("variant"), when=item["time"])
+                                behavior_episodes.append({"session": info["hash"], "repository": info["repository"], "signal": "scope", "timestamp": iso_ms(item["time"]), "observed_model": f"{item.get('provider')}/{item.get('model')}", "variant": item.get("variant")})
 
             edited = set()
             pending_user = False
             for item in timeline:
                 current = {path for path, _ in item["edits"]}
                 if pending_user and edited & current:
-                    add_flag(rid, "rework", "same_file_modified_after_user_turn", paths=sorted(edited & current))
+                    add_flag(rid, "rework", "same_file_modified_after_user_turn", paths=sorted(edited & current), agent=item.get("agent"), provider=item.get("provider"), model=item.get("model"), variant=item.get("variant"), when=item["time"])
+                    behavior_episodes.append({"session": info["hash"], "repository": info["repository"], "signal": "rework", "timestamp": iso_ms(item["time"]), "observed_model": f"{item.get('provider')}/{item.get('model')}", "variant": item.get("variant")})
                     break
                 if current:
                     edited.update(current)
@@ -507,26 +746,34 @@ def collect(args):
 
     for sid, entries in log_errors.items():
         rid = roots.get(sid)
-        if rid and root_info[rid]["class"] == "production" and entries:
+        if rid in root_info and root_info[rid]["class"] != "pre_profile" and entries:
+            provider_retries = counters[root_info[rid]["class"]]["provider_retries"]
             for reason, event in entries:
+                if event["time"] < max(since, profile_effective):
+                    continue
                 add_flag(rid, "provider_error", reason, agent=event["agent"], provider=event["provider"])
-            if any(
-                stream["sid"] == sid and stream["agent"] == event["agent"] and stream["time"] > event["time"]
-                for stream in streams
-            ):
-                provider_retries[event["provider"] or "unknown"][event["agent"] or "unknown"] += 1
+                if any(stream["sid"] == sid and stream["agent"] == event["agent"] and stream["time"] > event["time"] for stream in streams):
+                    provider_retries[event["provider"] or "unknown"][event["agent"] or "unknown"] += 1
 
     for stream in streams:
         rid = roots.get(stream["sid"])
-        if not rid:
+        if rid not in root_info:
             continue
-        if root_info[rid]["class"] == "production" and stream["time"] >= profile_effective and stream["agent"] == "title":
-            routing_requests[(stream["agent"], stream["provider"], stream["model"], None)] += 1
         target = targets.get(stream["agent"])
-        if root_info[rid]["class"] == "production" and stream["time"] >= profile_effective and target:
+        if target and f"{stream['provider']}/{stream['model']}" != target["model"]:
+            audit_route(rid, stream["sid"], stream["time"], "request_model_differs", stream["agent"], stream["provider"], stream["model"])
+        if root_info[rid]["class"] == "pre_profile" or stream["time"] < max(since, profile_effective):
+            continue
+        routing_requests = counters[root_info[rid]["class"]]["routing_requests"]
+        if stream["agent"] == "title":
+            routing_requests[(stream["agent"], stream["provider"], stream["model"], None)] += 1
+            if root_info[rid]["class"] == "production":
+                repository_requests[root_info[rid]["repository"]][(stream["agent"], stream["provider"], stream["model"], None)] += 1
+        target = targets.get(stream["agent"])
+        if target:
             expected_provider, expected_model = target["model"].split("/", 1)
             if (stream["provider"], stream["model"]) != (expected_provider, expected_model):
-                add_flag(rid, "routing", "request_model_differs", agent=stream["agent"], provider=stream["provider"], model=stream["model"])
+                add_flag(rid, "routing", "request_model_differs", agent=stream["agent"], provider=stream["provider"], model=stream["model"], when=stream["time"], sid=stream["sid"])
 
     public_flags = [{k: v for k, v in item.items() if k != "root"} for item in sorted(flags, key=lambda x: (x["timestamp"], x["signal"], x["reason"]))]
     confirmed = [item for item in flags if item["status"] == "confirmed" and root_info[item["root"]]["class"] == "production"]
@@ -535,46 +782,63 @@ def collect(args):
         if item["signal"] == "provider_error":
             error_sessions[item.get("provider", "unknown")].add(item["root"])
     triggers = {
-        "routing_mismatch": any(item["signal"] == "routing" for item in confirmed),
+        "routing_mismatch": any(item["signal"] == "routing" and item.get("activation_class") == "POST_ACTIVATION" for item in confirmed),
         "provider_errors_recurring": any(len(value) >= 2 for value in error_sessions.values()),
         "gates_skipped": sum(item["signal"] == "gate" for item in confirmed) >= 2,
         "rollback_required": any(item["signal"] == "rework" and item.get("rollback") for item in confirmed),
     }
+    populations = {}
+    for category in POPULATIONS:
+        bucket = counters[category]
+        populations[category] = {"sessions": sum(info["class"] == category for info in root_info.values())}
+        if category == "pre_profile":
+            continue
+        populations[category].update({
+            "agents": dict(sorted(bucket["agents"].items())),
+            "signals": {name: bucket["signals"].get(name, 0) for name in sorted(SIGNALS)},
+            "gate_outcomes": dict(sorted(bucket["gate_outcomes"].items())),
+            "gate_parity_outcomes": dict(sorted(bucket["gate_parity_outcomes"].items())),
+            "agent_signals": {agent: dict(sorted(counts.items())) for agent, counts in sorted(bucket["agent_signals"].items())},
+            "provider_errors": {provider: {agent: dict(sorted(counts.items())) for agent, counts in sorted(agents.items())} for provider, agents in sorted(bucket["provider_errors"].items())},
+            "provider_retries": {provider: dict(sorted(agents.items())) for provider, agents in sorted(bucket["provider_retries"].items())},
+            "routing_requests": [{"agent": agent, "provider": provider, "model": model, "variant": variant, "requests": count} for (agent, provider, model, variant), count in sorted(bucket["routing_requests"].items(), key=lambda item: tuple(str(v) for v in item[0]))],
+            "escalations": {agent: len(bucket["children"].get(agent, set())) for agent in ("expert", "reviewer", "breakglass")},
+            "task_children": {agent: len(children) for agent, children in sorted(bucket["children"].items()) if agent},
+        })
+    production = populations["production"]
+    repositories = {}
+    for name in REPOSITORIES:
+        ids = {rid for rid, info in root_info.items() if info["class"] == "production" and info["repository"] == name}
+        selected = [item for item in flags if item["root"] in ids]
+        repositories[name] = {
+            "sessions": len(ids), "agents": dict(Counter(sessions[rid]["agent"] for rid in ids)),
+            "signals": {signal: sum(item["signal"] == signal for item in selected) for signal in sorted(SIGNALS)},
+            "gate_outcomes": dict(repository_gates[name]),
+            "task_children": {agent: len(children) for agent, children in sorted(repository_children[name].items()) if agent},
+            "routing_requests": sum(repository_requests[name].values()),
+            "provider_errors": sum(item["signal"] == "provider_error" for item in selected),
+        }
     report = {
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "since": args.since,
+        "profile_boundary": boundary,
+        "populations": populations,
+        "production_repositories": repositories,
+        "routing_activation_audit": [{k: v for k, v in item.items() if k != "identity"} for item in routing_audit],
+        "routing_activation_counts": dict(Counter(item["activation_class"] for item in routing_audit)),
+        "expert_escalations": list(expert_packets.values()),
+        "behavior_episodes": behavior_episodes,
         "coverage": {
             "database": True, "log_files": log_count,
             "dispatcher_ids_loaded": len(known_dispatchers),
             "opencode_versions": sorted({s["version"] for s in sessions.values() if s["version"]}),
         },
-        "session_classes": dict(sorted(Counter(info["class"] for info in root_info.values()).items())),
-        "agents": dict(sorted(agent_counts.items())),
-        "signals": {name: signal_counts.get(name, 0) for name in ("routing", "provider_error", "escalation", "gate", "scope", "rework")},
-        "gate_outcomes": dict(sorted(gate_outcomes.items())),
-        "gate_parity_outcomes": dict(sorted(gate_parity_outcomes.items())),
-        "agent_signals": {agent: dict(sorted(counts.items())) for agent, counts in sorted(agent_signals.items())},
-        "provider_errors": {
-            provider: {agent: dict(sorted(counts.items())) for agent, counts in sorted(agents.items())}
-            for provider, agents in sorted(provider_errors.items())
-        },
-        "provider_retries": {
-            provider: dict(sorted(agents.items())) for provider, agents in sorted(provider_retries.items())
-        },
-        "routing_requests": [
-            {"agent": agent, "provider": provider, "model": model, "variant": variant, "requests": count}
-            for (agent, provider, model, variant), count in sorted(routing_requests.items(), key=lambda item: tuple(str(v) for v in item[0]))
-        ],
-        "routing_requests_by_class": {
-            category: [
-                {"agent": agent, "provider": provider, "model": model, "variant": variant, "requests": count}
-                for (agent, provider, model, variant), count in sorted(counts.items(), key=lambda item: tuple(str(v) for v in item[0]))
-            ] for category, counts in sorted(requests_by_class.items())
-        },
-        "escalations": {"expert": escalations.get("expert", 0), "reviewer": escalations.get("reviewer", 0), "breakglass": sum(s["agent"] == "breakglass" for s in sessions.values())},
+        "session_classes": {category: populations[category]["sessions"] for category in POPULATIONS},
+        **{name: production[name] for name in ("agents", "signals", "gate_outcomes", "gate_parity_outcomes", "agent_signals", "provider_errors", "provider_retries", "routing_requests", "escalations")},
         "checkpoint": {"build_sessions_with_gate": checkpoint, "minimum": 15, "maximum": 20},
         "triggers": triggers,
-        "review": public_flags,
+        "review": [item for item in public_flags if item["population"] == "production" and item.get("activation_class") in (None, "POST_ACTIVATION", "MANUAL_OVERRIDE")],
+        "informational": [item for item in public_flags if item["population"] != "production" or item.get("activation_class") not in (None, "POST_ACTIVATION", "MANUAL_OVERRIDE")],
     }
     (state / "latest-report.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return report
@@ -605,10 +869,20 @@ def report_command(args):
         return
     print(f"Sessions: {sum(report['session_classes'].values())}")
     print("Coverage: database=yes, log_files=%s, dispatcher_ids=%s" % (report["coverage"]["log_files"], report["coverage"]["dispatcher_ids_loaded"]))
-    print("Classes: " + ", ".join(f"{k}={v}" for k, v in report["session_classes"].items()))
-    print("Signals: " + ", ".join(f"{k}={v}" for k, v in report["signals"].items()))
+    print("Profile boundary: %s (%s)" % (report["profile_boundary"]["timestamp"], report["profile_boundary"]["source"]))
+    for category, population in report["populations"].items():
+        print(f"\n{category}: sessions={population['sessions']}")
+        if category == "pre_profile":
+            continue
+        print("Agents (root sessions): " + ", ".join(f"{k}={v}" for k, v in population["agents"].items()))
+        print("Signals: " + ", ".join(f"{k}={v}" for k, v in population["signals"].items()))
+        print("Distinct Task children: " + ", ".join(f"{k}={v}" for k, v in population["task_children"].items()))
+        print("Gate outcomes: " + ", ".join(f"{k}={v}" for k, v in population["gate_outcomes"].items()))
     cp = report["checkpoint"]
-    print(f"Build gate checkpoint: {cp['build_sessions_with_gate']} of {cp['minimum']}-{cp['maximum']}")
+    print(f"Product Build gate checkpoint: {cp['build_sessions_with_gate']} of {cp['minimum']}-{cp['maximum']}")
+    for repository, counts in report["production_repositories"].items():
+        print(f"Production repository {repository}: sessions={counts['sessions']}, routing_requests={counts['routing_requests']}")
+    print("Routing activation classes: " + ", ".join(f"{k}={v}" for k, v in report["routing_activation_counts"].items()))
     print("Triggers: " + ", ".join(f"{k}={'yes' if v else 'no'}" for k, v in report["triggers"].items()))
     if report["routing_requests"]:
         print("Production routing requests: " + str(sum(item["requests"] for item in report["routing_requests"])))
@@ -616,6 +890,9 @@ def report_command(args):
     for item in report["review"]:
         if item["status"] == "pending":
             print(f"- {item['session']} {item['signal']} {item['reason']}")
+    print(f"Informational (no review): {len(report['informational'])}")
+    for item in report["informational"]:
+        print(f"- {item['population']} {item['session']} {item['signal']} {item['reason']}")
 
 
 def review_command(args):
@@ -652,8 +929,10 @@ def parser():
     main = argparse.ArgumentParser(prog="observe")
     sub = main.add_subparsers(dest="command", required=True)
     report = sub.add_parser("report")
-    report.add_argument("--since", required=True)
-    report.add_argument("--profile-effective", default=PROFILE_EFFECTIVE)
+    report.add_argument("--since")
+    report.add_argument("--profile-effective")
+    report.add_argument("--activation-config", default=str(Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "opencode/opencode.jsonc"))
+    report.add_argument("--previous-config", default=str(Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "opencode/opencode.jsonc.bak-20261003"))
     report.add_argument("--db", default=str(default_db()))
     report.add_argument("--log-dir", default=str(default_db().parent / "log"))
     report.add_argument("--state-dir", default=str(default_state()))

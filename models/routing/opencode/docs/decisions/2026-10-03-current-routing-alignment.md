@@ -164,3 +164,35 @@ Expert streams after they start, not before dispatch. Retained stream/message
 evidence does not independently count HTTP requests or audit SDK retries.
 Snapshot diffs in the exports capture the harness writing its own raw output;
 they are not agent file edits.
+
+## Addendum — 2026-10-04 compaction variant inheritance
+
+In OpenCode **1.18.32**, automatic Compaction selects the configured agent model
+but inherits its variant from the parent user message. The configured `low`
+is therefore not effective as the variant selection on this path. This is
+**OpenCode behavior, not a configuration defect**. No routing or global
+configuration change is made.
+
+Version-pinned source evidence:
+
+- [`session/compaction.ts`](https://github.com/anomalyco/opencode/blob/v1.18.32/packages/opencode/src/session/compaction.ts),
+  `processCompaction`: selects `agent.model`, writes
+  `variant: userMessage.model.variant`, and passes `userMessage` to the processor.
+- [`session/llm/request.ts`](https://github.com/anomalyco/opencode/blob/v1.18.32/packages/opencode/src/session/llm/request.ts),
+  `LLMRequestPrep.prepare`: selects
+  `input.model.variants[input.user.model.variant]`, not the configured agent
+  variant. Missing variants produce no variant-specific options; stored effort
+  is not provider attestation.
+
+The observer marks this parent-linked, variant-only difference
+**KNOWN_DEVIATION**, with a reference to this addendum. It remains informational,
+requires no repeated human adjudication, and cannot trigger routing rollback.
+Wrong models, missing parent evidence, other versions, or variants different
+from the parent's are not exempted.
+
+Proposed upstream correction, **not applied**: resolve and validate the
+compaction agent variant against the selected model, then use it in assistant
+metadata and a copied user request passed to LLM preparation. Keep the parent
+message unchanged. A regression should assert configured `low` in both
+metadata and provider options when the parent uses `xhigh`. The issue draft
+contains only configuration and source references, with no session content.

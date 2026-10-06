@@ -52,3 +52,13 @@ is enforced (probe P5b: no Write, no Bash). Per the design's declared fallback,
 both agents now have `Read, Grep, Glob` only, and the routing policy tells the
 caller to hand Reviewer the change as a file. Superpowers' review templates
 that run `git diff` themselves are adapted by the caller, not edited.
+
+## Addendum — 2026-10-06 Expert moves to Opus 5.5 `max`
+
+The capability call for `claude-fable-5-1` at `xhigh` failed on this account
+with "Fable 5.1 requires usage credits. Switch to another model to continue."
+Every other pair returned `OK`. The user moved Expert to `claude-opus-5-5` at
+`max`. Fable 5.1 is now unused, so the cost-tier separation described above no
+longer holds: Expert differs from Build, Plan and Reviewer by effort (`max`), a
+six-turn cap and escalation-only use, not by model. Returning Expert to Fable
+5.1 requires usage credits and a new decision record.

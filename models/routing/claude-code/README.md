@@ -19,7 +19,7 @@ Selection rationale: [initial routing decision](docs/decisions/2026-10-06-initia
 | Explore | `agents/Explore.md` | `claude-haiku-4-5` | — |
 | Scout | `agents/scout.md` | `claude-haiku-4-5` | — |
 | Reviewer | `agents/reviewer.md` | `claude-opus-5-5` | `high` |
-| Expert | `agents/expert.md` | `claude-fable-5-1` | `xhigh` |
+| Expert | `agents/expert.md` | `claude-opus-5-5` | `max` |
 | Background tasks | `env.ANTHROPIC_DEFAULT_HAIKU_MODEL` | `claude-haiku-4-5` | — |
 
 Haiku 4.5 does not support effort levels. `eval/tests/docs-test.sh` fails if
@@ -54,10 +54,12 @@ the main thread. Its plan is then handed to an ordinary (Build) session.
 1. **Reviewer is not independent of Build by model.** Both run Opus 5.5
    `high`. Independence comes from a fresh context and a read-only,
    review-only prompt. Moving Reviewer to Fable 5.1 is the lever if reviews
-   fall short; that is a profile change with its own decision record.
-2. **No provider separation.** Everything runs on one Anthropic account. Cost
-   separation replaces it: Fable 5.1, the most expensive tier, is used only
-   by Expert.
+   fall short; it needs usage credits on the account (see the decision
+   record) and is a profile change with its own decision record.
+2. **No provider or model separation for Expert.** Everything runs on one
+   Anthropic account, and Fable 5.1 needs usage credits this account does not
+   have. Expert runs Opus 5.5 like Build, Plan and Reviewer; what sets it apart
+   is `max` effort, a six-turn cap and escalation-only use.
 3. **No Breakglass.** It existed for a separate provider and credential, and
    there is none here.
 4. **Compaction and session titles are not routable per role.** Claude Code

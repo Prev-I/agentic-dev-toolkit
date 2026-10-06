@@ -7,7 +7,7 @@ this repository.
 
 Portable assets for setting up an agentic development environment: a
 Debian/Ubuntu workstation installer, a shared `AGENTS.md` instruction pattern
-with per-harness adapters, and a model-routing bundle for OpenCode.
+with per-harness adapters, and model-routing bundles for OpenCode and Claude Code.
 
 It is **not** an application, and **not** a workflow or specification product. It
 installs and configures tools; it does not define how work is planned or
@@ -23,6 +23,8 @@ instructions/                   AGENTS.md pattern shipped to other projects
   AGENTS.md                     A TEMPLATE for consumers, not this repo's own
   adapters/{claude-code,codex,opencode}/
 models/routing/opencode/        Model-routing config bundle for OpenCode
+models/routing/claude-code/     Model-routing bundle for Claude Code: agents, policy,
+                                model-pinning hook, alignment check
 repository-policy/              `.repository-policy.yaml` format, schema and validator
 wsl-toolchain-doctor/           Linux-first PATH and toolchain auditor for WSL
 opencode-service/               Readiness probes for OpenCode and its Telegram
@@ -65,6 +67,7 @@ bash tests/opencode-service.sh          # the service scripts suite
 bash tests/headroom-runtime.sh          # the Headroom runtime suite
 bash tests/azure-artifacts.sh           # Azure Artifacts configuration suite (requires real mise)
 bash models/routing/opencode/eval/run-tests.sh   # the routing eval suite
+bash models/routing/claude-code/eval/run-tests.sh   # the Claude Code routing suite
 bash -n environments/linux/install.sh
 bash -n headroom-runtime/headroom-runtime.sh
 bash -n tests/headroom-runtime.sh
@@ -79,10 +82,14 @@ shellcheck azure-artifacts/configure.sh tests/azure-artifacts.sh \
   opencode-service/opencode-startup-ready.sh \
   opencode-service/opencode-telegram-ready.sh \
   opencode-service/opencode-gateway-restart.sh tests/opencode-service.sh \
-  headroom-runtime/headroom-runtime.sh tests/headroom-runtime.sh
+  headroom-runtime/headroom-runtime.sh tests/headroom-runtime.sh \
+  models/routing/claude-code/hooks/pin-agent-model.sh \
+  models/routing/claude-code/eval/run-tests.sh \
+  models/routing/claude-code/eval/check-alignment.sh \
+  models/routing/claude-code/eval/tests/*.sh
 ```
 
-All seven suites are the current required set. The routing evidence documents under
+All eight suites are the current required set. The routing evidence documents under
 `models/routing/opencode/docs/` do not establish this component's evidence.
 
 `tests/install.sh` sources the installer's functions by stripping its final

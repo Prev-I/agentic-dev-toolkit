@@ -50,3 +50,17 @@ decision record's addendum. The `max` row was run after that decision.
 Discovery and successful-call evidence only; no role-fixture evidence. The
 user-level rules check and the installed hook are recorded in the addendum
 after installation.
+
+## Addendum — 2026-10-06 installation
+
+Installed on the workstation by the README procedure, at commit `bc56032`,
+after the final branch review. The pre-install settings were backed up as
+`~/.claude/settings.json.pre-claude-code-routing.20261006214021`.
+
+| Check | Observed | Verdict |
+|---|---|---|
+| Alignment | `STATUS: ALIGNED`, exit 0; the pre-existing `modelSettings` was not reported | `ALIGNED` |
+| User-level rule loads from `~/.claude/rules/` | Asked from a fresh directory, a session answered `YES` and quoted the first dispatch rule verbatim | `LOADS`; no fallback needed |
+| Installed hook on a reviewer dispatch with `model: "haiku"`, Sonnet session | `modelUsage`: `claude-sonnet-5-5`, `claude-opus-5-5`; no `claude-haiku-4-5` | `EFFECTIVE`; the `~` in the hook command expands |
+
+Pre-existing `modelSettings`, plugins, `autoMode` and theme were left untouched.

@@ -31,7 +31,7 @@ Three facts shape the port:
 | Decision | Choice | Reason |
 |---|---|---|
 | Scope | Layers A + B | Usable routing with drift detection; evaluation deferred |
-| Profile | Build on Sonnet 5.5; Plan and Reviewer on Opus 5.5; Fable 5.1 only for Expert | Reviewer differs from the implementer model without spending Fable on every review |
+| Profile | Build, Plan and Reviewer on Opus 5.5; General on Sonnet 5.5; Fable 5.1 only for Expert | Build on Opus 5.5 `high` is the closest Anthropic counterpart to OpenCode's Build on GPT-6.1 Sol `high`; Fable is not spent on every review |
 | Breakglass | **Dropped** | It existed for a separate provider and credential; there is none here |
 | Enforcement | Frontmatter + policy + `PreToolUse` hook on `Agent` | Superpowers' per-call `model` makes a policy-only port unreliable by construction |
 | Authority | Agent frontmatter and the settings fragment | No second manifest to keep in sync; the hook knows role names, never models |
@@ -45,7 +45,7 @@ files).
 
 | Role | Claude Code mechanism | Model | Effort |
 |---|---|---|---|
-| Build (controller) | main session: settings `model`, `effortLevel` | `claude-sonnet-5-5` | `high` |
+| Build (controller) | main session: settings `model`, `effortLevel` | `claude-opus-5-5` | `high` |
 | Plan | primary agent `planner`, started with `claude --agent planner` | `claude-opus-5-5` | `xhigh` |
 | General | override of built-in `general-purpose` | `claude-sonnet-5-5` | `medium` |
 | Explore | override of built-in `Explore` | `claude-haiku-4-5` | — |
@@ -98,7 +98,7 @@ The routing-owned keys, and only those:
 
 ```json
 {
-  "model": "claude-sonnet-5-5",
+  "model": "claude-opus-5-5",
   "effortLevel": "high",
   "env": { "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-4-5" },
   "hooks": {
@@ -234,8 +234,12 @@ fixtures are layer C and out of scope, so the profile is recorded as
 
 ## Known deviations from the OpenCode bundle
 
-1. **No family diversity.** Reviewer (Opus) differs from Build and General
-   (Sonnet) by model, not by family.
+1. **No reviewer independence from Build.** Reviewer and Build both run Opus
+   5.5 `high`; Reviewer differs only from General (Sonnet 5.5), and by model,
+   not by family. Independence comes from a fresh context and a read-only,
+   review-only prompt, not from a different model. Moving Reviewer to Fable 5.1
+   is the lever if review quality falls short; it is a profile change, not part
+   of this design.
 2. **No provider separation.** Cost separation replaces it: Fable only on
    Expert.
 3. **No Breakglass.** Its reason for existing does not apply.

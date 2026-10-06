@@ -21,5 +21,5 @@ assert_contains() {
 }
 
 py() {
-  PYTHONPATH="$lib_dir" python3 "$@"
+  PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$lib_dir" python3 "$@"
 }

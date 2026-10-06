@@ -75,11 +75,13 @@ the main thread. Its plan is then handed to an ordinary (Build) session.
 
 ## Install
 
-These are copies, not links. Back up first:
+These are copies, not links. They assume the default `~/.claude`; with
+`CLAUDE_CONFIG_DIR` set, use that directory everywhere below, including in the
+fragment's hook command. Back up first; each install gets its own dated copy:
 
 ```bash
-[ -e ~/.claude/settings.json.pre-claude-code-routing ] || \
-  cp ~/.claude/settings.json ~/.claude/settings.json.pre-claude-code-routing
+[ ! -e ~/.claude/settings.json ] || \
+  cp ~/.claude/settings.json ~/.claude/settings.json.pre-claude-code-routing.$(date +%Y%m%d%H%M%S)
 mkdir -p ~/.claude/agents ~/.claude/hooks ~/.claude/rules
 cp models/routing/claude-code/agents/*.md ~/.claude/agents/
 cp -p models/routing/claude-code/hooks/pin-agent-model.sh ~/.claude/hooks/
@@ -110,8 +112,39 @@ target.write_text(json.dumps(settings, indent=2) + "\n")
 PY
 ```
 
-To roll back: restore `~/.claude/settings.json.pre-claude-code-routing`, then
-delete the six agent files, the hook and `rules/model-routing.md`.
+To roll back, remove exactly what the merge added, and keep every change you
+made since:
+
+```bash
+python3 - ~/.claude/settings.json <<'PY'
+import json, sys
+from pathlib import Path
+target = Path(sys.argv[1])
+settings = json.loads(target.read_text())
+settings.pop("model", None)
+settings.pop("effortLevel", None)
+env = settings.get("env", {})
+env.pop("ANTHROPIC_DEFAULT_HAIKU_MODEL", None)
+if not env:
+    settings.pop("env", None)
+hooks = settings.get("hooks", {})
+hooks["PreToolUse"] = [
+    entry for entry in hooks.get("PreToolUse", [])
+    if not any(str(hook.get("command", "")).rstrip("\"'").endswith("pin-agent-model.sh")
+               for hook in entry.get("hooks", []))
+]
+if not hooks["PreToolUse"]:
+    hooks.pop("PreToolUse")
+if not hooks:
+    settings.pop("hooks", None)
+target.write_text(json.dumps(settings, indent=2) + "\n")
+PY
+rm ~/.claude/agents/{planner,general-purpose,Explore,scout,reviewer,expert}.md \
+  ~/.claude/hooks/pin-agent-model.sh ~/.claude/rules/model-routing.md
+```
+
+This removes `model` and `effortLevel` outright. If you had your own values
+before installing, take them back from the dated backup.
 
 ## Alignment check
 
@@ -139,7 +172,8 @@ bash models/routing/claude-code/eval/run-tests.sh
 ```
 
 No model calls. The suites cover the parser, the hook, the pinned profile,
-the alignment check, and this README's model map.
+the alignment check, this README's model map, and its merge and rollback
+snippets, which they run verbatim against a sample `settings.json`.
 
 ## Verification status
 

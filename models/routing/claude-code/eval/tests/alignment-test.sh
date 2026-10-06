@@ -12,7 +12,10 @@ source "$(dirname "${BASH_SOURCE[0]}")/test-lib.sh"
 check="$bundle/eval/check-alignment.sh"
 workdir=$(mktemp -d)
 trap 'rm -rf "$workdir"' EXIT
-live="$workdir/live"
+# live is $HOME/.claude for a fake HOME, so the fragment's "~/.claude/..."
+# hook command resolves to the installed hook exactly as on a real machine.
+home="$workdir/home"
+live="$home/.claude"
 
 install_bundle() {
   rm -rf "$live"
@@ -25,7 +28,7 @@ install_bundle() {
 
 run_check() {
   set +e
-  CLAUDE_CONFIG_DIR="$live" bash "$check" --json "$workdir/report.json" >"$workdir/out" 2>"$workdir/err"
+  HOME="$home" CLAUDE_CONFIG_DIR="$live" bash "$check" --json "$workdir/report.json" >"$workdir/out" 2>"$workdir/err"
   rc=$?
   set -e
   out=$(cat "$workdir/out")
@@ -88,6 +91,30 @@ assert_eq 1 "$rc"; assert_contains "$out" "ANTHROPIC_DEFAULT_HAIKU_MODEL"
 install_bundle; edit_settings 'del s["hooks"]'; run_check
 assert_eq 1 "$rc"; assert_contains "$out" "settings.hooks.PreToolUse"
 
+# The registered command must reach the installed hook, not merely end in its
+# name: otherwise every Agent call errors and the check still says ALIGNED.
+install_bundle
+edit_settings 's["hooks"]["PreToolUse"][0]["hooks"][0]["command"]="/nonexistent/pin-agent-model.sh"'
+run_check
+assert_eq 1 "$rc"; assert_contains "$out" "settings.hooks.PreToolUse"; assert_contains "$out" "/nonexistent"
+install_bundle
+edit_settings 's["hooks"]["PreToolUse"][0]["hooks"][0]["command"]="\"" + "$" + "HOME/.claude/hooks/pin-agent-model.sh\""'
+run_check
+assert_eq 0 "$rc"; assert_eq ALIGNED "$(status)"
+install_bundle
+edit_settings "s['hooks']['PreToolUse'][0]['hooks'][0]['command']='$live/hooks/pin-agent-model.sh'"
+run_check
+assert_eq 0 "$rc"; assert_eq ALIGNED "$(status)"
+
+# A config dir other than ~/.claude with the fragment's "~/.claude" command:
+# the hook it names is not the one installed there.
+install_bundle
+other="$workdir/other"; rm -rf "$other"; cp -a "$live" "$other"
+set +e
+HOME="$home" CLAUDE_CONFIG_DIR="$other" bash "$check" >"$workdir/out" 2>&1; rc=$?
+set -e
+assert_eq 1 "$rc"; assert_contains "$(cat "$workdir/out")" "settings.hooks.PreToolUse"
+
 # Hook script: content, presence and the exec bit.
 install_bundle; printf '# local edit\n' >>"$live/hooks/pin-agent-model.sh"; run_check
 assert_eq 1 "$rc"; assert_contains "$out" "hooks/pin-agent-model.sh"
@@ -112,7 +139,7 @@ install_bundle; printf '[]' >"$live/settings.json"; run_check
 assert_eq 2 "$rc"; [[ "$err" != *Traceback* ]] || fail "non-object settings must not produce a traceback"
 
 # Usage error.
-set +e; CLAUDE_CONFIG_DIR="$live" bash "$check" --bogus >/dev/null 2>&1; rc=$?; set -e
+set +e; HOME="$home" CLAUDE_CONFIG_DIR="$live" bash "$check" --bogus >/dev/null 2>&1; rc=$?; set -e
 assert_eq 2 "$rc"
 
 printf 'PASS: alignment-test\n'

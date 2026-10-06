@@ -16,8 +16,9 @@ import os
 import sys
 from pathlib import Path
 
-from routing import (PERMISSION_FIELDS, ROUTING_FIELDS, FrontmatterError, load_json,
-                     normalized, parse_agent, registers_pin_hook)
+from routing import (PERMISSION_FIELDS, PIN_HOOK_NAME, ROUTING_FIELDS, FrontmatterError,
+                     hook_command_target, load_json, normalized, parse_agent,
+                     pin_hook_commands)
 
 SETTINGS_KEYS = (("model",), ("effortLevel",), ("env", "ANTHROPIC_DEFAULT_HAIKU_MODEL"))
 
@@ -46,8 +47,13 @@ def compare(bundle, installed):
         want, have = dig(fragment, path), dig(settings, path)
         if want != have:
             add("DRIFT", "settings." + ".".join(path), f"bundle={want!r} installed={have!r}")
-    if not registers_pin_hook(settings):
+    commands = pin_hook_commands(settings)
+    installed_hook = (installed / "hooks" / PIN_HOOK_NAME).resolve()
+    if not commands:
         add("DRIFT", "settings.hooks.PreToolUse", "no Agent matcher runs pin-agent-model.sh")
+    elif not any(hook_command_target(command) == installed_hook for command in commands):
+        add("DRIFT", "settings.hooks.PreToolUse",
+            f"registered command {commands[0]!r} does not run {installed_hook}")
 
     for agent in sorted((bundle / "agents").glob("*.md")):
         item = f"agents/{agent.name}"

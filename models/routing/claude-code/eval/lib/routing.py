@@ -7,6 +7,8 @@ error, never a silent skip: a lenient parser would let a malformed installed
 agent compare as equal to the bundle.
 """
 import json
+import os
+import shlex
 from pathlib import Path
 
 ROUTING_FIELDS = ("model", "effort")
@@ -54,16 +56,33 @@ def load_json(path):
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
-def registers_pin_hook(settings):
-    """True when settings route Agent calls through pin-agent-model.sh."""
+def pin_hook_commands(settings):
+    """Commands of Agent-matcher PreToolUse hooks that run pin-agent-model.sh."""
     hooks = settings.get("hooks") if isinstance(settings, dict) else None
     entries = hooks.get("PreToolUse") if isinstance(hooks, dict) else None
     if not isinstance(entries, list):
-        return False
+        return []
+    commands = []
     for entry in entries:
         if not isinstance(entry, dict) or entry.get("matcher") != "Agent":
             continue
         for hook in entry.get("hooks") or []:
-            if isinstance(hook, dict) and str(hook.get("command", "")).endswith(PIN_HOOK_NAME):
-                return True
-    return False
+            if isinstance(hook, dict) and str(hook.get("command", "")).rstrip('"\'').endswith(PIN_HOOK_NAME):
+                commands.append(str(hook["command"]))
+    return commands
+
+
+def registers_pin_hook(settings):
+    """True when settings route Agent calls through pin-agent-model.sh."""
+    return bool(pin_hook_commands(settings))
+
+
+def hook_command_target(command):
+    """The file a hook command runs, with quotes, ~ and $VARS resolved; None if unparseable."""
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return None
+    if not words:
+        return None
+    return Path(os.path.expandvars(os.path.expanduser(words[0]))).resolve()

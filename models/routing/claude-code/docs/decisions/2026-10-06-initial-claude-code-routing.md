@@ -41,3 +41,14 @@ Prices and effort support come from Anthropic's model documentation as of
 2026-10-06. Live capability evidence is in
 `../evidence/2026-10-06-capability.md`. No role-fixture evidence exists.
 Later corrections are appended as dated addenda, never edited in place.
+
+## Addendum — 2026-10-06 Reviewer and Explore lose Bash
+
+The design gave Reviewer and Explore `Bash` limited by `Bash(git diff:*)`-style
+patterns in their `tools` frontmatter. Live probe P5 showed Claude Code 2.1.291
+ignores those patterns there: with Bash permitted to the session, the probe
+reviewer ran `touch` and created a file. A plain allowlist (`Read, Grep, Glob`)
+is enforced (probe P5b: no Write, no Bash). Per the design's declared fallback,
+both agents now have `Read, Grep, Glob` only, and the routing policy tells the
+caller to hand Reviewer the change as a file. Superpowers' review templates
+that run `git diff` themselves are adapted by the caller, not edited.

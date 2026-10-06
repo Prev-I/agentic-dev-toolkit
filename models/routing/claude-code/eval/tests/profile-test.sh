@@ -19,11 +19,9 @@ EXPECTED = {
     "planner": {"model": "claude-opus-5-5", "effort": "xhigh", "permissionMode": "plan",
                 "disallowedTools": "Edit, Write, NotebookEdit"},
     "general-purpose": {"model": "claude-sonnet-5-5", "effort": "medium"},
-    "Explore": {"model": "claude-haiku-4-5",
-                "tools": "Read, Grep, Glob, Bash(ls:*), Bash(git log:*), Bash(git show:*), Bash(git grep:*)"},
+    "Explore": {"model": "claude-haiku-4-5", "tools": "Read, Grep, Glob"},
     "scout": {"model": "claude-haiku-4-5", "tools": "WebSearch, WebFetch, Read, Grep, Glob"},
-    "reviewer": {"model": "claude-opus-5-5", "effort": "high",
-                 "tools": "Read, Grep, Glob, Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(git show:*)"},
+    "reviewer": {"model": "claude-opus-5-5", "effort": "high", "tools": "Read, Grep, Glob"},
     "expert": {"model": "claude-fable-5-1", "effort": "xhigh", "maxTurns": "6",
                "tools": "Read, Grep, Glob",
                "disallowedTools": "Edit, Write, NotebookEdit, Bash, WebFetch, WebSearch, Agent"},
@@ -48,6 +46,9 @@ for name in ("reviewer", "expert", "Explore", "scout"):
     tools = normalized("tools", parse_agent(agents[name])[0]["tools"])
     for forbidden in ("Edit", "Write", "NotebookEdit", "Agent", "Bash"):
         assert forbidden not in tools, f"{name} must not have {forbidden}"
+    # Claude Code 2.1.291 ignores Bash(...) patterns in a subagent's `tools`
+    # and grants unrestricted Bash (evidence P5), so none may appear.
+    assert not any(tool.startswith("Bash") for tool in tools), f"{name}: no Bash in any form"
 
 fragment = load_json(bundle / "settings.fragment.json")
 assert set(fragment) == {"model", "effortLevel", "env", "hooks"}, sorted(fragment)

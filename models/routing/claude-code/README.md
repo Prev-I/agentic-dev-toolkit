@@ -65,6 +65,11 @@ the main thread. Its plan is then handed to an ordinary (Build) session.
    pinned to Haiku 4.5.
 5. **Plan is a launch choice, not a mode switch.** OpenCode switches primary
    agents inside a session; here planning is its own session.
+6. **Reviewer and Explore have no shell.** OpenCode let Reviewer run
+   `git status/diff/log/show` only. Claude Code ignores `Bash(...)` patterns in
+   a subagent's `tools` and grants unrestricted Bash instead (evidence P5), so
+   both get `Read, Grep, Glob` only. The caller hands Reviewer the diff as a
+   file; `model-routing.md` says how.
 
 ## Install
 

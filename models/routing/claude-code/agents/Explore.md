@@ -2,7 +2,7 @@
 name: Explore
 description: Fast read-only codebase exploration. Use it to locate files, symbols and patterns and to gather context before editing; it never modifies anything.
 model: claude-haiku-4-5
-tools: Read, Grep, Glob, Bash(ls:*), Bash(git log:*), Bash(git show:*), Bash(git grep:*)
+tools: Read, Grep, Glob
 ---
 
 # Explore

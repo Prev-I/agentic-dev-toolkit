@@ -29,6 +29,11 @@ main session's in `~/.claude/settings.json`.
 2. For `general-purpose`, a skill's own model-selection guidance applies.
    When nothing asks for a specific model, omit it.
 3. Do not send work to `expert` that `reviewer` or Build can settle.
+4. `reviewer` and `Explore` have no shell. Before dispatching `reviewer`,
+   write the change to a file and give its path in the prompt: the review
+   package a skill already produced, or `git diff BASE..HEAD > <scratch>/review.diff`.
+   Where a review template tells the reviewer to run `git diff`, replace those
+   commands with that path. Give `Explore` the history it needs the same way.
 
 ## Superpowers integration
 

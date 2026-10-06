@@ -55,6 +55,77 @@ dispatchers from production sessions, and requires human confirmation before
 applying trigger thresholds. Its README defines the weekly review and privacy
 boundary.
 
+## Agent interaction
+
+This diagram shows the intended policy flow with Build as the controller, not
+measured session traffic or an automatic dispatch schedule. All models are on
+GitHub Copilot unless marked as direct OpenAI. Solid arrows show task assignment
+or delegation; dashed arrows show handoffs, returned results, or runtime services.
+
+```mermaid
+flowchart TB
+    User["User"]
+
+    subgraph Primary["Primary agents"]
+        Plan["Plan<br/>Opus 5.5 · xhigh"]
+        Build["Build / Controller<br/>GPT-6.1 Sol · high"]
+        Breakglass["Breakglass<br/>GPT-6.1 Sol · max<br/>Direct OpenAI"]
+    end
+
+    subgraph Delegated["Task subagents"]
+        General["General<br/>GPT-6.1 Sol · medium"]
+        Explore["Explore<br/>GPT-6 Luna · medium"]
+        Scout["Scout<br/>GPT-6 Luna · low"]
+        Reviewer["Reviewer<br/>Opus 5.5 · high"]
+        Expert["Expert<br/>GPT-6 Astra · xhigh<br/>Direct OpenAI"]
+    end
+
+    subgraph Auxiliary["OpenCode runtime services"]
+        Runtime["Active session runtime"]
+        Title["Title<br/>GPT-6 Luna · low"]
+        Compaction["Compaction<br/>Sonnet 5.5 · configured low<br/>1.18.32 inherits parent variant"]
+        Summary["Summary<br/>GPT-6 Luna · low<br/>Explicit invocation"]
+    end
+
+    User -->|"Planning"| Plan
+    User -->|"Implementation"| Build
+    Plan -.->|"Plan and control handoff"| Build
+
+    Build -->|"Task: delegated implementation"| General
+    Build -->|"Task: local exploration"| Explore
+    Build -->|"Task: targeted research"| Scout
+    Build -->|"Task: independent review"| Reviewer
+    Build -->|"Task: escalation with decision packet"| Expert
+
+    General -.->|"Work product"| Build
+    Explore -.->|"Context"| Build
+    Scout -.->|"Evidence"| Build
+    Reviewer -.->|"Findings"| Build
+    Expert -.->|"Advisory recommendation"| Build
+
+    User -->|"Manual primary selection"| Breakglass
+    Plan -.-> Runtime
+    Build -.-> Runtime
+    Breakglass -.-> Runtime
+    Runtime -.->|"Root-session title"| Title
+    Runtime -.->|"Context compaction"| Compaction
+    User -->|"Explicit request"| Summary
+```
+
+- **Plan to Build is a handoff**, not an automatic Task invocation. Plan and
+  General also have Task permissions; the diagram focuses on the Build-led flow.
+- **Reviewer and Expert return assessments.** Expert does not implement changes;
+  the calling controller retains decision and implementation responsibility.
+- **Breakglass is human-selected only.** Task delegation to it is denied.
+- **Title and Compaction are runtime services**, not ordinary controller Task
+  calls, and can serve primary agents other than Build. Task children do not
+  generate automatic titles in OpenCode 1.18.32.
+- **Compaction variant inheritance is a known deviation** in OpenCode 1.18.32:
+  configured `low` does not govern the inherited variant on that path. See the
+  [append-only alignment addendum](docs/decisions/2026-10-03-current-routing-alignment.md#addendum--2026-10-04-compaction-variant-inheritance).
+- **Automatic snapshot summaries do not invoke Summary.** The configured Summary
+  model is available through explicit invocation.
+
 ## Routing migration
 
 The historical OpenCode V1 multi-model routing restoration was governed by:

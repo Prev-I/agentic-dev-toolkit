@@ -8,7 +8,8 @@ part of it.
 
 Design: [`docs/superpowers/specs/2026-10-06-claude-code-model-routing-design.md`](../../../docs/superpowers/specs/2026-10-06-claude-code-model-routing-design.md).
 Selection rationale: [initial routing decision](docs/decisions/2026-10-06-initial-claude-code-routing.md),
-amended by [Haiku roles on Haiku 5.5](docs/decisions/2026-10-09-haiku-roles-on-haiku-5-5.md).
+amended by [Haiku roles on Haiku 5.5](docs/decisions/2026-10-09-haiku-roles-on-haiku-5-5.md) and
+[Expert on Fable 5.1](docs/decisions/2026-10-09-expert-on-fable-5-1.md).
 
 ## Model map
 
@@ -20,7 +21,7 @@ amended by [Haiku roles on Haiku 5.5](docs/decisions/2026-10-09-haiku-roles-on-h
 | Explore | `agents/Explore.md` | `claude-haiku-5-5` | `medium` |
 | Scout | `agents/scout.md` | `claude-haiku-5-5` | `low` |
 | Reviewer | `agents/reviewer.md` | `claude-opus-5-5` | `high` |
-| Expert | `agents/expert.md` | `claude-opus-5-5` | `max` |
+| Expert | `agents/expert.md` | `claude-fable-5-1` | `xhigh` |
 | Background tasks | `env.ANTHROPIC_DEFAULT_HAIKU_MODEL` | `claude-haiku-5-5` | — |
 
 The background slot has no effort setting of its own; see deviation 4.
@@ -61,12 +62,16 @@ the main thread. Its plan is then handed to an ordinary (Build) session.
 1. **Reviewer is not independent of Build by model.** Both run Opus 5.5
    `high`. Independence comes from a fresh context and a read-only,
    review-only prompt. Moving Reviewer to Fable 5.1 is the lever if reviews
-   fall short; it needs usage credits on the account (see the decision
-   record) and is a profile change with its own decision record.
-2. **No provider or model separation for Expert.** Everything runs on one
-   Anthropic account, and Fable 5.1 needed usage credits this account did not
-   have on 2026-10-06. Expert runs Opus 5.5 like Build, Plan and Reviewer; what sets it apart
-   is `max` effort, a six-turn cap and escalation-only use.
+   fall short. On this account Fable 5.1 bills to usage credits (see the
+   [Expert decision record](docs/decisions/2026-10-09-expert-on-fable-5-1.md)),
+   and the move is a profile change with its own decision record.
+2. **No provider separation for Expert.** Everything runs on one Anthropic
+   account. Model and cost-tier separation is restored: Expert runs Fable 5.1
+   `xhigh`, the scarce tier, while Build, Plan and Reviewer run Opus 5.5. It
+   also differs by a six-turn cap and escalation-only use. On this account
+   Fable 5.1 bills to usage credits, and an interactive session asks for
+   consent before the first Fable request that does; see the
+   [Expert decision record](docs/decisions/2026-10-09-expert-on-fable-5-1.md).
 3. **No Breakglass.** It existed for a separate provider and credential, and
    there is none here.
 4. **Compaction and session titles are not routable per role.** Claude Code

@@ -90,3 +90,17 @@ documented, and nothing reported it as unknown.
 Discovery and successful-call evidence only; no role-fixture evidence. Haiku
 5.5's fitness for Explore and Scout, and Fable 5.1's for Expert, are not shown
 here.
+
+## Addendum — 2026-10-09 Expert dispatch on Fable 5.1
+
+Recorded with the [Expert on Fable 5.1](../decisions/2026-10-09-expert-on-fable-5-1.md)
+decision. Same setup as the Build-session dispatch above, with the probe
+`expert` as committed (`claude-fable-5-1`, `effort: xhigh`, `maxTurns: 6`),
+dispatched with `model: "sonnet"` and asked to reply `PONG`:
+
+| Agent | Hook in the debug log | Model dispatches in the debug log, in order | modelUsage | Result |
+|---|---|---|---|---|
+| `expert` | `modified tool input keys: [description, prompt, subagent_type, run_in_background]` (`model` removed) | `claude-opus-5-5`, hook, `claude-fable-5-1`, `claude-opus-5-5` | `claude-fable-5-1`, `claude-opus-5-5` | `PONG` |
+
+`-p` asks for no consent before billing usage credits, so this shows the route
+works, not how an interactive session's consent prompt behaves on a subagent.

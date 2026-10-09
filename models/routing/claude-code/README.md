@@ -7,7 +7,12 @@ the OpenCode bundle). Role fixtures and session observation (layer C) are not
 part of it.
 
 Design: [`docs/superpowers/specs/2026-10-06-claude-code-model-routing-design.md`](../../../docs/superpowers/specs/2026-10-06-claude-code-model-routing-design.md).
-Selection rationale: [initial routing decision](docs/decisions/2026-10-06-initial-claude-code-routing.md).
+Selection rationale: [initial routing decision](docs/decisions/2026-10-06-initial-claude-code-routing.md),
+amended by [Haiku roles on Haiku 5.5](docs/decisions/2026-10-09-haiku-roles-on-haiku-5-5.md),
+[Expert on Fable 5.1](docs/decisions/2026-10-09-expert-on-fable-5-1.md),
+[Build effort in modelSettings](docs/decisions/2026-10-09-build-effort-in-model-settings.md),
+[the hook pinning effort](docs/decisions/2026-10-09-hook-pins-effort.md) and
+[Scout at medium](docs/decisions/2026-10-09-scout-at-medium.md).
 
 ## Model map
 
@@ -16,14 +21,15 @@ Selection rationale: [initial routing decision](docs/decisions/2026-10-06-initia
 | Build (main session) | `settings.fragment.json` | `claude-opus-5-5` | `high` |
 | Plan | `agents/planner.md` | `claude-opus-5-5` | `xhigh` |
 | General | `agents/general-purpose.md` | `claude-sonnet-5-5` | `medium` |
-| Explore | `agents/Explore.md` | `claude-haiku-4-5` | — |
-| Scout | `agents/scout.md` | `claude-haiku-4-5` | — |
+| Explore | `agents/Explore.md` | `claude-haiku-5-5` | `medium` |
+| Scout | `agents/scout.md` | `claude-haiku-5-5` | `medium` |
 | Reviewer | `agents/reviewer.md` | `claude-opus-5-5` | `high` |
-| Expert | `agents/expert.md` | `claude-opus-5-5` | `max` |
-| Background tasks | `env.ANTHROPIC_DEFAULT_HAIKU_MODEL` | `claude-haiku-4-5` | — |
+| Expert | `agents/expert.md` | `claude-fable-5-1` | `xhigh` |
+| Background tasks | `env.ANTHROPIC_DEFAULT_HAIKU_MODEL` | `claude-haiku-5-5` | — |
 
-Haiku 4.5 does not support effort levels. `eval/tests/docs-test.sh` fails if
-this table disagrees with the agent files or the settings fragment.
+The background slot has no effort setting of its own; see deviation 4.
+`eval/tests/docs-test.sh` fails if this table disagrees with the agent files or
+the settings fragment.
 
 ## How routing works
 
@@ -31,17 +37,26 @@ Two layers, as in the OpenCode bundle:
 
 - **Deterministic: which model a role runs on.** Each agent's frontmatter
   declares `model` and `effort`; the settings fragment does the same for the
-  main session. These files are the only routing authority.
+  main session, through `modelSettings`. These files are the only routing
+  authority.
 - **Semantic: which role gets which work.** `model-routing.md` tells the
   controller when to use `general-purpose`, `reviewer`, `expert`, `Explore`,
   `scout` and `planner`. It never names a model.
 
 Superpowers passes an explicit `model` on every subagent dispatch, and on
 Claude Code a per-call `model` beats the agent's frontmatter.
-`hooks/pin-agent-model.sh` is a `PreToolUse` hook on `Agent` that removes
-`model` from calls to `reviewer`, `expert`, `scout`, `Explore` and `planner`,
-so their frontmatter applies. `general-purpose` is left alone, so Superpowers
-can still pick a cheaper or stronger model per task.
+Since Claude Code 2.1.292 a per-call `effort` beats the frontmatter's `effort`
+in the same way. `hooks/pin-agent-model.sh` is a `PreToolUse` hook on `Agent`
+that removes `model` and `effort` from calls to `reviewer`, `expert`, `scout`,
+`Explore` and `planner`, so their frontmatter applies. `general-purpose` is
+left alone, so Superpowers can still pick a cheaper or stronger model or effort
+per task.
+
+`CLAUDE_CODE_EFFORT_LEVEL` still overrides every agent's `effort` and Build's
+saved level, by design: it is an explicit choice. Leave it unset for the
+profile to apply. Exported in the shell, the alignment check cannot see it; set
+under `env` in `settings.json`, it is the user's own setting and is not
+reported. See the [hook effort decision](docs/decisions/2026-10-09-hook-pins-effort.md).
 
 The hook never approves anything and never blocks: if it fails, Claude Code
 reports a non-blocking error and routing falls back to the policy alone.
@@ -54,17 +69,23 @@ the main thread. Its plan is then handed to an ordinary (Build) session.
 1. **Reviewer is not independent of Build by model.** Both run Opus 5.5
    `high`. Independence comes from a fresh context and a read-only,
    review-only prompt. Moving Reviewer to Fable 5.1 is the lever if reviews
-   fall short; it needs usage credits on the account (see the decision
-   record) and is a profile change with its own decision record.
-2. **No provider or model separation for Expert.** Everything runs on one
-   Anthropic account, and Fable 5.1 needs usage credits this account does not
-   have. Expert runs Opus 5.5 like Build, Plan and Reviewer; what sets it apart
-   is `max` effort, a six-turn cap and escalation-only use.
+   fall short. On this account Fable 5.1 bills to usage credits (see the
+   [Expert decision record](docs/decisions/2026-10-09-expert-on-fable-5-1.md)),
+   and the move is a profile change with its own decision record.
+2. **No provider separation for Expert.** Everything runs on one Anthropic
+   account. Model and cost-tier separation is restored: Expert runs Fable 5.1
+   `xhigh`, the scarce tier, while Build, Plan and Reviewer run Opus 5.5. It
+   also differs by a six-turn cap and escalation-only use. On this account
+   Fable 5.1 bills to usage credits, and an interactive session asks for
+   consent before the first Fable request that does; see the
+   [Expert decision record](docs/decisions/2026-10-09-expert-on-fable-5-1.md).
 3. **No Breakglass.** It existed for a separate provider and credential, and
    there is none here.
 4. **Compaction and session titles are not routable per role.** Claude Code
    has no separate compaction setting; background tasks use the haiku slot,
-   pinned to Haiku 4.5.
+   pinned to Haiku 5.5. Its effort is not configurable separately: Claude Code
+   documents no effort control for background functionality, so it runs at
+   whatever effort Claude Code applies to Haiku 5.5, not one this bundle sets.
 5. **Plan is a launch choice, not a mode switch.** OpenCode switches primary
    agents inside a session; here planning is its own session.
 6. **Reviewer and Explore have no shell.** OpenCode let Reviewer run
@@ -72,6 +93,10 @@ the main thread. Its plan is then handed to an ordinary (Build) session.
    a subagent's `tools` and grants unrestricted Bash instead (evidence P5), so
    both get `Read, Grep, Glob` only. The caller hands Reviewer the diff as a
    file; `model-routing.md` says how.
+7. **Scout runs `medium`, not `low`.** OpenCode's scout runs GPT-6 Luna
+   `low`. Here Scout runs Haiku 5.5 `medium`, because Anthropic warns that at
+   `low` the model is more likely to skip a search; see the
+   [Scout decision](docs/decisions/2026-10-09-scout-at-medium.md).
 
 ## Install
 
@@ -102,7 +127,8 @@ fragment = json.loads(Path(sys.argv[1]).read_text())
 target = Path(sys.argv[2])
 settings = json.loads(target.read_text()) if target.exists() else {}
 settings["model"] = fragment["model"]
-settings["effortLevel"] = fragment["effortLevel"]
+for model, entry in fragment["modelSettings"].items():
+    settings.setdefault("modelSettings", {}).setdefault(model, {}).update(entry)
 settings.setdefault("env", {}).update(fragment["env"])
 pre = settings.setdefault("hooks", {}).setdefault("PreToolUse", [])
 for entry in fragment["hooks"]["PreToolUse"]:
@@ -122,7 +148,13 @@ from pathlib import Path
 target = Path(sys.argv[1])
 settings = json.loads(target.read_text())
 settings.pop("model", None)
-settings.pop("effortLevel", None)
+model_settings = settings.get("modelSettings", {})
+opus = model_settings.get("claude-opus-5-5", {})
+opus.pop("effortLevel", None)
+if not opus:
+    model_settings.pop("claude-opus-5-5", None)
+if not model_settings:
+    settings.pop("modelSettings", None)
 env = settings.get("env", {})
 env.pop("ANTHROPIC_DEFAULT_HAIKU_MODEL", None)
 if not env:
@@ -143,8 +175,21 @@ rm ~/.claude/agents/{planner,general-purpose,Explore,scout,reviewer,expert}.md \
   ~/.claude/hooks/pin-agent-model.sh ~/.claude/rules/model-routing.md
 ```
 
-This removes `model` and `effortLevel` outright. If you had your own values
-before installing, take them back from the dated backup.
+This removes `model` and Opus 5.5's saved effort outright. If you had your own
+values before installing, take them back from the dated backup. That includes a
+level saved with `/effort` on Opus 5.5 before installing: `/effort` writes the
+same key the merge sets, so the rollback removes it too. Restore it with
+`/effort` or from the backup.
+
+Build's effort is set under `modelSettings`, not as a top-level `effortLevel`:
+in `~/.claude/settings.json`, Opus 5.5 and later models ignore the top-level
+key ([decision](docs/decisions/2026-10-09-build-effort-in-model-settings.md)).
+An install made before that change left a top-level `effortLevel: "high"`;
+neither the merge nor the rollback touches it, so remove it by hand if you do
+not want it. It does not reach Opus 5.5, Sonnet 5.5 or Haiku 5.5; it still
+applies to Fable 5.1, where Expert's frontmatter `effort` takes precedence
+(evidence E1). `modelSettings` needs Claude Code 2.1.251 or later: an older
+version ignores it, and Build falls to Opus 5.5's default effort.
 
 ## Alignment check
 
@@ -158,7 +203,7 @@ usage error or nothing installed.
 
 | Severity | Covers | Fails |
 |---|---|---|
-| `DRIFT` | settings `model`, `effortLevel`, `env.ANTHROPIC_DEFAULT_HAIKU_MODEL`, the hook registration; each agent's `model`, `effort`, `tools`, `disallowedTools`, `maxTurns`, `permissionMode`; the hook script's content and exec bit; a missing agent, hook or policy file | yes |
+| `DRIFT` | settings `model`, `modelSettings.claude-opus-5-5.effortLevel`, `env.ANTHROPIC_DEFAULT_HAIKU_MODEL`, the hook registration; each agent's `model`, `effort`, `tools`, `disallowedTools`, `maxTurns`, `permissionMode`; the hook script's content and exec bit; a missing agent, hook or policy file | yes |
 | `STALE` | agent prompt bodies; the policy's content | no |
 
 Everything else in your configuration is yours and is never reported. It
@@ -180,7 +225,10 @@ snippets, which they run verbatim against a sample `settings.json`.
 The profile is **capability-verified, not role-verified**. Live checks of the
 mechanisms this bundle relies on, and one trivial successful call per model
 and effort pair, are recorded in
-[`docs/evidence/2026-10-06-capability.md`](docs/evidence/2026-10-06-capability.md).
+[`docs/evidence/2026-10-06-capability.md`](docs/evidence/2026-10-06-capability.md)
+and, for Claude Code 2.1.295, the Haiku 5.5 and Fable 5.1 pairs and the
+effort each request actually carries,
+[`docs/evidence/2026-10-09-capability.md`](docs/evidence/2026-10-09-capability.md).
 Role fixtures, which would show each model is fit for its role, are out of
 scope.
 

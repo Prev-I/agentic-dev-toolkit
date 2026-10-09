@@ -5,9 +5,10 @@ IFS=$'\n\t'
 source "$(dirname "${BASH_SOURCE[0]}")/test-lib.sh"
 
 # The hook is the deterministic half of routing: Superpowers always passes a
-# per-call `model`, which would otherwise beat the agent's frontmatter. These
-# cases pin what it rewrites, what it must leave alone, and that a failure is
-# never blocking (exit 2 would block every delegation).
+# per-call `model`, and a caller may pass `effort`; either would otherwise beat
+# the agent's frontmatter. These cases pin what it rewrites, what it must leave
+# alone, and that a failure is never blocking (exit 2 would block every
+# delegation).
 
 hook="$bundle/hooks/pin-agent-model.sh"
 [[ -x "$hook" ]] || fail "hook missing or not executable: $hook"
@@ -29,9 +30,9 @@ agent_event() {
     "$1" "${2:+,$2}"
 }
 
-# Every pinned role: model stripped, everything else preserved.
+# Every pinned role: model and effort stripped, everything else preserved.
 for role in reviewer expert scout Explore planner; do
-  run_hook "$(agent_event "$role" '"model":"sonnet","run_in_background":true,"isolation":"worktree"')"
+  run_hook "$(agent_event "$role" '"model":"sonnet","effort":"max","run_in_background":true,"isolation":"worktree"')"
   assert_eq 0 "$rc"
   [[ "$out" != *permissionDecision* ]] || fail "$role: hook must never emit permissionDecision"
   python3 - "$role" "$out" <<'PY' || fail "$role: wrong updatedInput: $out"
@@ -44,16 +45,19 @@ assert spec["updatedInput"] == {"subagent_type": role, "description": "d", "prom
 PY
 done
 
-# A present key is an override whatever its value.
-for value in null '""'; do
-  run_hook "$(agent_event reviewer "\"model\":$value")"
-  assert_eq 0 "$rc"
-  assert_contains "$out" '"updatedInput"'
-  [[ "$out" != *'"model"'* ]] || fail "model:$value must be stripped: $out"
+# A present key is an override whatever its value, and either key alone is
+# enough to rewrite the call.
+for key in model effort; do
+  for value in null '""' '"low"'; do
+    run_hook "$(agent_event reviewer "\"$key\":$value")"
+    assert_eq 0 "$rc"
+    assert_contains "$out" '"updatedInput"'
+    [[ "$out" != *"\"$key\""* ]] || fail "$key:$value must be stripped: $out"
+  done
 done
 
 # Not pinned, or nothing to strip: no output at all.
-run_hook "$(agent_event general-purpose '"model":"haiku"')"
+run_hook "$(agent_event general-purpose '"model":"haiku","effort":"max"')"
 assert_eq 0 "$rc"; assert_eq "" "$out"
 run_hook "$(agent_event reviewer '')"
 assert_eq 0 "$rc"; assert_eq "" "$out"

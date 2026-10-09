@@ -20,7 +20,7 @@ from routing import (PERMISSION_FIELDS, PIN_HOOK_NAME, ROUTING_FIELDS, Frontmatt
                      hook_command_target, load_json, normalized, parse_agent,
                      pin_hook_commands)
 
-SETTINGS_KEYS = (("model",), ("effortLevel",), ("env", "ANTHROPIC_DEFAULT_HAIKU_MODEL"))
+SETTINGS_KEYS = (("model",), ("env", "ANTHROPIC_DEFAULT_HAIKU_MODEL"))
 
 
 def dig(data, path):
@@ -43,7 +43,12 @@ def compare(bundle, installed):
     if not isinstance(settings, dict):
         raise ValueError(f"{settings_path} is not a JSON object")
 
-    for path in SETTINGS_KEYS:
+    # Per-model keys come from the fragment, so a change of Build's model
+    # cannot leave the check comparing an entry nobody sets.
+    model_paths = tuple(("modelSettings", model, key)
+                        for model, entry in fragment.get("modelSettings", {}).items()
+                        for key in entry)
+    for path in SETTINGS_KEYS + model_paths:
         want, have = dig(fragment, path), dig(settings, path)
         if want != have:
             add("DRIFT", "settings." + ".".join(path), f"bundle={want!r} installed={have!r}")

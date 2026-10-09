@@ -58,7 +58,7 @@ assert_eq 0 "$rc"; assert_eq ALIGNED "$(status)"; assert_contains "$out" "STATUS
 install_bundle
 printf -- '---\nname: mine\ndescription: x\nmodel: claude-haiku-4-5\n---\nmine\n' >"$live/agents/mine.md"
 printf 'my rule\n' >"$live/rules/mine.md"
-edit_settings 's["theme"]="dark"; s["env"]["MY_VAR"]="1"; s["hooks"]["PreToolUse"].append({"matcher":"Bash","hooks":[{"type":"command","command":"/bin/true"}]}); s["modelSettings"]={"claude-opus-5-5":{"effortLevel":"high"}}'
+edit_settings 's["theme"]="dark"; s["env"]["MY_VAR"]="1"; s["hooks"]["PreToolUse"].append({"matcher":"Bash","hooks":[{"type":"command","command":"/bin/true"}]}); s["modelSettings"]["claude-sonnet-5-5"]={"effortLevel":"low"}; s["modelSettings"]["claude-opus-5-5"]["autoCompactWindow"]="auto"'
 run_check
 assert_eq 0 "$rc"; assert_eq ALIGNED "$(status)"
 
@@ -86,6 +86,10 @@ assert_eq 0 "$rc"; assert_eq STALE "$(status)"; assert_contains "$out" "STALE"
 # Settings routing keys.
 install_bundle; edit_settings 's["model"]="claude-sonnet-5-5"'; run_check
 assert_eq 1 "$rc"; assert_contains "$out" "settings.model"
+install_bundle; edit_settings 's["modelSettings"]["claude-opus-5-5"]["effortLevel"]="medium"'; run_check
+assert_eq 1 "$rc"; assert_contains "$out" "settings.modelSettings.claude-opus-5-5.effortLevel"
+install_bundle; edit_settings 'del s["modelSettings"]'; run_check
+assert_eq 1 "$rc"; assert_contains "$out" "settings.modelSettings.claude-opus-5-5.effortLevel"
 install_bundle; edit_settings 's["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"]="claude-sonnet-5-5"'; run_check
 assert_eq 1 "$rc"; assert_contains "$out" "ANTHROPIC_DEFAULT_HAIKU_MODEL"
 install_bundle; edit_settings 'del s["hooks"]'; run_check

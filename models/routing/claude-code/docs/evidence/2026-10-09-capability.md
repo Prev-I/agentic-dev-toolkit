@@ -233,3 +233,20 @@ fragment's top-level `effortLevel` therefore left Build at `medium` wherever the
 user had not saved a level for Opus 5.5. The Opus 5.5 row cannot isolate the
 top-level key, because the file also holds a `modelSettings` entry, and
 changing `~/.claude` was out of bounds.
+
+## Addendum — 2026-10-09 E2, a per-call `effort` against the hook
+
+Recorded with [The Hook Pins Effort](../decisions/2026-10-09-hook-pins-effort.md),
+after E1 and E3 above. Same setup as E1, `scout` dispatched with
+`model: "sonnet"` and `effort: "max"`. In the second run a logging hook,
+registered before the pin hook on the same matcher, recorded the Agent call's
+input as the hooks saw it.
+
+| Hook | Agent call input | Hook output keys | Scout request |
+|---|---|---|---|
+| as it stood before that decision, stripping `model` only | not recorded; `effort` was present, since the hook's output keys include it | `[description, prompt, subagent_type, effort, run_in_background]` | Haiku 5.5 `max` |
+| `model` and `effort` | `{"subagent_type": "scout", "model": "sonnet", "effort": "max", …}` (abridged) | `[description, prompt, subagent_type, run_in_background]` | Haiku 5.5 `low` |
+
+A per-call `effort` beats the frontmatter, as the subagents documentation
+states (<https://code.claude.com/docs/en/subagents>), and stripping it in the
+hook restores the frontmatter's `low`. `CONFIRMED` and `EFFECTIVE`.

@@ -9,8 +9,9 @@ part of it.
 Design: [`docs/superpowers/specs/2026-10-06-claude-code-model-routing-design.md`](../../../docs/superpowers/specs/2026-10-06-claude-code-model-routing-design.md).
 Selection rationale: [initial routing decision](docs/decisions/2026-10-06-initial-claude-code-routing.md),
 amended by [Haiku roles on Haiku 5.5](docs/decisions/2026-10-09-haiku-roles-on-haiku-5-5.md),
-[Expert on Fable 5.1](docs/decisions/2026-10-09-expert-on-fable-5-1.md) and
-[Build effort in modelSettings](docs/decisions/2026-10-09-build-effort-in-model-settings.md).
+[Expert on Fable 5.1](docs/decisions/2026-10-09-expert-on-fable-5-1.md),
+[Build effort in modelSettings](docs/decisions/2026-10-09-build-effort-in-model-settings.md) and
+[the hook pinning effort](docs/decisions/2026-10-09-hook-pins-effort.md).
 
 ## Model map
 
@@ -43,15 +44,18 @@ Two layers, as in the OpenCode bundle:
 
 Superpowers passes an explicit `model` on every subagent dispatch, and on
 Claude Code a per-call `model` beats the agent's frontmatter.
-`hooks/pin-agent-model.sh` is a `PreToolUse` hook on `Agent` that removes
-`model` from calls to `reviewer`, `expert`, `scout`, `Explore` and `planner`,
-so their frontmatter applies. `general-purpose` is left alone, so Superpowers
-can still pick a cheaper or stronger model per task.
+Since Claude Code 2.1.292 a per-call `effort` beats the frontmatter's `effort`
+in the same way. `hooks/pin-agent-model.sh` is a `PreToolUse` hook on `Agent`
+that removes `model` and `effort` from calls to `reviewer`, `expert`, `scout`,
+`Explore` and `planner`, so their frontmatter applies. `general-purpose` is
+left alone, so Superpowers can still pick a cheaper or stronger model or effort
+per task.
 
-The hook pins `model` only. Frontmatter `effort` is overridden by a per-call
-`effort` on the Agent tool (Claude Code 2.1.292 and later) and by
-`CLAUDE_CODE_EFFORT_LEVEL`. The hook pins neither and the alignment check,
-which reads files only, cannot see either; see the [Haiku 5.5 decision](docs/decisions/2026-10-09-haiku-roles-on-haiku-5-5.md).
+`CLAUDE_CODE_EFFORT_LEVEL` still overrides every agent's `effort` and Build's
+saved level, by design: it is an explicit choice. Leave it unset for the
+profile to apply. Exported in the shell, the alignment check cannot see it; set
+under `env` in `settings.json`, it is the user's own setting and is not
+reported. See the [hook effort decision](docs/decisions/2026-10-09-hook-pins-effort.md).
 
 The hook never approves anything and never blocks: if it fails, Claude Code
 reports a non-blocking error and routing falls back to the policy alone.

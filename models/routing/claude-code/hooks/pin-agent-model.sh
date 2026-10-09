@@ -4,11 +4,12 @@ IFS=$'\n\t'
 
 # Claude Code PreToolUse hook for the Agent tool.
 #
-# Routed roles take their model from their agent frontmatter. Superpowers
-# passes an explicit `model` on every dispatch, and a per-call model beats
-# frontmatter, so for the roles below this hook removes `model` from the call
-# and resolution falls back to the frontmatter. It knows role names only, never
-# models: the frontmatter stays the single routing authority.
+# Routed roles take their model and effort from their agent frontmatter.
+# Superpowers passes an explicit `model` on every dispatch, and since Claude
+# Code 2.1.292 a caller can also pass `effort`; either beats the frontmatter.
+# For the roles below this hook removes both from the call, so resolution falls
+# back to the frontmatter. It knows role names only, never models or levels:
+# the frontmatter stays the single routing authority.
 #
 # It never sets permissionDecision, so it never bypasses a permission prompt.
 # It fails open: unreadable input exits 1, which Claude Code reports as a
@@ -19,6 +20,7 @@ import json
 import sys
 
 PINNED = {"reviewer", "expert", "scout", "Explore", "planner"}
+OVERRIDES = ("model", "effort")
 
 try:
     event = json.load(sys.stdin)
@@ -32,10 +34,10 @@ except (ValueError, KeyError) as error:
 
 if (event.get("tool_name") != "Agent"
         or tool_input.get("subagent_type") not in PINNED
-        or "model" not in tool_input):
+        or not any(key in tool_input for key in OVERRIDES)):
     sys.exit(0)
 
-updated = {key: value for key, value in tool_input.items() if key != "model"}
+updated = {key: value for key, value in tool_input.items() if key not in OVERRIDES}
 json.dump({"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                   "updatedInput": updated}}, sys.stdout)
 '

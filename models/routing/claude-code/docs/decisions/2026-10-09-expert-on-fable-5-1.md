@@ -93,3 +93,11 @@ No role-fixture evidence exists. Documentation as read on 2026-10-09:
 [Subagents]: https://code.claude.com/docs/en/subagents
 
 Later corrections are appended as dated addenda, never edited in place.
+
+## Addendum — 2026-10-09 the hook pins effort
+
+The risk "Effort can be overridden per call" above is closed for the per-call
+parameter: the hook now removes `effort` as well as `model` for the pinned
+roles ([The Hook Pins Effort](2026-10-09-hook-pins-effort.md), evidence E2).
+`CLAUDE_CODE_EFFORT_LEVEL` still overrides the frontmatter, as that record
+explains.

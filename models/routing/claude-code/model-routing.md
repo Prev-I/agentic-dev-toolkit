@@ -23,11 +23,13 @@ main session's in `~/.claude/settings.json`.
 
 ## Dispatch rules
 
-1. Omit the `model` parameter when dispatching `reviewer`, `expert`, `scout`,
-   `Explore` or `planner`. Their agent file decides the model; a hook removes
-   any `model` passed anyway, so passing one only misrepresents intent.
-2. For `general-purpose`, a skill's own model-selection guidance applies.
-   When nothing asks for a specific model, omit it.
+1. Omit the `model` parameter, and the `effort` parameter, when dispatching
+   `reviewer`, `expert`, `scout`, `Explore` or `planner`. Their agent file
+   decides both; a hook removes any `model` or `effort` passed anyway, so
+   passing one only misrepresents intent.
+2. For `general-purpose`, a skill's own model-selection guidance applies, to
+   effort as to model. When nothing asks for a specific model or effort, omit
+   it.
 3. Do not send work to `expert` that `reviewer` or Build can settle.
 4. `reviewer` and `Explore` have no shell. Before dispatching `reviewer`,
    write the change to a file and give its path in the prompt: the review

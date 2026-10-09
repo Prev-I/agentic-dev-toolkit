@@ -130,3 +130,11 @@ on the wire"). It confirms that Explore runs Haiku 5.5 at `medium` and Scout at
 trigger for one, so the conclusion that the slot's effort is not configurable
 by this bundle stands. The proxy is the way to re-check it from an interactive
 session.
+
+## Addendum — 2026-10-09 the hook pins effort
+
+The risk "Frontmatter effort can be overridden" above is closed for the per-call
+parameter: the hook now removes `effort` as well as `model` for the pinned
+roles ([The Hook Pins Effort](2026-10-09-hook-pins-effort.md), evidence E2).
+`CLAUDE_CODE_EFFORT_LEVEL` still overrides the frontmatter, as that record
+explains.

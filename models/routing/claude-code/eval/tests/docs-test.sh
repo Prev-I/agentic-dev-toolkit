@@ -31,7 +31,7 @@ for r in rows:
         actual = (fields.get("model"), fields.get("effort"))
         seen.add(where)
     elif where == "settings.fragment.json":
-        actual = (fragment["model"], fragment["effortLevel"])
+        actual = (fragment["model"], fragment["modelSettings"][fragment["model"]]["effortLevel"])
     elif where == "env.ANTHROPIC_DEFAULT_HAIKU_MODEL":
         actual = (fragment["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"], None)
     else:

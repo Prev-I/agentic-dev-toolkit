@@ -52,9 +52,11 @@ for name in ("reviewer", "expert", "Explore", "scout"):
     assert not any(tool.startswith("Bash") for tool in tools), f"{name}: no Bash in any form"
 
 fragment = load_json(bundle / "settings.fragment.json")
-assert set(fragment) == {"model", "effortLevel", "env", "hooks"}, sorted(fragment)
+assert set(fragment) == {"model", "modelSettings", "env", "hooks"}, sorted(fragment)
 assert fragment["model"] == "claude-opus-5-5"
-assert fragment["effortLevel"] == "high"
+# A top-level effortLevel in ~/.claude/settings.json is ignored by Opus 5.5 and
+# later models (evidence E3), so Build's effort is set per model.
+assert fragment["modelSettings"] == {"claude-opus-5-5": {"effortLevel": "high"}}
 assert fragment["env"] == {"ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-5-5"}
 assert registers_pin_hook(fragment)
 

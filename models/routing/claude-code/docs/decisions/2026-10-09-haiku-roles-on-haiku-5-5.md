@@ -120,3 +120,13 @@ No role-fixture evidence exists. Documentation as read on 2026-10-09:
 [Subagents]: https://code.claude.com/docs/en/subagents
 
 Later corrections are appended as dated addenda, never edited in place.
+
+## Addendum — 2026-10-09 effort is observable through a proxy
+
+Point 3 under "Background effort" no longer holds in general: a local logging
+proxy shows each request's `output_config` (evidence addendum "effort observed
+on the wire"). It confirms that Explore runs Haiku 5.5 at `medium` and Scout at
+`low`. No background request was captured, since a `-p` run gives no reliable
+trigger for one, so the conclusion that the slot's effort is not configurable
+by this bundle stands. The proxy is the way to re-check it from an interactive
+session.

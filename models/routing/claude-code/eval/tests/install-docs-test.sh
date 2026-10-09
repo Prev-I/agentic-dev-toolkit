@@ -24,26 +24,43 @@ for marker, name in (("Merge the settings fragment", "merge.py"), ("To roll back
     (work / name).write_text(block.group(1) + "\n", encoding="utf-8")
 PY
 
-user='{"theme": "dark", "env": {"MY_VAR": "1"}, "hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "/bin/true"}]}]}, "modelSettings": {"claude-opus-5-5": {"effortLevel": "high"}}}'
-printf '%s\n' "$user" >"$workdir/settings.json"
+# The user's own modelSettings in three shapes: an Opus 5.5 entry with other
+# fields, another model only, and none at all. Rollback must give each back
+# exactly, including removing the containers the merge created.
+base='"theme": "dark", "env": {"MY_VAR": "1"}, "hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "/bin/true"}]}]}'
+for own in ', "modelSettings": {"claude-sonnet-5-5": {"effortLevel": "low"}, "claude-opus-5-5": {"autoCompactWindow": "auto"}}' \
+           ', "modelSettings": {"claude-sonnet-5-5": {"effortLevel": "low"}}' \
+           ''; do
+  user="{$base$own}"
+  printf '%s\n' "$user" >"$workdir/settings.json"
 
-for _ in 1 2; do
-  python3 "$workdir/merge.py" "$bundle/settings.fragment.json" "$workdir/settings.json"
-done
-py - "$workdir/settings.json" <<'PY' || fail "merge did not add the routing keys exactly once"
+  for _ in 1 2; do
+    python3 "$workdir/merge.py" "$bundle/settings.fragment.json" "$workdir/settings.json"
+  done
+  py - "$workdir/settings.json" "$user" <<'PY' || fail "merge did not add the routing keys exactly once"
 import json, sys
 from routing import pin_hook_commands
-s = json.load(open(sys.argv[1]))
-assert s["model"] == "claude-opus-5-5" and s["effortLevel"] == "high", s
+s, own = json.load(open(sys.argv[1])), json.loads(sys.argv[2]).get("modelSettings", {})
+assert s["model"] == "claude-opus-5-5" and "effortLevel" not in s, s
+want = {model: dict(entry) for model, entry in own.items()}
+want.setdefault("claude-opus-5-5", {})["effortLevel"] = "high"
+assert s["modelSettings"] == want, s["modelSettings"]
 assert s["env"] == {"MY_VAR": "1", "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-5-5"}, s["env"]
 assert len(pin_hook_commands(s)) == 1, s["hooks"]
-assert s["theme"] == "dark" and s["modelSettings"], s
+assert s["theme"] == "dark", s
 PY
 
-python3 "$workdir/rollback.py" "$workdir/settings.json"
-py - "$workdir/settings.json" "$user" <<'PY' || fail "rollback did not restore the user's own settings"
+  python3 "$workdir/rollback.py" "$workdir/settings.json"
+  # The rollback names Build's model literally; it must be the fragment's.
+  python3 - "$bundle/settings.fragment.json" "$workdir/rollback.py" <<'PY' || fail "rollback does not name the fragment's model"
+import json, sys
+model = json.load(open(sys.argv[1]))["model"]
+assert f'"{model}"' in open(sys.argv[2]).read(), model
+PY
+  py - "$workdir/settings.json" "$user" <<'PY' || fail "rollback did not restore the user's own settings"
 import json, sys
 assert json.load(open(sys.argv[1])) == json.loads(sys.argv[2]), open(sys.argv[1]).read()
 PY
+done
 
 printf 'PASS: install-docs-test\n'

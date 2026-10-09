@@ -104,3 +104,132 @@ dispatched with `model: "sonnet"` and asked to reply `PONG`:
 
 `-p` asks for no consent before billing usage credits, so this shows the route
 works, not how an interactive session's consent prompt behaves on a subagent.
+
+## Addendum — 2026-10-09 effort observed on the wire
+
+The effort verdicts above are `NOT_OBSERVABLE` because neither the debug log
+nor the SDK log shows `output_config`'s contents. A local pass-through proxy
+makes them observable: Claude Code runs with
+`ANTHROPIC_BASE_URL=http://127.0.0.1:<port>`, and the proxy forwards every
+request to `api.anthropic.com` unchanged, logging only each Messages request's
+`model`, `output_config` and `thinking`. It never logs headers, so no
+credential is written anywhere.
+
+<details>
+<summary>The proxy</summary>
+
+```python
+"""Local pass-through proxy to api.anthropic.com that logs, per Messages
+request, only the path and the model, output_config and thinking fields of the
+JSON body. Headers (and therefore credentials) are forwarded but never logged.
+
+usage: python3 -I effort_proxy.py PORT LOGFILE
+"""
+import http.client
+import json
+import sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+UPSTREAM = "api.anthropic.com"
+HOP = {"connection", "keep-alive", "proxy-connection", "transfer-encoding", "te",
+       "trailer", "upgrade", "host", "accept-encoding", "content-length"}
+port, logfile = int(sys.argv[1]), sys.argv[2]
+
+
+class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, *args):
+        pass
+
+    def _forward(self):
+        length = int(self.headers.get("content-length") or 0)
+        body = self.rfile.read(length) if length else b""
+        if self.path.startswith("/v1/messages") and body:
+            try:
+                data = json.loads(body)
+                record = {"path": self.path.split("?")[0], "model": data.get("model"),
+                          "output_config": data.get("output_config"),
+                          "thinking": data.get("thinking")}
+            except ValueError:
+                record = {"path": self.path, "unparsed": True}
+            with open(logfile, "a") as fh:
+                fh.write(json.dumps(record) + "\n")
+        headers = {k: v for k, v in self.headers.items() if k.lower() not in HOP}
+        headers["accept-encoding"] = "identity"
+        conn = http.client.HTTPSConnection(UPSTREAM, timeout=600)
+        conn.request(self.command, self.path, body=body or None, headers=headers)
+        resp = conn.getresponse()
+        self.send_response(resp.status, resp.reason)
+        for k, v in resp.getheaders():
+            if k.lower() not in HOP:
+                self.send_header(k, v)
+        self.send_header("transfer-encoding", "chunked")
+        self.end_headers()
+        while True:
+            chunk = resp.read1(65536)
+            if not chunk:
+                break
+            self.wfile.write(b"%x\r\n%s\r\n" % (len(chunk), chunk))
+            self.wfile.flush()
+        self.wfile.write(b"0\r\n\r\n")
+        conn.close()
+
+    do_POST = do_GET = do_PUT = do_DELETE = do_PATCH = _forward
+
+
+ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
+```
+
+</details>
+
+Sanity check: `--model claude-haiku-5-5 --effort low` logged
+`{"model": "claude-haiku-5-5", "output_config": {"effort": "low"}}`.
+
+### E1 — frontmatter effort on dispatch
+
+Same setup as the Build-session dispatch above (Opus 5.5 `--effort high`, hook
+registered, `model: "sonnet"` on each dispatch), through the proxy:
+
+| Agent | Frontmatter | Requests logged, in order | Verdict |
+|---|---|---|---|
+| `scout` | `claude-haiku-5-5`, `low` | Opus 5.5 `high`; Haiku 5.5 `low`; Opus 5.5 `high` | `VERIFIED` |
+| `Explore` | `claude-haiku-5-5`, `medium` | Opus 5.5 `high`; Haiku 5.5 `medium`; Opus 5.5 `high` | `VERIFIED` |
+| `expert` | `claude-fable-5-1`, `xhigh` | Opus 5.5 `high`; Fable 5.1 `xhigh`; Opus 5.5 `high` | `VERIFIED` |
+| `expert`, user settings loaded¹ | `claude-fable-5-1`, `xhigh` | Opus 5.5 `high`; Fable 5.1 `xhigh`; Opus 5.5 `high` | `VERIFIED` |
+
+¹ `--setting-sources user,project,local`, no `--effort`, no `model` on the
+dispatch. The real `~/.claude/settings.json`, read only, holds a top-level
+`"effortLevel": "high"`, which the settings reference says still applies to
+Fable 5.1; the frontmatter's `xhigh` wins over it.
+
+Frontmatter `effort` is applied, and the session's `high` does not leak into
+the subagent. This supersedes the `NOT_OBSERVABLE` effort verdict above.
+
+### E3 — a top-level `effortLevel` in user settings
+
+`claude -p 'Reply with exactly OK'` with no `--effort`. "User settings" is the
+real `~/.claude/settings.json`, read only: it holds a top-level
+`"effortLevel": "high"` and `modelSettings.claude-opus-5-5.effortLevel: "high"`.
+
+| Setting sources | Model | Effort sent |
+|---|---|---|
+| user | `claude-opus-5-5` | `high` (from `modelSettings`) |
+| user | `claude-sonnet-5-5` | `medium` |
+| user | `claude-haiku-5-5` | `medium` |
+| project only | `claude-opus-5-5` | `medium` |
+| project, `--settings '{"effortLevel":"high"}'` | `claude-opus-5-5` | `high` |
+| project, `--settings '{"effortLevel":"high"}'` | `claude-haiku-5-5` | `high` |
+| project, `--settings '{"effortLevel":"high"}'` | `claude-sonnet-5-5` | `high` |
+
+In user settings the top-level key reached neither 5.5 model that had no
+`modelSettings` entry, while the same key passed with `--settings` reached
+all three 5.5 models. Opus 5.5 with no settings runs `medium`. This matches
+the settings reference: in `~/.claude/settings.json` the key "keeps applying
+where it applied before, on Opus 5, Fable 5.1, and earlier models. Opus 5.5 and
+models released after it ignore it".
+(<https://code.claude.com/docs/en/settings-reference#effortlevel>) The
+fragment's top-level `effortLevel` therefore left Build at `medium` wherever the
+user had not saved a level for Opus 5.5. The Opus 5.5 row cannot isolate the
+top-level key, because the file also holds a `modelSettings` entry, and
+changing `~/.claude` was out of bounds.

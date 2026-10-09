@@ -21,7 +21,7 @@ EXPECTED = {
                 "disallowedTools": "Edit, Write, NotebookEdit"},
     "general-purpose": {"model": "claude-sonnet-5-5", "effort": "medium"},
     "Explore": {"model": "claude-haiku-5-5", "effort": "medium", "tools": "Read, Grep, Glob"},
-    "scout": {"model": "claude-haiku-5-5", "effort": "low", "tools": "WebSearch, WebFetch, Read, Grep, Glob"},
+    "scout": {"model": "claude-haiku-5-5", "effort": "medium", "tools": "WebSearch, WebFetch, Read, Grep, Glob"},
     "reviewer": {"model": "claude-opus-5-5", "effort": "high", "tools": "Read, Grep, Glob"},
     "expert": {"model": "claude-fable-5-1", "effort": "xhigh", "maxTurns": "6",
                "tools": "Read, Grep, Glob",

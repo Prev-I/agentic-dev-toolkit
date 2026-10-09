@@ -10,8 +10,9 @@ Design: [`docs/superpowers/specs/2026-10-06-claude-code-model-routing-design.md`
 Selection rationale: [initial routing decision](docs/decisions/2026-10-06-initial-claude-code-routing.md),
 amended by [Haiku roles on Haiku 5.5](docs/decisions/2026-10-09-haiku-roles-on-haiku-5-5.md),
 [Expert on Fable 5.1](docs/decisions/2026-10-09-expert-on-fable-5-1.md),
-[Build effort in modelSettings](docs/decisions/2026-10-09-build-effort-in-model-settings.md) and
-[the hook pinning effort](docs/decisions/2026-10-09-hook-pins-effort.md).
+[Build effort in modelSettings](docs/decisions/2026-10-09-build-effort-in-model-settings.md),
+[the hook pinning effort](docs/decisions/2026-10-09-hook-pins-effort.md) and
+[Scout at medium](docs/decisions/2026-10-09-scout-at-medium.md).
 
 ## Model map
 
@@ -21,7 +22,7 @@ amended by [Haiku roles on Haiku 5.5](docs/decisions/2026-10-09-haiku-roles-on-h
 | Plan | `agents/planner.md` | `claude-opus-5-5` | `xhigh` |
 | General | `agents/general-purpose.md` | `claude-sonnet-5-5` | `medium` |
 | Explore | `agents/Explore.md` | `claude-haiku-5-5` | `medium` |
-| Scout | `agents/scout.md` | `claude-haiku-5-5` | `low` |
+| Scout | `agents/scout.md` | `claude-haiku-5-5` | `medium` |
 | Reviewer | `agents/reviewer.md` | `claude-opus-5-5` | `high` |
 | Expert | `agents/expert.md` | `claude-fable-5-1` | `xhigh` |
 | Background tasks | `env.ANTHROPIC_DEFAULT_HAIKU_MODEL` | `claude-haiku-5-5` | — |
@@ -92,6 +93,10 @@ the main thread. Its plan is then handed to an ordinary (Build) session.
    a subagent's `tools` and grants unrestricted Bash instead (evidence P5), so
    both get `Read, Grep, Glob` only. The caller hands Reviewer the diff as a
    file; `model-routing.md` says how.
+7. **Scout runs `medium`, not `low`.** OpenCode's scout runs GPT-6 Luna
+   `low`. Here Scout runs Haiku 5.5 `medium`, because Anthropic warns that at
+   `low` the model is more likely to skip a search; see the
+   [Scout decision](docs/decisions/2026-10-09-scout-at-medium.md).
 
 ## Install
 

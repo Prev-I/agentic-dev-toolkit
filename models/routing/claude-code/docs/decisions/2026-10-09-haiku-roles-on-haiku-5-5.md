@@ -138,3 +138,9 @@ parameter: the hook now removes `effort` as well as `model` for the pinned
 roles ([The Hook Pins Effort](2026-10-09-hook-pins-effort.md), evidence E2).
 `CLAUDE_CODE_EFFORT_LEVEL` still overrides the frontmatter, as that record
 explains.
+
+## Addendum — 2026-10-09 Scout moves to `medium`
+
+The risk "`low` and searching" above is acted on: the user moved Scout to
+`medium`, the lever this record named ([Scout at medium](2026-10-09-scout-at-medium.md)).
+Explore and the haiku slot are unchanged.

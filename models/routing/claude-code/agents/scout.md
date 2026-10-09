@@ -1,7 +1,8 @@
 ---
 name: scout
 description: Targeted external research. Use it for current upstream or dependency documentation, release notes, upstream issues and other facts that live outside the repository.
-model: claude-haiku-4-5
+model: claude-haiku-5-5
+effort: low
 tools: WebSearch, WebFetch, Read, Grep, Glob
 ---
 

@@ -7,7 +7,8 @@ the OpenCode bundle). Role fixtures and session observation (layer C) are not
 part of it.
 
 Design: [`docs/superpowers/specs/2026-10-06-claude-code-model-routing-design.md`](../../../docs/superpowers/specs/2026-10-06-claude-code-model-routing-design.md).
-Selection rationale: [initial routing decision](docs/decisions/2026-10-06-initial-claude-code-routing.md).
+Selection rationale: [initial routing decision](docs/decisions/2026-10-06-initial-claude-code-routing.md),
+amended by [Haiku roles on Haiku 5.5](docs/decisions/2026-10-09-haiku-roles-on-haiku-5-5.md).
 
 ## Model map
 
@@ -16,14 +17,15 @@ Selection rationale: [initial routing decision](docs/decisions/2026-10-06-initia
 | Build (main session) | `settings.fragment.json` | `claude-opus-5-5` | `high` |
 | Plan | `agents/planner.md` | `claude-opus-5-5` | `xhigh` |
 | General | `agents/general-purpose.md` | `claude-sonnet-5-5` | `medium` |
-| Explore | `agents/Explore.md` | `claude-haiku-4-5` | — |
-| Scout | `agents/scout.md` | `claude-haiku-4-5` | — |
+| Explore | `agents/Explore.md` | `claude-haiku-5-5` | `medium` |
+| Scout | `agents/scout.md` | `claude-haiku-5-5` | `low` |
 | Reviewer | `agents/reviewer.md` | `claude-opus-5-5` | `high` |
 | Expert | `agents/expert.md` | `claude-opus-5-5` | `max` |
-| Background tasks | `env.ANTHROPIC_DEFAULT_HAIKU_MODEL` | `claude-haiku-4-5` | — |
+| Background tasks | `env.ANTHROPIC_DEFAULT_HAIKU_MODEL` | `claude-haiku-5-5` | — |
 
-Haiku 4.5 does not support effort levels. `eval/tests/docs-test.sh` fails if
-this table disagrees with the agent files or the settings fragment.
+The background slot has no effort setting of its own; see deviation 4.
+`eval/tests/docs-test.sh` fails if this table disagrees with the agent files or
+the settings fragment.
 
 ## How routing works
 
@@ -43,6 +45,11 @@ Claude Code a per-call `model` beats the agent's frontmatter.
 so their frontmatter applies. `general-purpose` is left alone, so Superpowers
 can still pick a cheaper or stronger model per task.
 
+The hook pins `model` only. Frontmatter `effort` is overridden by a per-call
+`effort` on the Agent tool (Claude Code 2.1.292 and later) and by
+`CLAUDE_CODE_EFFORT_LEVEL`. The hook pins neither and the alignment check,
+which reads files only, cannot see either; see the [Haiku 5.5 decision](docs/decisions/2026-10-09-haiku-roles-on-haiku-5-5.md).
+
 The hook never approves anything and never blocks: if it fails, Claude Code
 reports a non-blocking error and routing falls back to the policy alone.
 
@@ -57,14 +64,16 @@ the main thread. Its plan is then handed to an ordinary (Build) session.
    fall short; it needs usage credits on the account (see the decision
    record) and is a profile change with its own decision record.
 2. **No provider or model separation for Expert.** Everything runs on one
-   Anthropic account, and Fable 5.1 needs usage credits this account does not
-   have. Expert runs Opus 5.5 like Build, Plan and Reviewer; what sets it apart
+   Anthropic account, and Fable 5.1 needed usage credits this account did not
+   have on 2026-10-06. Expert runs Opus 5.5 like Build, Plan and Reviewer; what sets it apart
    is `max` effort, a six-turn cap and escalation-only use.
 3. **No Breakglass.** It existed for a separate provider and credential, and
    there is none here.
 4. **Compaction and session titles are not routable per role.** Claude Code
    has no separate compaction setting; background tasks use the haiku slot,
-   pinned to Haiku 4.5.
+   pinned to Haiku 5.5. Its effort is not configurable separately: Claude Code
+   documents no effort control for background functionality, so it runs at
+   whatever effort Claude Code applies to Haiku 5.5, not one this bundle sets.
 5. **Plan is a launch choice, not a mode switch.** OpenCode switches primary
    agents inside a session; here planning is its own session.
 6. **Reviewer and Explore have no shell.** OpenCode let Reviewer run
@@ -180,7 +189,9 @@ snippets, which they run verbatim against a sample `settings.json`.
 The profile is **capability-verified, not role-verified**. Live checks of the
 mechanisms this bundle relies on, and one trivial successful call per model
 and effort pair, are recorded in
-[`docs/evidence/2026-10-06-capability.md`](docs/evidence/2026-10-06-capability.md).
+[`docs/evidence/2026-10-06-capability.md`](docs/evidence/2026-10-06-capability.md)
+and, for Claude Code 2.1.295 and the Haiku 5.5 and Fable 5.1 pairs,
+[`docs/evidence/2026-10-09-capability.md`](docs/evidence/2026-10-09-capability.md).
 Role fixtures, which would show each model is fit for its role, are out of
 scope.
 

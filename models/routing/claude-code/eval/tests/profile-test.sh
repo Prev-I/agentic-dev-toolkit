@@ -4,7 +4,8 @@ IFS=$'\n\t'
 # shellcheck source=models/routing/claude-code/eval/tests/test-lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/test-lib.sh"
 
-# Pins the user-selected profile of 2026-10-06 and its permission invariants.
+# Pins the user-selected profile, as amended by the records under
+# docs/decisions/, and its permission invariants.
 # Changing the profile means changing EXPECTED below on purpose, together with
 # a decision record under docs/decisions/.
 
@@ -19,8 +20,8 @@ EXPECTED = {
     "planner": {"model": "claude-opus-5-5", "effort": "xhigh", "permissionMode": "plan",
                 "disallowedTools": "Edit, Write, NotebookEdit"},
     "general-purpose": {"model": "claude-sonnet-5-5", "effort": "medium"},
-    "Explore": {"model": "claude-haiku-4-5", "tools": "Read, Grep, Glob"},
-    "scout": {"model": "claude-haiku-4-5", "tools": "WebSearch, WebFetch, Read, Grep, Glob"},
+    "Explore": {"model": "claude-haiku-5-5", "effort": "medium", "tools": "Read, Grep, Glob"},
+    "scout": {"model": "claude-haiku-5-5", "effort": "low", "tools": "WebSearch, WebFetch, Read, Grep, Glob"},
     "reviewer": {"model": "claude-opus-5-5", "effort": "high", "tools": "Read, Grep, Glob"},
     "expert": {"model": "claude-opus-5-5", "effort": "max", "maxTurns": "6",
                "tools": "Read, Grep, Glob",
@@ -54,7 +55,7 @@ fragment = load_json(bundle / "settings.fragment.json")
 assert set(fragment) == {"model", "effortLevel", "env", "hooks"}, sorted(fragment)
 assert fragment["model"] == "claude-opus-5-5"
 assert fragment["effortLevel"] == "high"
-assert fragment["env"] == {"ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-4-5"}
+assert fragment["env"] == {"ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-5-5"}
 assert registers_pin_hook(fragment)
 
 policy = (bundle / "model-routing.md").read_text(encoding="utf-8")

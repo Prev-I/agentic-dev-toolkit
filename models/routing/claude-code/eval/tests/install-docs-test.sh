@@ -35,7 +35,7 @@ import json, sys
 from routing import pin_hook_commands
 s = json.load(open(sys.argv[1]))
 assert s["model"] == "claude-opus-5-5" and s["effortLevel"] == "high", s
-assert s["env"] == {"MY_VAR": "1", "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-4-5"}, s["env"]
+assert s["env"] == {"MY_VAR": "1", "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-5-5"}, s["env"]
 assert len(pin_hook_commands(s)) == 1, s["hooks"]
 assert s["theme"] == "dark" and s["modelSettings"], s
 PY

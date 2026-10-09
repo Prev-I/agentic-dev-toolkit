@@ -1,7 +1,8 @@
 ---
 name: Explore
 description: Fast read-only codebase exploration. Use it to locate files, symbols and patterns and to gather context before editing; it never modifies anything.
-model: claude-haiku-4-5
+model: claude-haiku-5-5
+effort: medium
 tools: Read, Grep, Glob
 ---
 

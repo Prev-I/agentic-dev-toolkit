@@ -13,9 +13,16 @@ IFS=$'\n\t'
 #
 # It never sets permissionDecision, so it never bypasses a permission prompt.
 # It fails open: unreadable input exits 1, which Claude Code reports as a
-# non-blocking error. It never exits 2, which would block every delegation.
+# non-blocking error. It never exits 2, which would block every delegation;
+# an interpreter that exits 2 itself, as on an option it does not know, is
+# reported as 1.
+#
+# Python runs isolated (-I). Hooks run in the session's current directory with
+# its environment; without -I, `python3 -c` imports from that directory and
+# honours PYTHONPATH, so a json.py there would run on every Agent call.
 
-exec python3 -c '
+rc=0
+python3 -I -c '
 import json
 import sys
 
@@ -40,4 +47,6 @@ if (event.get("tool_name") != "Agent"
 updated = {key: value for key, value in tool_input.items() if key not in OVERRIDES}
 json.dump({"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                   "updatedInput": updated}}, sys.stdout)
-'
+' || rc=$?
+((rc != 2)) || rc=1
+exit "$rc"

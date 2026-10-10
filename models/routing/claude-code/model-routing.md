@@ -30,12 +30,20 @@ main session's in `~/.claude/settings.json`.
 2. For `general-purpose`, a skill's own model-selection guidance applies, to
    effort as to model. When nothing asks for a specific model or effort, omit
    it.
-3. Do not send work to `expert` that `reviewer` or Build can settle.
+3. Do not send work to `expert` that `reviewer` or Build can settle, unless
+   the human's framing requires it (see the paragraph after the escalation
+   conditions).
 4. `reviewer` and `Explore` have no shell. Before dispatching `reviewer`,
    write the change to a file and give its path in the prompt: the review
    package a skill already produced, or `git diff BASE..HEAD > <scratch>/review.diff`.
    Where a review template tells the reviewer to run `git diff`, replace those
    commands with that path. Give `Explore` the history it needs the same way.
+5. If you can dispatch subagents, a codebase search goes to `Explore`
+   whenever you do not yet know which file holds the answer, including when a
+   skill tells you to explore the code: dispatch it before your own first
+   Grep, Glob or search command. Search yourself only inside files you have
+   already located. Producing the history file rule 4 asks for is not such a
+   search.
 
 ## Superpowers integration
 
@@ -74,6 +82,12 @@ Escalate when any of these holds:
 9. **Deep semantic analysis**: correctness reasoning beyond normal review
    depth (invariant proofs, subtle state machines).
 10. **Implementer and reviewer disagree** and neither can resolve it.
+
+Conditions 2 and 5 also hold when the human presents a decision as
+security-sensitive or as a public API change, even if you judge it is not.
+Escalate rather than settling it yourself, give your own view beside the
+expert's, and say where you disagree with the framing. A human who tells you
+not to escalate has opted out.
 
 ## Decision Packet
 

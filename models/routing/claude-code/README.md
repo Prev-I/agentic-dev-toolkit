@@ -11,8 +11,10 @@ Selection rationale: [initial routing decision](docs/decisions/2026-10-06-initia
 amended by [Haiku roles on Haiku 5.5](docs/decisions/2026-10-09-haiku-roles-on-haiku-5-5.md),
 [Expert on Fable 5.1](docs/decisions/2026-10-09-expert-on-fable-5-1.md),
 [Build effort in modelSettings](docs/decisions/2026-10-09-build-effort-in-model-settings.md),
-[the hook pinning effort](docs/decisions/2026-10-09-hook-pins-effort.md) and
-[Scout at medium](docs/decisions/2026-10-09-scout-at-medium.md).
+[the hook pinning effort](docs/decisions/2026-10-09-hook-pins-effort.md),
+[Scout at medium](docs/decisions/2026-10-09-scout-at-medium.md),
+[the hook running Python isolated](docs/decisions/2026-10-10-hook-runs-python-isolated.md)
+and [the Explore and escalation triggers](docs/decisions/2026-10-10-explore-and-escalation-triggers.md).
 
 ## Model map
 
@@ -59,7 +61,10 @@ under `env` in `settings.json`, it is the user's own setting and is not
 reported. See the [hook effort decision](docs/decisions/2026-10-09-hook-pins-effort.md).
 
 The hook never approves anything and never blocks: if it fails, Claude Code
-reports a non-blocking error and routing falls back to the policy alone.
+reports a non-blocking error and routing falls back to the policy alone. It
+runs Python in isolated mode, so modules in the session's directory or on
+`PYTHONPATH` never load inside it; see the
+[hook isolation decision](docs/decisions/2026-10-10-hook-runs-python-isolated.md).
 
 Planning is a separate session: `claude --agent planner` runs the planner as
 the main thread. Its plan is then handed to an ordinary (Build) session.
@@ -97,6 +102,12 @@ the main thread. Its plan is then handed to an ordinary (Build) session.
    `low`. Here Scout runs Haiku 5.5 `medium`, because Anthropic warns that at
    `low` the model is more likely to skip a search; see the
    [Scout decision](docs/decisions/2026-10-09-scout-at-medium.md).
+8. **Two dispatch triggers the OpenCode policy does not state.** Build sends a
+   codebase search to Explore whenever it does not yet know which file holds
+   the answer, and escalates a decision the human presents as
+   security-sensitive or as a public API change even when it judges otherwise.
+   Without them, the 2026-10-10 smoke tests saw Build answer both itself; see
+   the [trigger decision](docs/decisions/2026-10-10-explore-and-escalation-triggers.md).
 
 ## Install
 

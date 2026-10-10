@@ -41,11 +41,14 @@ docs/wsl-toolchain-doctor.md    Operational documentation for the doctor
 docs/opencode-service.md        Running OpenCode as a persistent service, and
                                 optionally reaching it over HTTPS from the LAN
 docs/headroom-runtime.md        Headroom runtime operations, status, and rollback runbook
+docs/claude-remote-control.md   Claude Code Remote Control as a systemd user template;
+                                the unit ships inside the runbook
 tests/install.sh                Test suite for the installer
 tests/repository-policy.sh      Test suite for the policy validator
 tests/wsl-toolchain-doctor.sh   Test suite for the doctor
 tests/opencode-service.sh       Test suite for the service scripts
 tests/headroom-runtime.sh       Test suite for the Headroom runtime
+tests/claude-remote-control.sh  Test suite for the unit shipped in the Remote Control runbook
 tests/azure-artifacts.sh        Test suite for Azure Artifacts configuration
 tests/azure-artifacts-windows.ps1  Windows adapter behavior invoked by the Azure suite
 ```
@@ -65,6 +68,7 @@ bash tests/repository-policy.sh         # the policy validator suite
 bash tests/wsl-toolchain-doctor.sh      # the WSL toolchain doctor suite
 bash tests/opencode-service.sh          # the service scripts suite
 bash tests/headroom-runtime.sh          # the Headroom runtime suite
+bash tests/claude-remote-control.sh     # the Remote Control runbook unit suite
 bash tests/azure-artifacts.sh           # Azure Artifacts configuration suite (requires real mise)
 bash models/routing/opencode/eval/run-tests.sh   # the routing eval suite
 bash models/routing/claude-code/eval/run-tests.sh   # the Claude Code routing suite
@@ -83,13 +87,14 @@ shellcheck azure-artifacts/configure.sh tests/azure-artifacts.sh \
   opencode-service/opencode-telegram-ready.sh \
   opencode-service/opencode-gateway-restart.sh tests/opencode-service.sh \
   headroom-runtime/headroom-runtime.sh tests/headroom-runtime.sh \
+  tests/claude-remote-control.sh \
   models/routing/claude-code/hooks/pin-agent-model.sh \
   models/routing/claude-code/eval/run-tests.sh \
   models/routing/claude-code/eval/check-alignment.sh \
   models/routing/claude-code/eval/tests/*.sh
 ```
 
-All eight suites are the current required set. The routing evidence documents under
+All nine suites are the current required set. The routing evidence documents under
 `models/routing/opencode/docs/` do not establish this component's evidence.
 
 `tests/install.sh` sources the installer's functions by stripping its final

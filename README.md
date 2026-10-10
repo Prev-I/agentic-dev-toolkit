@@ -33,6 +33,9 @@ A collection of reusable components for teams using AI coding agents:
   remediate `wsl.conf` and persistent `PATH=` assignments.
 - **Headroom runtime** — an opt-in standalone Headroom service installer, auditor, and remover
   with no active OpenCode traffic optimization.
+- **Claude Code Remote Control service** — a runbook and systemd user template unit that keep
+  `claude remote-control` running per project, so sessions started from claude.ai or the mobile
+  app always find the workstation ready.
 
 ## What this is NOT
 
@@ -115,6 +118,7 @@ agentic-dev-toolkit/
     multi-agent-workspace-guide.md                 # Full guide: AGENTS.md pattern + MCP parity
     wsl-toolchain-doctor.md                        # Toolchain doctor operational documentation
     headroom-runtime.md                            # Headroom runtime operations and status
+    claude-remote-control.md                       # Claude Code Remote Control user service runbook
 ```
 
 ## Headroom Runtime
@@ -125,6 +129,15 @@ removal. It is not installed by `environments/linux/install.sh`. The
 [operational runbook](docs/headroom-runtime.md) records installation, rollback,
 upgrades, status evidence, and the decision to keep OpenCode integration on
 hold.
+
+## Claude Code Remote Control service
+
+A systemd user template, `claude-rc@<project>.service`, keeps `claude remote-control` running for
+`~/code/<project>` inside a dedicated tmux server, loads the project's `.envrc` through direnv,
+and gives each session opened from a client its own Git worktree. It is not installed by
+`environments/linux/install.sh`. The [runbook](docs/claude-remote-control.md) covers the
+prerequisites, the interactive first run, the unit and why each line is there, operations, and
+rollback.
 
 ## Workstation bootstrap
 

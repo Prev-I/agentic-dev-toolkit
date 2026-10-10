@@ -161,8 +161,10 @@ test_the_project_environment_is_loaded_and_checked_first() {
 test_remote_control_runs_without_bypass_or_global_flags() {
   local start
   start="$(directive ExecStart)"
-  # Nothing may sit between the binary and the subcommand.
-  assert_contains "$start" '/claude remote-control ' "remote-control must follow the binary directly"
+  # Nothing may sit between the binary and the subcommand, and the stop and
+  # verification patterns expect --name right after it.
+  assert_contains "$start" '/claude remote-control --name "%i" ' \
+    "remote-control must follow the binary directly, with --name first"
   assert_contains "$start" '--spawn worktree' "remote sessions must get their own worktree"
   # Nobody is at the workstation to answer prompts and the project's defaultMode
   # does not reach every session, so the server sets the mode, after the verb,

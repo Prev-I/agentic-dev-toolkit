@@ -18,8 +18,10 @@ Ubuntu under WSL2.
   `bypassPermissions` mode.
 - **The server starts its sessions in auto mode** (`--permission-mode auto`).
   The flag overrides the project's `permissions.defaultMode` for those sessions,
-  so a project that wants a stricter mode when nobody is at the workstation sets
-  it in the flag, not in its settings.
+  and it is part of the shared template, so it applies to every instance. A
+  project that needs a stricter mode gets its own `ExecStart` in a per-instance
+  drop-in (see [Another project](#another-project)), not a change to its
+  settings.
 - **One instance per project.** The instance name is the directory name under
   `~/code`, so `claude-rc@<PROJECT>` always serves `~/code/<PROJECT>`. Use plain
   directory names: `%i` is the escaped instance name, so a name that
@@ -27,9 +29,9 @@ Ubuntu under WSL2.
   directory.
 - **Sessions opened from a client get their own Git worktree** (`--spawn
   worktree`), so two remote sessions never share a working tree. The one
-  exception is the server's own session, which it creates at its first start and
-  reattaches after each restart, and which runs in
-  the project's main checkout — the same tree an interactive session there uses.
+  exception is the server's own session: created at the server's first start and
+  reattached after each restart, it runs in the project's main checkout — the
+  same tree an interactive session there uses.
 - **The project's environment comes from its own `.envrc`.** Secrets stay where
   direnv already finds them; nothing secret is written into the unit.
 
@@ -239,9 +241,9 @@ it is stronger than that: given before the verb, Remote Control refuses to start
   `permissions.defaultMode` does not reliably reach the sessions the server
   starts: with `defaultMode: "auto"` in the project's settings, a new worktree
   session ran in auto mode, while the server's own session, reattached after a
-  restart, ran in `default`. The server puts the flag on the command line of
-  every session process it starts, the reattached one included; the
-  verification below shows it there.
+  restart, ran in `default`. The server appends the flag to the command line of
+  every session process it starts, and the reattached session is started the
+  same way; the verification below confirms it after a restart.
 - **mise shims on PATH, not versioned runtime directories.** Shims resolve tools
   against the project's own mise configuration in each working directory.
 
@@ -297,17 +299,17 @@ pid=$(pgrep -f '^[^ ]*/claude remote-control --name <PROJECT> ')
 tr '\0' '\n' < /proc/"$pid"/environ | cut -d= -f1 | sort
 ```
 
-To confirm the permission mode reached the sessions, list the session processes
-the server started. Each should show `--permission-mode auto` beside its
-session ID; the bracket keeps `pgrep` from matching the shell running it:
-
-```bash
-pgrep -af -- '--sdk-ur[l] ' | grep -o -- '--session-id [^ ]*\|--permission-mode [^ ]*'
-```
-
 The pattern is anchored to the first argument because the tmux server's own
 command line contains the same words further along, and ends in a space so that
 `foo` does not also match `foo-bar`.
+
+To confirm the permission mode reached the sessions, list the server's child
+processes, one per session. Each should show `--permission-mode auto` after its
+session ID, the server's own session included:
+
+```bash
+pgrep -aP "$pid" | grep -o -- '--session-id [^ ]*\|--permission-mode [^ ]*'
+```
 
 ## Operations
 
@@ -335,9 +337,17 @@ Repeat the prerequisites for `~/code/<OTHER>`, run the interactive first run
 there, then `systemctl --user enable --now claude-rc@<OTHER>`. A worktree ignore
 rule kept in one repository's `.git/info/exclude` does not carry over.
 
+A project that needs a different permission mode overrides `ExecStart` for its
+instance only. `systemctl --user edit claude-rc@<OTHER>` opens
+`~/.config/systemd/user/claude-rc@<OTHER>.service.d/override.conf`; in it, an
+empty `ExecStart=` under `[Service]` clears the template's line, and a copy of
+that line with the other mode replaces it. The copy no longer follows the
+runbook, so compare it with the template after changing either.
+
 ### Sessions and worktrees
 
-The server creates one session in the project directory itself when it starts;
+The server creates one session in the project directory itself at its first
+start, and reattaches it after each restart;
 sessions opened from claude.ai or the app go to worktrees. When a session ends
 other than cleanly — closing or archiving it from a client is enough — the pane
 logs `Session failed: Process exited with error` and `kept worktree … session

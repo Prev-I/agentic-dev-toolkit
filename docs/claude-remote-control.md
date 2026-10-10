@@ -6,7 +6,8 @@ a server waiting on the workstation. One template unit serves every project:
 the instance name selects the directory.
 
 Placeholders used throughout: `<PROJECT>` a Git repository at `~/code/<PROJECT>`,
-`<USER>` the Linux account.
+`<USER>` the Linux account, `<NAME>` and `<PORT>` a shell function name and a
+local proxy's port.
 
 Observed with Claude Code 2.1.296, tmux 3.4, direnv 2.32.1 and systemd 255 on
 Ubuntu under WSL2.
@@ -79,6 +80,20 @@ token-compression proxy that rewrites project settings, can leave
 `ANTHROPIC_BASE_URL` pointing at a loopback port there. Remove it from that file
 rather than overriding it in the unit: project settings take precedence over the
 process environment.
+
+Interactive sessions in the same project can keep using such a proxy. Set the
+variable on those processes only, not in project settings, for example with a
+shell function:
+
+```bash
+# <NAME> runs Claude Code through the local proxy on <PORT>; plain `claude` does not.
+<NAME>() { ANTHROPIC_BASE_URL=http://127.0.0.1:<PORT> claude "$@"; }
+```
+
+Sessions started with `<NAME>` go through the proxy, while the Remote Control
+server and the sessions it spawns reach the API directly. Pick a name other than
+`claude`: the interactive first run below types `claude remote-control` by hand,
+and redefining `claude` would hand it the variable.
 
 **Proxy and certificate variables, if the network needs them.** The reverse
 holds too: `HTTPS_PROXY`, `NO_PROXY` or `NODE_EXTRA_CA_CERTS` exported only by an

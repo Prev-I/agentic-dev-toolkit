@@ -2,7 +2,10 @@
 
 Asks whether the files Claude Code reads still match this repository. It
 makes no model calls and never repairs anything: drift is sometimes
-deliberate, so every decision stays with a human.
+deliberate, so every decision stays with a human. When the installed hook
+matches the bundle, it also runs it on two synthetic dispatches, from an
+empty temporary directory, since a hook that fails open shows its failure
+nowhere else.
 
 DRIFT  routing or permission state differs. Fails the check.
 STALE  prose differs while routing and permissions match. Informational.
@@ -13,7 +16,10 @@ and rule belongs to the user and is never reported.
 import argparse
 import json
 import os
+import signal
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from routing import (PERMISSION_FIELDS, PIN_HOOK_NAME, ROUTING_FIELDS, FrontmatterError,
@@ -21,6 +27,79 @@ from routing import (PERMISSION_FIELDS, PIN_HOOK_NAME, ROUTING_FIELDS, Frontmatt
                      pin_hook_commands)
 
 SETTINGS_KEYS = (("model",), ("env", "ANTHROPIC_DEFAULT_HAIKU_MODEL"))
+
+HOOK_TIMEOUT = 15
+# A pinned role with both overrides and extra members of several JSON types:
+# the hook must remove exactly the overrides. An unpinned role must pass as is.
+PINNED_INPUT = {"subagent_type": "reviewer", "description": "alignment probe",
+                "prompt": "p", "model": "sonnet", "effort": "max",
+                "run_in_background": True, "isolation": None, "extra": [1, "two", {}]}
+UNPINNED_INPUT = {"subagent_type": "general-purpose", "description": "alignment probe",
+                  "prompt": "p", "model": "sonnet"}
+
+
+def run_hook(path, tool_input, timeout):
+    """Runs the hook on one Agent dispatch; returns (exit, stdout, stderr) or a reason."""
+    event = {"hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": tool_input}
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("PYTHONPATH", "PYTHONDONTWRITEBYTECODE")}
+    with tempfile.TemporaryDirectory() as cwd:
+        try:
+            proc = subprocess.Popen([str(path)], cwd=cwd, env=env, stdin=subprocess.PIPE,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    start_new_session=True)
+        except OSError as error:
+            return f"could not start ({error})"
+        # The hook leads its own process group; whatever stops the wait, the
+        # group goes with it. A command the hook starts in a group of its own,
+        # as `timeout` does for mise, is bounded by that command instead.
+        try:
+            out, err = proc.communicate(json.dumps(event).encode(), timeout=timeout)
+        except subprocess.TimeoutExpired:
+            kill_group(proc)
+            return f"no result within {timeout} s"
+        except BaseException:
+            kill_group(proc)
+            raise
+    return proc.returncode, out.decode(errors="replace"), err.decode(errors="replace")
+
+
+def kill_group(proc):
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    try:
+        proc.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def canonical(value):
+    # Python equates True, 1 and 1.0; JSON does not.
+    return json.dumps(value, sort_keys=True)
+
+
+def probe_hook(path, timeout=HOOK_TIMEOUT):
+    """None when the hook pins as the bundle intends, else what went wrong."""
+    expected = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "updatedInput": {
+        k: v for k, v in PINNED_INPUT.items() if k not in ("model", "effort")}}}
+    for tool_input, want in ((PINNED_INPUT, expected), (UNPINNED_INPUT, None)):
+        result = run_hook(path, tool_input, timeout)
+        if isinstance(result, str):
+            return result
+        code, out, err = result
+        if code != 0:
+            first = err.strip().splitlines()[0][:200] if err.strip() else "no stderr"
+            return f"exit {code}: {first}"
+        # stderr on exit 0 is not a failure: Claude never sees it there.
+        try:
+            have = json.loads(out) if out.strip() else None
+        except ValueError:
+            have = out
+        if canonical(have) != canonical(want):
+            return f"unexpected output for {tool_input['subagent_type']}: {out.strip()[:200]!r}"
+    return None
 
 
 def dig(data, path):
@@ -87,6 +166,11 @@ def compare(bundle, installed):
         add("DRIFT", item, "content differs")
     elif not os.access(target, os.X_OK):
         add("DRIFT", item, "not executable")
+    else:
+        # Only bytes identical to the bundle's are ever run.
+        failure = probe_hook(target)
+        if failure:
+            add("DRIFT", item, f"run: {failure}")
 
     target = installed / "rules" / "model-routing.md"
     if not target.is_file():

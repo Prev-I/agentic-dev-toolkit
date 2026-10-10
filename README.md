@@ -134,7 +134,8 @@ hold.
 
 A systemd user template, `claude-rc@<project>.service`, keeps `claude remote-control` running for
 `~/code/<project>` inside a dedicated tmux server, loads the project's `.envrc` through direnv,
-and gives each session opened from a client its own Git worktree. It is not installed by
+gives each session opened from a client its own Git worktree, and starts the sessions it spawns
+in auto mode, never with a permission bypass. It is not installed by
 `environments/linux/install.sh`. The [runbook](docs/claude-remote-control.md) covers the
 prerequisites, the interactive first run, the unit and why each line is there, operations, and
 rollback.

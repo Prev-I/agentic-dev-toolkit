@@ -15,7 +15,12 @@ Ubuntu under WSL2.
 ## Policy
 
 - **No permission bypass.** Never add `--dangerously-skip-permissions` or a
-  `bypassPermissions` mode. Remote sessions keep the project's normal permission
+  `bypassPermissions` mode.
+- **The server starts its sessions in auto mode** (`--permission-mode auto`).
+  The flag overrides the project's `permissions.defaultMode` for those sessions,
+  and it is part of the shared template, so it applies to every instance. A
+  project that needs a stricter mode gets its own `ExecStart` in a per-instance
+  drop-in (see [Another project](#another-project)), not a change to its
   settings.
 - **One instance per project.** The instance name is the directory name under
   `~/code`, so `claude-rc@<PROJECT>` always serves `~/code/<PROJECT>`. Use plain
@@ -24,8 +29,9 @@ Ubuntu under WSL2.
   directory.
 - **Sessions opened from a client get their own Git worktree** (`--spawn
   worktree`), so two remote sessions never share a working tree. The one
-  exception is the session the server creates for itself at start, which runs in
-  the project's main checkout — the same tree an interactive session there uses.
+  exception is the server's own session: created at the server's first start and
+  reattached after each restart, it runs in the project's main checkout — the
+  same tree an interactive session there uses.
 - **The project's environment comes from its own `.envrc`.** Secrets stay where
   direnv already finds them; nothing secret is written into the unit.
 
@@ -47,11 +53,11 @@ launches through it; jq is needed only by the checks below.
 command -v claude                       # expect: ~/.local/bin/claude
 claude --version
 claude auth status                      # expect: "authMethod": "claude.ai"
-timeout 10 claude remote-control --help | grep -E -- '--(spawn|capacity|remote-control-session-name-prefix)'
+timeout 10 claude remote-control --help | grep -E -- '--(spawn|capacity|remote-control-session-name-prefix|permission-mode)'
 ```
 
 `claude remote-control --help` can print its help and then stay running, hence the
-`timeout`. All three flags must be listed; an older version lacks them.
+`timeout`. All four flags must be listed; an older version lacks them.
 
 **No variable that redirects or restricts the API.** Remote Control needs the
 first-party claude.ai endpoint and login. None of these may reach the server:
@@ -144,7 +150,7 @@ ExecStartPre=/bin/sh -c 'until getent ahosts api.anthropic.com >/dev/null; do sl
 # tmux that only ends the session cleanly; checking first makes it a unit failure.
 ExecStartPre=/usr/bin/direnv exec %h/code/%i /bin/true
 ExecStart=/usr/bin/tmux -L rc-%i new-session -d -s rc-%i -c %h/code/%i \
-    /usr/bin/direnv exec %h/code/%i %h/.local/bin/claude remote-control --name "%i" --remote-control-session-name-prefix "%i" --spawn worktree --capacity 4
+    /usr/bin/direnv exec %h/code/%i %h/.local/bin/claude remote-control --name "%i" --remote-control-session-name-prefix "%i" --spawn worktree --capacity 4 --permission-mode auto
 # The server holds one session, so stop it whole. A `-t rc-%i` target would read
 # a "." in the instance name as a pane separator. The server is already gone
 # whenever claude exited on its own.
@@ -170,7 +176,8 @@ WantedBy=default.target
 
 Adjust `/usr/bin/tmux` and `/usr/bin/direnv` to what `command -v` reports. Nothing
 goes before `remote-control` on the command line: it is a subcommand, and global
-flags placed ahead of it are not Remote Control options.
+flags placed ahead of it are not Remote Control options. For `--permission-mode`
+it is stronger than that: given before the verb, Remote Control refuses to start.
 
 ### Why it is shaped this way
 
@@ -228,6 +235,15 @@ flags placed ahead of it are not Remote Control options.
   [OpenCode as a persistent service](opencode-service.md)), has to merge several
   `.envrc` files and so needs an allowlist and conflict detection. Here one
   `.envrc` is loaded whole, as it would be interactively.
+- **The permission mode is set on the server, not left to settings.** Nobody is
+  at the workstation to answer a prompt, so a session that waits for approval
+  stalls until someone opens it in a client. A project's
+  `permissions.defaultMode` does not reliably reach the sessions the server
+  starts: with `defaultMode: "auto"` in the project's settings, a new worktree
+  session ran in auto mode, while the server's own session, reattached after a
+  restart, ran in `default`. The server appends the flag to the command line of
+  every session process it starts, and the reattached session is started the
+  same way; the verification below confirms it after a restart.
 - **mise shims on PATH, not versioned runtime directories.** Shims resolve tools
   against the project's own mise configuration in each working directory.
 
@@ -287,6 +303,14 @@ The pattern is anchored to the first argument because the tmux server's own
 command line contains the same words further along, and ends in a space so that
 `foo` does not also match `foo-bar`.
 
+To confirm the permission mode reached the sessions, list the server's child
+processes, one per session. Each should show `--permission-mode auto` after its
+session ID, the server's own session included:
+
+```bash
+pgrep -aP "$pid" | grep -o -- '--session-id [^ ]*\|--permission-mode [^ ]*'
+```
+
 ## Operations
 
 | Task | Command |
@@ -313,9 +337,17 @@ Repeat the prerequisites for `~/code/<OTHER>`, run the interactive first run
 there, then `systemctl --user enable --now claude-rc@<OTHER>`. A worktree ignore
 rule kept in one repository's `.git/info/exclude` does not carry over.
 
+A project that needs a different permission mode overrides `ExecStart` for its
+instance only. `systemctl --user edit claude-rc@<OTHER>` opens
+`~/.config/systemd/user/claude-rc@<OTHER>.service.d/override.conf`; in it, an
+empty `ExecStart=` under `[Service]` clears the template's line, and a copy of
+that line with the other mode replaces it. The copy no longer follows the
+runbook, so compare it with the template after changing either.
+
 ### Sessions and worktrees
 
-The server creates one session in the project directory itself when it starts;
+The server creates one session in the project directory itself at its first
+start, and reattaches it after each restart;
 sessions opened from claude.ai or the app go to worktrees. When a session ends
 other than cleanly — closing or archiving it from a client is enough — the pane
 logs `Session failed: Process exited with error` and `kept worktree … session
@@ -356,7 +388,9 @@ project, then reset and restart the unit.
 `claude` exits as soon as it starts. Run the first-run step by hand.
 `Workspace not trusted` in the journal or the pane means the trust prompt was
 never answered; a refusal mentioning the API endpoint or login means a variable
-from the prerequisites reaches the server.
+from the prerequisites reaches the server. `Invalid permission mode` means the
+installed version does not accept the unit's `--permission-mode` value; check it
+against the modes the error lists.
 
 ### The unit stays `activating` for minutes
 

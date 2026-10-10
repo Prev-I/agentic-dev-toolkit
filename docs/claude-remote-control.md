@@ -353,6 +353,14 @@ other than cleanly — closing or archiving it from a client is enough — the p
 logs `Session failed: Process exited with error` and `kept worktree … session
 crashed`. The server itself is unaffected.
 
+From a terminal, `claude --resume` in the project lists the server's own
+session beside the interactive ones, but none of the worktree sessions: not with
+all worktrees or all projects shown, and not from inside the session's worktree,
+although their transcripts are on disk (Claude Code 2.1.296). Resume those from
+claude.ai or the app. Resuming the server's own session from a terminal while
+the server holds it would run one session in two processes, so stop the
+unit first.
+
 Kept worktrees and their `worktree-*` branches accumulate. Remove one only after
 checking it has no uncommitted work and no commits ahead of the default branch.
 

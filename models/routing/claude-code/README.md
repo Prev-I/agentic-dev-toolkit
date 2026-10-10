@@ -13,8 +13,10 @@ amended by [Haiku roles on Haiku 5.5](docs/decisions/2026-10-09-haiku-roles-on-h
 [Build effort in modelSettings](docs/decisions/2026-10-09-build-effort-in-model-settings.md),
 [the hook pinning effort](docs/decisions/2026-10-09-hook-pins-effort.md),
 [Scout at medium](docs/decisions/2026-10-09-scout-at-medium.md),
-[the hook running Python isolated](docs/decisions/2026-10-10-hook-runs-python-isolated.md)
-and [the Explore and escalation triggers](docs/decisions/2026-10-10-explore-and-escalation-triggers.md).
+[the hook running Python isolated](docs/decisions/2026-10-10-hook-runs-python-isolated.md),
+[the Explore and escalation triggers](docs/decisions/2026-10-10-explore-and-escalation-triggers.md),
+[the hook resolving Python through mise](docs/decisions/2026-10-10-hook-resolves-python-through-mise.md)
+and [the alignment check running the hook](docs/decisions/2026-10-10-alignment-check-runs-the-hook.md).
 
 ## Model map
 
@@ -65,6 +67,10 @@ reports a non-blocking error and routing falls back to the policy alone. It
 runs Python in isolated mode, so modules in the session's directory or on
 `PYTHONPATH` never load inside it; see the
 [hook isolation decision](docs/decisions/2026-10-10-hook-runs-python-isolated.md).
+Nor does that directory choose the interpreter: the hook asks
+`mise -C "$HOME" which python3` with automatic installs off, and falls back to
+`python3` on `PATH` resolved from `$HOME`; see the
+[interpreter decision](docs/decisions/2026-10-10-hook-resolves-python-through-mise.md).
 
 Planning is a separate session: `claude --agent planner` runs the planner as
 the main thread. Its plan is then handed to an ordinary (Build) session.
@@ -209,12 +215,17 @@ bash models/routing/claude-code/eval/check-alignment.sh [--json report.json]
 ```
 
 It compares the bundle with `$CLAUDE_CONFIG_DIR` (default `~/.claude`). It
-makes no model calls and changes nothing. Exit `0` aligned, `1` drift, `2`
-usage error or nothing installed.
+makes no model calls and writes nothing itself outside a temporary
+directory. When the installed hook is byte-identical to the bundle's and
+executable, it runs it on two synthetic dispatches, from an empty temporary
+directory and with your shell's environment: a pinned role must come back
+with exactly `model` and `effort` removed, and `general-purpose` unchanged.
+That run asks mise for the hook's interpreter, as every dispatch does. Exit `0` aligned, `1`
+drift, `2` usage error or nothing installed.
 
 | Severity | Covers | Fails |
 |---|---|---|
-| `DRIFT` | settings `model`, `modelSettings.claude-opus-5-5.effortLevel`, `env.ANTHROPIC_DEFAULT_HAIKU_MODEL`, the hook registration; each agent's `model`, `effort`, `tools`, `disallowedTools`, `maxTurns`, `permissionMode`; the hook script's content and exec bit; a missing agent, hook or policy file | yes |
+| `DRIFT` | settings `model`, `modelSettings.claude-opus-5-5.effortLevel`, `env.ANTHROPIC_DEFAULT_HAIKU_MODEL`, the hook registration; each agent's `model`, `effort`, `tools`, `disallowedTools`, `maxTurns`, `permissionMode`; the hook script's content and exec bit, and a test run of it that does not pin; a missing agent, hook or policy file | yes |
 | `STALE` | agent prompt bodies; the policy's content | no |
 
 Everything else in your configuration is yours and is never reported. It

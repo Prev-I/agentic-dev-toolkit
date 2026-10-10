@@ -17,6 +17,21 @@ trap 'rm -rf "$workdir"' EXIT
 home="$workdir/home"
 live="$home/.claude"
 
+# The check runs the installed hook, which asks mise for its interpreter. A
+# stub mise and a stub python3 first on PATH keep the suite off the real mise:
+# STUB_PY names the interpreter the stub mise reports, or it fails and the hook
+# falls back to the stub python3, which hands off to the real interpreter by
+# its absolute path, found once here.
+stubs="$workdir/stubs"
+mkdir -p "$stubs"
+cat >"$stubs/mise" <<'SH'
+#!/bin/sh
+[ -n "${STUB_PY:-}" ] || exit 1
+printf '%s\n' "$STUB_PY"
+SH
+printf '#!/bin/sh\nexec "%s" "$@"\n' "$(python3 -c 'import sys; print(sys.executable)')" >"$stubs/python3"
+chmod +x "$stubs/mise" "$stubs/python3"
+
 install_bundle() {
   rm -rf "$live"
   mkdir -p "$live/agents" "$live/hooks" "$live/rules"
@@ -28,7 +43,8 @@ install_bundle() {
 
 run_check() {
   set +e
-  HOME="$home" CLAUDE_CONFIG_DIR="$live" bash "$check" --json "$workdir/report.json" >"$workdir/out" 2>"$workdir/err"
+  HOME="$home" CLAUDE_CONFIG_DIR="$live" PATH="$stubs:$PATH" \
+    bash "$check" --json "$workdir/report.json" >"$workdir/out" 2>"$workdir/err"
   rc=$?
   set -e
   out=$(cat "$workdir/out")
@@ -115,7 +131,7 @@ assert_eq 0 "$rc"; assert_eq ALIGNED "$(status)"
 install_bundle
 other="$workdir/other"; rm -rf "$other"; cp -a "$live" "$other"
 set +e
-HOME="$home" CLAUDE_CONFIG_DIR="$other" bash "$check" >"$workdir/out" 2>&1; rc=$?
+HOME="$home" CLAUDE_CONFIG_DIR="$other" PATH="$stubs:$PATH" bash "$check" >"$workdir/out" 2>&1; rc=$?
 set -e
 assert_eq 1 "$rc"; assert_contains "$(cat "$workdir/out")" "settings.hooks.PreToolUse"
 
@@ -126,6 +142,59 @@ install_bundle; chmod -x "$live/hooks/pin-agent-model.sh"; run_check
 assert_eq 1 "$rc"; assert_contains "$out" "not executable"
 install_bundle; rm "$live/hooks/pin-agent-model.sh"; run_check
 assert_eq 1 "$rc"; assert_contains "$out" "not installed"
+
+# The installed hook is run, and a run that does not pin is drift even when
+# its bytes match: here mise names an interpreter that fails.
+printf '#!/bin/sh\necho "broken interpreter" >&2\nexit 1\n' >"$workdir/broken-python"
+chmod +x "$workdir/broken-python"
+install_bundle; STUB_PY="$workdir/broken-python" run_check
+assert_eq 1 "$rc"; assert_eq DRIFT "$(status)"
+assert_contains "$out" "hooks/pin-agent-model.sh  run: exit 1: broken interpreter"
+
+# An interpreter that answers but does not pin is drift too.
+printf '#!/bin/sh\necho "{}"\n' >"$workdir/wrong-python"
+chmod +x "$workdir/wrong-python"
+install_bundle; STUB_PY="$workdir/wrong-python" run_check
+assert_eq 1 "$rc"; assert_contains "$out" "run: unexpected output for reviewer: '{}'"
+
+# A hook that differs from the bundle is reported and never run.
+install_bundle
+printf 'touch "%s/ran"\n' "$workdir" >>"$live/hooks/pin-agent-model.sh"
+run_check
+assert_eq 1 "$rc"; assert_contains "$out" "content differs"
+[[ ! -e "$workdir/ran" ]] || fail "a hook that differs from the bundle must not run"
+
+# A hook that never answers is cut off at the timeout.
+printf '#!/bin/sh\nsleep 30\n' >"$workdir/hang.sh"
+chmod +x "$workdir/hang.sh"
+SECONDS=0
+detail=$(py - "$workdir/hang.sh" <<'PY'
+import sys
+from pathlib import Path
+from check_alignment import probe_hook
+print(probe_hook(Path(sys.argv[1]), timeout=1))
+PY
+)
+assert_eq "no result within 1 s" "$detail"
+((SECONDS < 10)) || fail "the hook timeout did not cut the run off (${SECONDS}s)"
+
+# A hook that cannot be started is reported, not raised.
+detail=$(py - "$workdir/does-not-exist" <<'PY'
+import sys
+from pathlib import Path
+from check_alignment import probe_hook
+print(probe_hook(Path(sys.argv[1])))
+PY
+)
+assert_contains "$detail" "could not start"
+
+# Values must keep their JSON type: Python alone would equate true and 1.
+py - <<'PY' || fail "canonical comparison equates true and 1"
+from check_alignment import canonical
+assert canonical({"a": True}) != canonical({"a": 1})
+assert canonical({"a": 1}) != canonical({"a": 1.0})
+assert canonical({"a": 1, "b": [None]}) == canonical({"b": [None], "a": 1})
+PY
 
 # Policy: missing is drift, edited is stale.
 install_bundle; rm "$live/rules/model-routing.md"; run_check

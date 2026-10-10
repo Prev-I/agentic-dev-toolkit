@@ -97,7 +97,9 @@ shell function:
 ```
 
 Sessions started with `<NAME>` go through the proxy, while the Remote Control
-server and the sessions it spawns reach the API directly. Pick a name other than
+server and the sessions it spawns reach the API directly. The price is that a
+`<NAME>` session cannot use Remote Control itself, so it never shows up in
+claude.ai or the app (see [Sessions and worktrees](#sessions-and-worktrees)). Pick a name other than
 `claude`: the interactive first run below types `claude remote-control` by hand,
 and redefining `claude` would hand it the variable.
 
@@ -360,6 +362,14 @@ although their transcripts are on disk (Claude Code 2.1.296). Resume those from
 claude.ai or the app. Resuming the server's own session from a terminal while
 the server holds it would run one session in two processes, so stop the
 unit first.
+
+The reverse direction is opt-in: a session started from a terminal appears in
+claude.ai or the app only while Remote Control is on for it. To have every
+interactive session join, turn on "Enable Remote Control for all sessions" in
+`/config`, which writes `remoteControlAtStartup` to the user settings; Claude
+Code ignores the key in project and local settings. Sessions started through a
+proxy function stay out, since Remote Control refuses the redirected endpoint.
+With it on, the app is the one place that lists both kinds of session.
 
 Kept worktrees and their `worktree-*` branches accumulate. Remove one only after
 checking it has no uncommitted work and no commits ahead of the default branch.

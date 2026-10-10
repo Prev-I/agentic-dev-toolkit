@@ -13,8 +13,9 @@ amended by [Haiku roles on Haiku 5.5](docs/decisions/2026-10-09-haiku-roles-on-h
 [Build effort in modelSettings](docs/decisions/2026-10-09-build-effort-in-model-settings.md),
 [the hook pinning effort](docs/decisions/2026-10-09-hook-pins-effort.md),
 [Scout at medium](docs/decisions/2026-10-09-scout-at-medium.md),
-[the hook running Python isolated](docs/decisions/2026-10-10-hook-runs-python-isolated.md)
-and [the Explore and escalation triggers](docs/decisions/2026-10-10-explore-and-escalation-triggers.md).
+[the hook running Python isolated](docs/decisions/2026-10-10-hook-runs-python-isolated.md),
+[the Explore and escalation triggers](docs/decisions/2026-10-10-explore-and-escalation-triggers.md)
+and [the hook resolving Python through mise](docs/decisions/2026-10-10-hook-resolves-python-through-mise.md).
 
 ## Model map
 
@@ -65,6 +66,10 @@ reports a non-blocking error and routing falls back to the policy alone. It
 runs Python in isolated mode, so modules in the session's directory or on
 `PYTHONPATH` never load inside it; see the
 [hook isolation decision](docs/decisions/2026-10-10-hook-runs-python-isolated.md).
+Nor does that directory choose the interpreter: the hook asks
+`mise -C "$HOME" which python3` with automatic installs off, and falls back to
+`python3` on `PATH` resolved from `$HOME`; see the
+[interpreter decision](docs/decisions/2026-10-10-hook-resolves-python-through-mise.md).
 
 Planning is a separate session: `claude --agent planner` runs the planner as
 the main thread. Its plan is then handed to an ordinary (Build) session.

@@ -62,7 +62,9 @@ assert registers_pin_hook(fragment)
 
 policy = (bundle / "model-routing.md").read_text(encoding="utf-8")
 for needle in ("reviewer", "expert", "general-purpose", "Explore", "scout", "planner",
-               "Decision Packet", "Omit the `model` parameter", "the `effort` parameter"):
+               "Decision Packet", "Omit the `model` parameter", "the `effort` parameter",
+               "a codebase search goes to `Explore`", "presents a decision",
+               "the human's framing requires it", "not to escalate has opted out"):
     assert needle in policy, f"model-routing.md must mention {needle!r}"
 for model_id in ("claude-opus", "claude-sonnet", "claude-haiku", "claude-fable"):
     assert model_id not in policy, f"model-routing.md must never assign a model ({model_id})"

@@ -15,10 +15,11 @@ Ubuntu under WSL2.
 ## Policy
 
 - **No permission bypass.** Never add `--dangerously-skip-permissions` or a
-  `bypassPermissions` mode. Remote sessions start in auto mode
-  (`--permission-mode auto`): a classifier approves routine actions and blocks
-  risky ones, and anything it cannot settle still asks in the client. The
-  project's permission rules still apply.
+  `bypassPermissions` mode.
+- **The server starts its sessions in auto mode** (`--permission-mode auto`).
+  The flag overrides the project's `permissions.defaultMode` for those sessions,
+  so a project that wants a stricter mode when nobody is at the workstation sets
+  it in the flag, not in its settings.
 - **One instance per project.** The instance name is the directory name under
   `~/code`, so `claude-rc@<PROJECT>` always serves `~/code/<PROJECT>`. Use plain
   directory names: `%i` is the escaped instance name, so a name that
@@ -26,7 +27,8 @@ Ubuntu under WSL2.
   directory.
 - **Sessions opened from a client get their own Git worktree** (`--spawn
   worktree`), so two remote sessions never share a working tree. The one
-  exception is the session the server creates for itself at start, which runs in
+  exception is the server's own session, which it creates at its first start and
+  reattaches after each restart, and which runs in
   the project's main checkout — the same tree an interactive session there uses.
 - **The project's environment comes from its own `.envrc`.** Secrets stay where
   direnv already finds them; nothing secret is written into the unit.
@@ -49,11 +51,11 @@ launches through it; jq is needed only by the checks below.
 command -v claude                       # expect: ~/.local/bin/claude
 claude --version
 claude auth status                      # expect: "authMethod": "claude.ai"
-timeout 10 claude remote-control --help | grep -E -- '--(spawn|capacity|remote-control-session-name-prefix)'
+timeout 10 claude remote-control --help | grep -E -- '--(spawn|capacity|remote-control-session-name-prefix|permission-mode)'
 ```
 
 `claude remote-control --help` can print its help and then stay running, hence the
-`timeout`. All three flags must be listed; an older version lacks them.
+`timeout`. All four flags must be listed; an older version lacks them.
 
 **No variable that redirects or restricts the API.** Remote Control needs the
 first-party claude.ai endpoint and login. None of these may reach the server:
@@ -172,7 +174,8 @@ WantedBy=default.target
 
 Adjust `/usr/bin/tmux` and `/usr/bin/direnv` to what `command -v` reports. Nothing
 goes before `remote-control` on the command line: it is a subcommand, and global
-flags placed ahead of it are not Remote Control options.
+flags placed ahead of it are not Remote Control options. For `--permission-mode`
+it is stronger than that: given before the verb, Remote Control refuses to start.
 
 ### Why it is shaped this way
 
@@ -235,11 +238,10 @@ flags placed ahead of it are not Remote Control options.
   stalls until someone opens it in a client. A project's
   `permissions.defaultMode` does not reliably reach the sessions the server
   starts: with `defaultMode: "auto"` in the project's settings, a new worktree
-  session ran in auto mode, while the server's own session resumed after a
-  restart ran in `default`. The server passes `--permission-mode` to every
-  session it spawns, so the flag covers both. It must follow `remote-control`:
-  given before the verb, Remote Control refuses to start. A client can still
-  change the mode of a session it has open.
+  session ran in auto mode, while the server's own session, reattached after a
+  restart, ran in `default`. The server puts the flag on the command line of
+  every session process it starts, the reattached one included; the
+  verification below shows it there.
 - **mise shims on PATH, not versioned runtime directories.** Shims resolve tools
   against the project's own mise configuration in each working directory.
 
@@ -293,6 +295,14 @@ only — never values:
 ```bash
 pid=$(pgrep -f '^[^ ]*/claude remote-control --name <PROJECT> ')
 tr '\0' '\n' < /proc/"$pid"/environ | cut -d= -f1 | sort
+```
+
+To confirm the permission mode reached the sessions, list the session processes
+the server started. Each should show `--permission-mode auto` beside its
+session ID; the bracket keeps `pgrep` from matching the shell running it:
+
+```bash
+pgrep -af -- '--sdk-ur[l] ' | grep -o -- '--session-id [^ ]*\|--permission-mode [^ ]*'
 ```
 
 The pattern is anchored to the first argument because the tmux server's own
@@ -368,7 +378,9 @@ project, then reset and restart the unit.
 `claude` exits as soon as it starts. Run the first-run step by hand.
 `Workspace not trusted` in the journal or the pane means the trust prompt was
 never answered; a refusal mentioning the API endpoint or login means a variable
-from the prerequisites reaches the server.
+from the prerequisites reaches the server. `Invalid permission mode` means the
+installed version does not accept the unit's `--permission-mode` value; check it
+against the modes the error lists.
 
 ### The unit stays `activating` for minutes
 

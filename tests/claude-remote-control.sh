@@ -164,11 +164,13 @@ test_remote_control_runs_without_bypass_or_global_flags() {
   # Nothing may sit between the binary and the subcommand.
   assert_contains "$start" '/claude remote-control ' "remote-control must follow the binary directly"
   assert_contains "$start" '--spawn worktree' "remote sessions must get their own worktree"
-  # Nobody is at the workstation to answer prompts, and the project's defaultMode
-  # does not reach every session the server starts.
-  # Given before the verb, the flag makes Remote Control refuse to start.
-  [[ "$start" == *'/claude remote-control '*' --permission-mode auto'* ]] \
+  # Nobody is at the workstation to answer prompts and the project's defaultMode
+  # does not reach every session, so the server sets the mode, after the verb,
+  # where Remote Control accepts it.
+  [[ "$start " == *'/claude remote-control '*' --permission-mode auto '* ]] \
     || fail "the server must start its sessions in auto mode, after the verb"
+  [[ "$(grep -o -- '--permission-mode' <<< "$start" | wc -l)" == 1 ]] \
+    || fail "the unit must set the permission mode exactly once"
   assert_not_contains "$UNIT" 'dangerously-skip-permissions' "unit must not bypass permissions"
   assert_not_contains "$UNIT" 'bypassPermissions' "unit must not bypass permissions"
   local settings

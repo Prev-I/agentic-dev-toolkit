@@ -15,8 +15,10 @@ Ubuntu under WSL2.
 ## Policy
 
 - **No permission bypass.** Never add `--dangerously-skip-permissions` or a
-  `bypassPermissions` mode. Remote sessions keep the project's normal permission
-  settings.
+  `bypassPermissions` mode. Remote sessions start in auto mode
+  (`--permission-mode auto`): a classifier approves routine actions and blocks
+  risky ones, and anything it cannot settle still asks in the client. The
+  project's permission rules still apply.
 - **One instance per project.** The instance name is the directory name under
   `~/code`, so `claude-rc@<PROJECT>` always serves `~/code/<PROJECT>`. Use plain
   directory names: `%i` is the escaped instance name, so a name that
@@ -144,7 +146,7 @@ ExecStartPre=/bin/sh -c 'until getent ahosts api.anthropic.com >/dev/null; do sl
 # tmux that only ends the session cleanly; checking first makes it a unit failure.
 ExecStartPre=/usr/bin/direnv exec %h/code/%i /bin/true
 ExecStart=/usr/bin/tmux -L rc-%i new-session -d -s rc-%i -c %h/code/%i \
-    /usr/bin/direnv exec %h/code/%i %h/.local/bin/claude remote-control --name "%i" --remote-control-session-name-prefix "%i" --spawn worktree --capacity 4
+    /usr/bin/direnv exec %h/code/%i %h/.local/bin/claude remote-control --name "%i" --remote-control-session-name-prefix "%i" --spawn worktree --capacity 4 --permission-mode auto
 # The server holds one session, so stop it whole. A `-t rc-%i` target would read
 # a "." in the instance name as a pane separator. The server is already gone
 # whenever claude exited on its own.
@@ -228,6 +230,16 @@ flags placed ahead of it are not Remote Control options.
   [OpenCode as a persistent service](opencode-service.md)), has to merge several
   `.envrc` files and so needs an allowlist and conflict detection. Here one
   `.envrc` is loaded whole, as it would be interactively.
+- **The permission mode is set on the server, not left to settings.** Nobody is
+  at the workstation to answer a prompt, so a session that waits for approval
+  stalls until someone opens it in a client. A project's
+  `permissions.defaultMode` does not reliably reach the sessions the server
+  starts: with `defaultMode: "auto"` in the project's settings, a new worktree
+  session ran in auto mode, while the server's own session resumed after a
+  restart ran in `default`. The server passes `--permission-mode` to every
+  session it spawns, so the flag covers both. It must follow `remote-control`:
+  given before the verb, Remote Control refuses to start. A client can still
+  change the mode of a session it has open.
 - **mise shims on PATH, not versioned runtime directories.** Shims resolve tools
   against the project's own mise configuration in each working directory.
 

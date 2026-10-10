@@ -369,6 +369,11 @@ interactive session join, turn on "Enable Remote Control for all sessions" in
 `/config`, which writes `remoteControlAtStartup` to the user settings; Claude
 Code ignores the key in project and local settings. Sessions started through a
 proxy function stay out, since Remote Control refuses the redirected endpoint.
+With it on, the app lists the server's sessions and the interactive ones
+together. Archiving an interactive session there only disconnects it: the
+terminal shows `Remote Control disconnected — this session was ended or
+archived from another device or app (code 4090)` and the session keeps running
+locally.
 
 Kept worktrees and their `worktree-*` branches accumulate. Remove one only after
 checking it has no uncommitted work and no commits ahead of the default branch.

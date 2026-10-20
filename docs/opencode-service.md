@@ -112,6 +112,15 @@ so a 60s window catches the fifth and a persistent failure ends in a visible
 the more dangerous state, because the unit then restarts for ever while
 appearing to have a limit configured.
 
+That arithmetic assumes a failed start *ends* quickly, and the readiness probe
+under `ExecStartPost` decides when it ends. A probe that keeps polling after the
+server has exited holds every start open for its whole window, so with a 60s
+probe each cycle takes ~63s, five never fit in 60s, and the limit cannot trip.
+This is not hypothetical: a server that exited within a second of every start
+restarted more than 8,000 times over six days without ever reaching `failed`.
+The probe below therefore gives up as soon as the main process is gone — see
+[Readiness](#readiness).
+
 ```bash
 systemctl --user daemon-reload
 systemctl --user enable --now opencode.service
@@ -506,7 +515,9 @@ system — `[boot] systemd=true` in `/etc/wsl.conf`, verified with
 surface is available, then logs a line per check. Without it, `systemctl
 start` returns as soon as the process exists, and the next command in a script
 races a server that is listening but not ready. Anything that polls the health
-endpoint and one required tool, then exits non-zero on timeout, is sufficient.
+endpoint and one required tool, exits non-zero on timeout, and exits non-zero
+*at once* when the server process dies, is sufficient. The last part is what
+keeps the start limit reachable.
 
 `opencode-service/opencode-startup-ready.sh` in this repository is one such
 probe. Copy it to the path the unit names:
@@ -516,12 +527,15 @@ install -D -m 755 opencode-service/opencode-startup-ready.sh \
   ~/.local/libexec/opencode/opencode-startup-ready
 ```
 
-Two things it gets right that are easy to miss. It checks **both** health and
+Three things it gets right that are easy to miss. It checks **both** health and
 the registered tool surface. The gateway-neutral default is the built-in
 `bash` tool; set `READY_TOOL_MARKER` to a plugin-owned tool only when that plugin
-is required for the server to count as ready. And it never calls anything
+is required for the server to count as ready. It never calls anything
 external, so an outage at a message channel cannot fail a start and have systemd
-restart a healthy server.
+restart a healthy server. And it watches the `MAINPID` systemd hands to
+`ExecStartPost`, failing with `main process <pid> exited during startup` the
+moment the server is gone instead of polling out the window. Run by hand, with no
+`MAINPID`, it only polls.
 
 Whatever probe you use, keep `TimeoutStartSec` above its window. Left at the
 default the start is killed first, and the probe's own diagnosis — which half

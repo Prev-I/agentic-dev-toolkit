@@ -335,6 +335,55 @@ test_server_readiness_accepts_an_explicit_plugin_marker() {
     "readiness must report the configured marker"
 }
 
+# A server that exits at once must fail the start at once. Polling out the window
+# instead makes every crash-loop cycle longer than StartLimitIntervalSec, so the
+# start limit never trips and the unit restarts for ever.
+test_server_readiness_fails_fast_when_the_main_process_is_gone() {
+  new_case ready-dead-main
+  export STUB_CURL_STATUS=7                 # never healthy: only MAINPID can end it
+
+  local dead_pid
+  bash -c 'exit 1' &
+  dead_pid=$!
+  wait "$dead_pid" || true
+
+  local output status started=$SECONDS
+  set +e
+  output="$(
+    PATH="$TEMP_DIR/bin:$PATH" MAINPID="$dead_pid" \
+      READY_TIMEOUT=30 READY_INTERVAL=1 bash "$READY" 2>&1
+  )"
+  status=$?
+  set -e
+
+  assert_equal "$status" "1" "a dead main process must fail readiness"
+  (( SECONDS - started <= 3 )) \
+    || fail "readiness must not poll out the window after the main process exits"
+  assert_contains "$output" "main process $dead_pid exited during startup" \
+    "readiness must say why it gave up"
+}
+
+test_server_readiness_passes_while_the_main_process_lives() {
+  new_case ready-live-main
+
+  local live_pid
+  sleep 30 &
+  live_pid=$!
+
+  local output status
+  set +e
+  output="$(
+    PATH="$TEMP_DIR/bin:$PATH" MAINPID="$live_pid" \
+      READY_TIMEOUT=0 READY_INTERVAL=0 bash "$READY" 2>&1
+  )"
+  status=$?
+  set -e
+  kill "$live_pid" 2>/dev/null || true
+
+  assert_equal "$status" "0" "a live main process must not block readiness"
+  assert_contains "$output" "readiness: READY" "readiness must still report READY"
+}
+
 test_telegram_readiness_requires_polling_and_opencode() {
   new_case telegram-ready
   export STUB_REQUIRE_AUTH=1
@@ -437,6 +486,11 @@ test_shipped_scripts_are_executable_and_syntactically_valid() {
 }
 
 test_service_helpers_declare_and_print_their_versions() {
+  local -A expected=(
+    ["$CONSUMER"]="0.1.0"
+    ["$READY"]="0.1.1"
+    ["$TELEGRAM_READY"]="0.1.0"
+  )
   local script
   for script in "$CONSUMER" "$READY" "$TELEGRAM_READY"; do
     grep -qE '^readonly SCRIPT_VERSION="[0-9]+\.[0-9]+\.[0-9]+"$' "$script" \
@@ -449,7 +503,7 @@ test_service_helpers_declare_and_print_their_versions() {
     set -e
 
     assert_equal "$status" "0" "$script --version must exit 0"
-    assert_equal "$output" "0.1.0" "$script --version must print the version"
+    assert_equal "$output" "${expected[$script]}" "$script --version must print the version"
   done
 }
 
@@ -587,6 +641,8 @@ test_a_request_without_a_usable_stamp_is_still_honoured
 test_every_written_status_is_well_formed_json
 test_server_readiness_defaults_to_a_builtin_tool
 test_server_readiness_accepts_an_explicit_plugin_marker
+test_server_readiness_fails_fast_when_the_main_process_is_gone
+test_server_readiness_passes_while_the_main_process_lives
 test_telegram_readiness_requires_polling_and_opencode
 test_telegram_readiness_requires_systemd_invocation_id
 test_shipped_scripts_are_executable_and_syntactically_valid

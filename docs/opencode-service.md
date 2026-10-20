@@ -626,6 +626,12 @@ The readiness helper requires both authenticated OpenCode health and a
 `Bot @… started!` journal marker from the current systemd invocation. That marker
 is vendor output, so verify it when upgrading the bot. A bot release or Node
 major upgrade requires updating its pinned path in the unit.
+Like the server probe, it fails at once when the bot's `MAINPID` is gone, so a
+bot that dies on start cannot hold each start open for the whole window. It
+discards what its marker search prints: the probe's output is logged under the
+same invocation it searches, so an echoed match would match again on every
+poll. `--quiet` does not prevent that, because it silences journalctl's notices,
+not its matches.
 
 The bot owns `~/.config/opencode-telegram-bot/settings.json`, including scheduled
 tasks and a directory cache. Back it up, but do not use the cache as declarative

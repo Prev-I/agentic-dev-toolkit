@@ -54,11 +54,14 @@ main() {
         "$BOT_PID" >&2
       return 1
     fi
-    if journalctl \
+    # --quiet silences journalctl's notices, not its matches. Printed, a match
+    # lands in this invocation's own journal and matches again on every later
+    # poll, so the output must be discarded.
+    if (( ! polling_ready )) && journalctl \
         "_SYSTEMD_INVOCATION_ID=$INVOCATION_ID" \
         --grep='Bot @[^ ]+ started!' \
         --quiet \
-        --no-pager; then
+        --no-pager >/dev/null; then
       polling_ready=1
     fi
 

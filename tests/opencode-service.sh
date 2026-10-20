@@ -79,7 +79,10 @@ STUB
 #!/usr/bin/env bash
 [[ "$*" == *"_SYSTEMD_INVOCATION_ID=${STUB_MARKER_INVOCATION:-}"* ]] || exit 1
 [[ "$*" == *'--grep=Bot @[^ ]+ started!'* ]] || exit 2
-[[ "${STUB_TELEGRAM_STARTED:-0}" == "1" ]]
+[[ "${STUB_TELEGRAM_STARTED:-0}" == "1" ]] || exit 1
+# Real journalctl prints every match even under --quiet, which only silences
+# its informational messages.
+printf '%s\n' 'Bot @stub_bot started!'
 STUB
 
   chmod 0755 "$TEMP_DIR/bin/systemctl" "$TEMP_DIR/bin/curl" "$TEMP_DIR/bin/journalctl"
@@ -477,6 +480,29 @@ test_telegram_readiness_requires_systemd_invocation_id() {
     "Telegram readiness must explain its systemd-only contract"
 }
 
+# The probe's stdout lands in the journal under the same invocation id it greps,
+# so an echoed marker matches again on the next poll and the output snowballs:
+# one start on a real host logged 22,307 lines. Matching must stay silent.
+test_telegram_readiness_does_not_echo_journal_matches() {
+  new_case telegram-no-echo
+  export STUB_HEALTH_BODY='{"healthy":false}'   # keep it polling past the marker
+
+  local output status
+  set +e
+  output="$(
+    PATH="$TEMP_DIR/bin:$PATH" \
+      INVOCATION_ID=test-invocation \
+      TELEGRAM_READY_TIMEOUT=2 TELEGRAM_READY_INTERVAL=1 \
+      bash "$TELEGRAM_READY" 2>&1
+  )"
+  status=$?
+  set -e
+
+  assert_equal "$status" "1" "an unhealthy OpenCode must still fail Telegram readiness"
+  [[ "$output" != *'started!'* ]] \
+    || fail "Telegram readiness must not copy journal matches into its own output: '$output'"
+}
+
 # The same containment rule as the server probe: a bot that exits at once must
 # fail the start at once, not after the whole window.
 test_telegram_readiness_fails_fast_when_the_main_process_is_gone() {
@@ -698,6 +724,7 @@ test_server_readiness_fails_fast_when_the_main_process_is_gone
 test_server_readiness_passes_while_the_main_process_lives
 test_telegram_readiness_requires_polling_and_opencode
 test_telegram_readiness_requires_systemd_invocation_id
+test_telegram_readiness_does_not_echo_journal_matches
 test_telegram_readiness_fails_fast_when_the_main_process_is_gone
 test_telegram_readiness_passes_while_the_main_process_lives
 test_shipped_scripts_are_executable_and_syntactically_valid

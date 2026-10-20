@@ -5,13 +5,18 @@ IFS=$'\n\t'
 # Readiness probe for a Telegram sidecar that connects to a persistent OpenCode
 # server. The polling marker is scoped to this systemd invocation so a previous
 # successful start cannot satisfy a new one.
+#
+# Like the server probe, it gives up as soon as the MAINPID systemd hands to
+# `ExecStartPost=` is gone, so a bot that dies at once fails its start at once
+# and the unit's start limit stays reachable.
 
 readonly TIMEOUT="${TELEGRAM_READY_TIMEOUT:-60}"
 readonly INTERVAL="${TELEGRAM_READY_INTERVAL:-1}"
 readonly OPENCODE_URL="${OPENCODE_API_URL:-http://127.0.0.1:4096}"
 readonly USERNAME="${OPENCODE_SERVER_USERNAME:-opencode}"
 readonly PASSWORD="${OPENCODE_SERVER_PASSWORD:-}"
-readonly SCRIPT_VERSION="0.1.0"
+readonly BOT_PID="${MAINPID:-}"
+readonly SCRIPT_VERSION="0.1.1"
 
 # Answered here, at the top level, rather than as the first statement of main
 # like the sibling helpers do: the INVOCATION_ID requirement below runs before
@@ -32,12 +37,23 @@ fi
 
 readonly DEADLINE=$((SECONDS + TIMEOUT))
 
+# True while the bot process exists, or when there is no PID to watch.
+bot_alive() {
+  [[ "$BOT_PID" =~ ^[1-9][0-9]*$ ]] || return 0
+  kill -0 "$BOT_PID" 2>/dev/null
+}
+
 main() {
   local polling_ready=0
   local opencode_ready=0
   local health_body=""
 
   while true; do
+    if ! bot_alive; then
+      printf 'telegram-readiness: NOT READY — main process %s exited during startup\n' \
+        "$BOT_PID" >&2
+      return 1
+    fi
     if journalctl \
         "_SYSTEMD_INVOCATION_ID=$INVOCATION_ID" \
         --grep='Bot @[^ ]+ started!' \

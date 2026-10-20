@@ -477,6 +477,59 @@ test_telegram_readiness_requires_systemd_invocation_id() {
     "Telegram readiness must explain its systemd-only contract"
 }
 
+# The same containment rule as the server probe: a bot that exits at once must
+# fail the start at once, not after the whole window.
+test_telegram_readiness_fails_fast_when_the_main_process_is_gone() {
+  new_case telegram-dead-main
+  export STUB_TELEGRAM_STARTED=0            # never ready: only MAINPID can end it
+
+  local dead_pid
+  bash -c 'exit 1' &
+  dead_pid=$!
+  wait "$dead_pid" || true
+
+  local output status started=$SECONDS
+  set +e
+  output="$(
+    PATH="$TEMP_DIR/bin:$PATH" MAINPID="$dead_pid" \
+      INVOCATION_ID=test-invocation \
+      TELEGRAM_READY_TIMEOUT=30 TELEGRAM_READY_INTERVAL=1 \
+      bash "$TELEGRAM_READY" 2>&1
+  )"
+  status=$?
+  set -e
+
+  assert_equal "$status" "1" "a dead main process must fail Telegram readiness"
+  (( SECONDS - started <= 3 )) \
+    || fail "Telegram readiness must not poll out the window after the main process exits"
+  assert_contains "$output" "main process $dead_pid exited during startup" \
+    "Telegram readiness must say why it gave up"
+}
+
+test_telegram_readiness_passes_while_the_main_process_lives() {
+  new_case telegram-live-main
+
+  local live_pid
+  sleep 30 &
+  live_pid=$!
+
+  local output status
+  set +e
+  output="$(
+    PATH="$TEMP_DIR/bin:$PATH" MAINPID="$live_pid" \
+      INVOCATION_ID=test-invocation \
+      TELEGRAM_READY_TIMEOUT=0 TELEGRAM_READY_INTERVAL=0 \
+      bash "$TELEGRAM_READY" 2>&1
+  )"
+  status=$?
+  set -e
+  kill "$live_pid" 2>/dev/null || true
+
+  assert_equal "$status" "0" "a live main process must not block Telegram readiness"
+  assert_contains "$output" "telegram-readiness: READY" \
+    "Telegram readiness must still report READY"
+}
+
 test_shipped_scripts_are_executable_and_syntactically_valid() {
   local script
   for script in "$CONSUMER" "$READY" "$TELEGRAM_READY"; do
@@ -489,7 +542,7 @@ test_service_helpers_declare_and_print_their_versions() {
   local -A expected=(
     ["$CONSUMER"]="0.1.0"
     ["$READY"]="0.1.1"
-    ["$TELEGRAM_READY"]="0.1.0"
+    ["$TELEGRAM_READY"]="0.1.1"
   )
   local script
   for script in "$CONSUMER" "$READY" "$TELEGRAM_READY"; do
@@ -645,6 +698,8 @@ test_server_readiness_fails_fast_when_the_main_process_is_gone
 test_server_readiness_passes_while_the_main_process_lives
 test_telegram_readiness_requires_polling_and_opencode
 test_telegram_readiness_requires_systemd_invocation_id
+test_telegram_readiness_fails_fast_when_the_main_process_is_gone
+test_telegram_readiness_passes_while_the_main_process_lives
 test_shipped_scripts_are_executable_and_syntactically_valid
 test_service_helpers_declare_and_print_their_versions
 test_service_helpers_survive_no_arguments_under_set_u

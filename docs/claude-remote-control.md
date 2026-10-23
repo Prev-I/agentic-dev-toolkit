@@ -10,7 +10,7 @@ Placeholders used throughout: `<PROJECT>` a Git repository at `~/code/<PROJECT>`
 local proxy's port.
 
 Observed with Claude Code 2.1.296, tmux 3.4, direnv 2.32.1 and systemd 255 on
-Ubuntu under WSL2.
+Ubuntu under WSL2; `--no-create-session-in-dir` with Claude Code 2.1.309.
 
 ## Policy
 
@@ -28,10 +28,12 @@ Ubuntu under WSL2.
   `systemd-escape` would alter (spaces, for example) does not map back to the
   directory.
 - **Sessions opened from a client get their own Git worktree** (`--spawn
-  worktree`), so two remote sessions never share a working tree. The one
-  exception is the server's own session: created at the server's first start and
-  reattached after each restart, it runs in the project's main checkout — the
-  same tree an interactive session there uses.
+  worktree`), so two remote sessions never share a working tree.
+- **The server pre-creates no session** (`--no-create-session-in-dir`). By
+  default it opens one at start in the project's main checkout — the same tree
+  an interactive session there uses — and reattaches it after each restart, so
+  every instance carries an idle session nobody asked for. Without it, the
+  server starts empty and every session comes from a client.
 - **The project's environment comes from its own `.envrc`.** Secrets stay where
   direnv already finds them; nothing secret is written into the unit.
 
@@ -53,11 +55,11 @@ launches through it; jq is needed only by the checks below.
 command -v claude                       # expect: ~/.local/bin/claude
 claude --version
 claude auth status                      # expect: "authMethod": "claude.ai"
-timeout 10 claude remote-control --help | grep -E -- '--(spawn|capacity|remote-control-session-name-prefix|permission-mode)'
+timeout 10 claude remote-control --help | grep -E -- '--(spawn|capacity|remote-control-session-name-prefix|permission-mode|\[no-\]create-session-in-dir)'
 ```
 
 `claude remote-control --help` can print its help and then stay running, hence the
-`timeout`. All four flags must be listed; an older version lacks them.
+`timeout`. All five flags must be listed; an older version lacks them.
 
 **No variable that redirects or restricts the API.** Remote Control needs the
 first-party claude.ai endpoint and login. None of these may reach the server:
@@ -152,7 +154,7 @@ ExecStartPre=/bin/sh -c 'until getent ahosts api.anthropic.com >/dev/null; do sl
 # tmux that only ends the session cleanly; checking first makes it a unit failure.
 ExecStartPre=/usr/bin/direnv exec %h/code/%i /bin/true
 ExecStart=/usr/bin/tmux -L rc-%i new-session -d -s rc-%i -c %h/code/%i \
-    /usr/bin/direnv exec %h/code/%i %h/.local/bin/claude remote-control --name "%i" --remote-control-session-name-prefix "%i" --spawn worktree --capacity 4 --permission-mode auto
+    /usr/bin/direnv exec %h/code/%i %h/.local/bin/claude remote-control --name "%i" --remote-control-session-name-prefix "%i" --spawn worktree --no-create-session-in-dir --capacity 4 --permission-mode auto
 # The server holds one session, so stop it whole. A `-t rc-%i` target would read
 # a "." in the instance name as a pane separator. The server is already gone
 # whenever claude exited on its own.
@@ -242,10 +244,9 @@ it is stronger than that: given before the verb, Remote Control refuses to start
   stalls until someone opens it in a client. A project's
   `permissions.defaultMode` does not reliably reach the sessions the server
   starts: with `defaultMode: "auto"` in the project's settings, a new worktree
-  session ran in auto mode, while the server's own session, reattached after a
-  restart, ran in `default`. The server appends the flag to the command line of
-  every session process it starts, and the reattached session is started the
-  same way; the verification below confirms it after a restart.
+  session ran in auto mode, while the server's pre-created session, reattached
+  after a restart, ran in `default`. The server appends the flag to the command
+  line of every session process it starts; the verification below confirms it.
 - **mise shims on PATH, not versioned runtime directories.** Shims resolve tools
   against the project's own mise configuration in each working directory.
 
@@ -282,9 +283,11 @@ tmux -L rc-<PROJECT> has-session && echo running
 tmux -L rc-<PROJECT> capture-pane -p | tail -20
 ```
 
-The pane should show `Connected · <PROJECT>`, the capacity, and the claude.ai link
-for the environment. The environment identifier survives restarts, so the link
-stays valid.
+The pane should show `Ready · <PROJECT>` (`Connected` once a client has a
+session open), the capacity, and the claude.ai link for the environment. The
+environment identifier changes on every restart, so that link goes stale; the
+project's name in claude.ai and the app does not. The identifier survived
+restarts only while the server reattached a pre-created session.
 
 `Tasks: 1` in the status output is expected. tmux built with systemd support moves
 each pane into its own transient `tmux-spawn-*.scope`, so `claude` and its MCP
@@ -305,9 +308,10 @@ The pattern is anchored to the first argument because the tmux server's own
 command line contains the same words further along, and ends in a space so that
 `foo` does not also match `foo-bar`.
 
-To confirm the permission mode reached the sessions, list the server's child
-processes, one per session. Each should show `--permission-mode auto` after its
-session ID, the server's own session included:
+To confirm the permission mode reached the sessions, open one from a client,
+then list the server's child processes, one per session. Each should show
+`--permission-mode auto` after its session ID. A freshly started server has
+none, and its pane shows `Capacity: 0/4`:
 
 ```bash
 pgrep -aP "$pid" | grep -o -- '--session-id [^ ]*\|--permission-mode [^ ]*'
@@ -348,20 +352,16 @@ runbook, so compare it with the template after changing either.
 
 ### Sessions and worktrees
 
-The server creates one session in the project directory itself at its first
-start, and reattaches it after each restart;
-sessions opened from claude.ai or the app go to worktrees. When a session ends
+The server starts with no session of its own; every session is opened from
+claude.ai or the app and goes to a worktree. When a session ends
 other than cleanly — closing or archiving it from a client is enough — the pane
 logs `Session failed: Process exited with error` and `kept worktree … session
 crashed`. The server itself is unaffected.
 
-From a terminal, `claude --resume` in the project lists the server's own
-session beside the interactive ones, but none of the worktree sessions: not with
-all worktrees or all projects shown, and not from inside the session's worktree,
-although their transcripts are on disk (Claude Code 2.1.296). Resume those from
-claude.ai or the app. Resuming the server's own session from a terminal while
-the server holds it would run one session in two processes, so stop the
-unit first.
+From a terminal, `claude --resume` in the project lists none of the worktree
+sessions: not with all worktrees or all projects shown, and not from inside the
+session's worktree, although their transcripts are on disk (Claude Code
+2.1.296). Resume them from claude.ai or the app.
 
 The reverse direction is opt-in: a session started from a terminal appears in
 claude.ai or the app only while Remote Control is on for it. To have every
@@ -413,6 +413,13 @@ never answered; a refusal mentioning the API endpoint or login means a variable
 from the prerequisites reaches the server. `Invalid permission mode` means the
 installed version does not accept the unit's `--permission-mode` value; check it
 against the modes the error lists.
+
+`This folder is already served by a terminal claude remote-control on this
+device` with no other `claude remote-control` running for the project was seen
+once, on the first restart after `--no-create-session-in-dir` was added, while
+Claude Code updated itself from 2.1.308 to 2.1.309. The same command run by hand
+two minutes later started normally, and later restarts did not repeat it.
+Reset and restart the unit.
 
 ### The unit stays `activating` for minutes
 

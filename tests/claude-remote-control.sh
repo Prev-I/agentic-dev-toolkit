@@ -166,6 +166,8 @@ test_remote_control_runs_without_bypass_or_global_flags() {
   assert_contains "$start" '/claude remote-control --name "%i" ' \
     "remote-control must follow the binary directly, with --name first"
   assert_contains "$start" '--spawn worktree' "remote sessions must get their own worktree"
+  # A pre-created session would run in the main checkout, outside any worktree.
+  assert_contains "$start" '--no-create-session-in-dir' "the server must not pre-create a session in the project directory"
   # Nobody is at the workstation to answer prompts and the project's defaultMode
   # does not reach every session, so the server sets the mode, after the verb,
   # where Remote Control accepts it.

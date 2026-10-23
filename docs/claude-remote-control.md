@@ -28,7 +28,11 @@ Ubuntu under WSL2; `--no-create-session-in-dir` with Claude Code 2.1.309.
   `systemd-escape` would alter (spaces, for example) does not map back to the
   directory.
 - **Sessions opened from a client get their own Git worktree** (`--spawn
-  worktree`), so two remote sessions never share a working tree.
+  worktree`), so two remote sessions never share a working tree. The exception
+  is a project whose working tree holds git-ignored nested repositories, such as
+  a parent workspace: a worktree contains only tracked files, so those
+  repositories would be missing. Its instance runs `--spawn same-dir` instead
+  (see [Another project](#another-project)).
 - **The server pre-creates no session** (`--no-create-session-in-dir`). By
   default it opens one at start in the project's main checkout — the same tree
   an interactive session there uses — and reattaches it after each restart, so
@@ -343,12 +347,28 @@ Repeat the prerequisites for `~/code/<OTHER>`, run the interactive first run
 there, then `systemctl --user enable --now claude-rc@<OTHER>`. A worktree ignore
 rule kept in one repository's `.git/info/exclude` does not carry over.
 
-A project that needs a different permission mode overrides `ExecStart` for its
-instance only. `systemctl --user edit claude-rc@<OTHER>` opens
+A project that needs a different permission mode or spawn mode overrides
+`ExecStart` for its instance only. `systemctl --user edit claude-rc@<OTHER>` opens
 `~/.config/systemd/user/claude-rc@<OTHER>.service.d/override.conf`; in it, an
 empty `ExecStart=` under `[Service]` clears the template's line, and a copy of
-that line with the other mode replaces it. The copy no longer follows the
+that line with the other value replaces it. The copy no longer follows the
 runbook, so compare it with the template after changing either.
+
+A project with git-ignored nested repositories needs `--spawn same-dir`. With
+`worktree`, every session starts in a worktree where those repositories do not
+exist. Paths to them that the project's own instructions give relative to its
+root then point at nothing, and nothing reports it. Check before enabling an
+instance:
+
+```bash
+cd ~/code/<OTHER> && find . -mindepth 2 -maxdepth 3 -name .git -type d |
+  while read -r g; do git check-ignore -q "${g%/.git}" && echo "${g%/.git}"; done
+```
+
+Any output means `same-dir`. `-type d` leaves out linked worktrees, whose `.git`
+is a file. Its sessions share the main checkout with each
+other and with interactive sessions there, so nothing isolates two sessions that
+edit the same file. A `same-dir` project needs no worktree ignore rule.
 
 ### Sessions and worktrees
 

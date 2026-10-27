@@ -188,6 +188,23 @@ is not rewritten automatically and must already contain the pinned plugin as a
 standalone entry on its own line without a trailing comment. Remove stale
 additional Superpowers entries manually; the installer does not normalize JSONC.
 
+The installer configures Superpowers for OpenCode only. To run the same version
+in Claude Code, install it from the upstream marketplace, which publishes a
+release as soon as it is tagged, and disable the copy from the official
+marketplace, which can lag a release behind. Two enabled copies load every skill
+twice.
+
+```bash
+claude plugin marketplace add obra/superpowers
+claude plugin install superpowers@superpowers-dev
+claude plugin disable superpowers@claude-plugins-official
+```
+
+The upstream marketplace follows the repository's default branch, and
+third-party marketplaces do not update automatically by default: run
+`claude plugin update superpowers@superpowers-dev` after a new tag to match the
+catalog's `superpowers` pin, and check `claude plugin list` shows that version.
+
 ### Project environments
 
 The installer adds direnv's Bash hook and installs its Debian/Ubuntu package. When invoked with

@@ -26,8 +26,9 @@ The routing policy is loaded through OpenCode's `instructions` setting; it does 
 | Session summary | `summary` | `github-copilot/gpt-6-luna` | `low` |
 
 `opencode.jsonc` is the single authority for role-to-model assignment.
-`.opencode/agents/reviewer.md` and `.opencode/agents/expert.md` define prompt,
-permissions and non-routing metadata only; they carry no `model` or `variant`.
+`.opencode/agents/reviewer.md`, `.opencode/agents/expert.md` and
+`.opencode/agents/scout.md` define prompt, permissions and non-routing metadata
+only; they carry no `model` or `variant`.
 
 `breakglass` is human-selected primary. Ordinary agents cannot reach it: the
 `task` permission denies it explicitly, at the top level and on every agent that
@@ -352,6 +353,7 @@ For a **project-local** install, keep the `.opencode/` prefix:
 ```text
 .opencode/agents/reviewer.md -> <project>/.opencode/agents/reviewer.md
 .opencode/agents/expert.md   -> <project>/.opencode/agents/expert.md
+.opencode/agents/scout.md    -> <project>/.opencode/agents/scout.md
 .opencode/model-routing.md   -> <project>/.opencode/model-routing.md
 ```
 
@@ -362,12 +364,15 @@ alignment check inspects:
 ```text
 .opencode/agents/reviewer.md -> ~/.config/opencode/agents/reviewer.md
 .opencode/agents/expert.md   -> ~/.config/opencode/agents/expert.md
+.opencode/agents/scout.md    -> ~/.config/opencode/agents/scout.md
 .opencode/model-routing.md   -> ~/.config/opencode/model-routing.md
 ```
 
 `reviewer` is independent and read-only on Copilot Opus 5.5/high. `expert` uses
 direct OpenAI Astra/xhigh, is hidden, read-only, cannot spawn subagents, and is
-capped at six agentic steps. Build uses Copilot GPT-6.1 Sol/high; Breakglass uses
+capped at six agentic steps. `scout` is a subagent for external research: it may
+fetch and search the web but cannot edit, run commands or spawn subagents, and it
+cites a URL for every claim. Build uses Copilot GPT-6.1 Sol/high; Breakglass uses
 direct OpenAI GPT-6.1 Sol/max as a human-selected primary.
 
 These are copies. After installing them — and after any later change to

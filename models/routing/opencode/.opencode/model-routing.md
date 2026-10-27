@@ -72,8 +72,10 @@ Searches the codebase, reads documentation, and assembles context for other agen
 design — it reports findings but does not modify files.
 
 ### scout
-Similar to explore but optimized for narrow, targeted lookups: finding a specific function, tracing
-a dependency, or confirming a fact across repositories.
+Targeted external research: current upstream or dependency documentation, release notes, upstream
+issues and other facts that live outside the repository. Read-only; it cites a URL for every claim.
+Local codebase questions go to explore. Prompt and permissions are defined in
+`.opencode/agents/scout.md`; model and variant are assigned by `opencode.jsonc`.
 
 ### reviewer
 An independent quality gate. Reviews diffs and implementation artifacts for correctness, spec

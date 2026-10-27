@@ -12,7 +12,7 @@ readonly KARPATHY_RAW_BASE='https://raw.githubusercontent.com/multica-ai/andrej-
 readonly KARPATHY_SKILL_PATH='skills/karpathy-guidelines/SKILL.md'
 # The installer's own version, declared with the other constants for parity
 # with the repository's other versioned scripts. Printed verbatim by --version.
-readonly SCRIPT_VERSION="0.3.1"
+readonly SCRIPT_VERSION="0.3.2"
 
 log() {
   printf '\n==> %s\n' "$*"

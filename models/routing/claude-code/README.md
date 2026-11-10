@@ -16,7 +16,8 @@ amended by [Haiku roles on Haiku 5.5](docs/decisions/2026-10-09-haiku-roles-on-h
 [the hook running Python isolated](docs/decisions/2026-10-10-hook-runs-python-isolated.md),
 [the Explore and escalation triggers](docs/decisions/2026-10-10-explore-and-escalation-triggers.md),
 [the hook resolving Python through mise](docs/decisions/2026-10-10-hook-resolves-python-through-mise.md)
-and [the alignment check running the hook](docs/decisions/2026-10-10-alignment-check-runs-the-hook.md).
+[the alignment check running the hook](docs/decisions/2026-10-10-alignment-check-runs-the-hook.md)
+and [Expert on Fable 5.2](docs/decisions/2026-11-10-expert-on-fable-5-2.md).
 
 ## Model map
 
@@ -28,7 +29,7 @@ and [the alignment check running the hook](docs/decisions/2026-10-10-alignment-c
 | Explore | `agents/Explore.md` | `claude-haiku-5-5` | `medium` |
 | Scout | `agents/scout.md` | `claude-haiku-5-5` | `medium` |
 | Reviewer | `agents/reviewer.md` | `claude-opus-5-5` | `high` |
-| Expert | `agents/expert.md` | `claude-fable-5-1` | `xhigh` |
+| Expert | `agents/expert.md` | `claude-fable-5-2` | `xhigh` |
 | Background tasks | `env.ANTHROPIC_DEFAULT_HAIKU_MODEL` | `claude-haiku-5-5` | — |
 
 The background slot has no effort setting of its own; see deviation 4.
@@ -79,17 +80,18 @@ the main thread. Its plan is then handed to an ordinary (Build) session.
 
 1. **Reviewer is not independent of Build by model.** Both run Opus 5.5
    `high`. Independence comes from a fresh context and a read-only,
-   review-only prompt. Moving Reviewer to Fable 5.1 is the lever if reviews
-   fall short. On this account Fable 5.1 bills to usage credits (see the
-   [Expert decision record](docs/decisions/2026-10-09-expert-on-fable-5-1.md)),
+   review-only prompt. Moving Reviewer to Fable 5.2 is the lever if reviews
+   fall short. On this account Fable bills to usage credits (observed for 5.1,
+   expected for 5.2; see the
+   [Expert decision record](docs/decisions/2026-11-10-expert-on-fable-5-2.md)),
    and the move is a profile change with its own decision record.
 2. **No provider separation for Expert.** Everything runs on one Anthropic
-   account. Model and cost-tier separation is restored: Expert runs Fable 5.1
+   account. Model and cost-tier separation is restored: Expert runs Fable 5.2
    `xhigh`, the scarce tier, while Build, Plan and Reviewer run Opus 5.5. It
    also differs by a six-turn cap and escalation-only use. On this account
-   Fable 5.1 bills to usage credits, and an interactive session asks for
+   Fable bills to usage credits (observed for 5.1, expected for 5.2), and an interactive session asks for
    consent before the first Fable request that does; see the
-   [Expert decision record](docs/decisions/2026-10-09-expert-on-fable-5-1.md).
+   [Expert decision record](docs/decisions/2026-11-10-expert-on-fable-5-2.md).
 3. **No Breakglass.** It existed for a separate provider and credential, and
    there is none here.
 4. **Compaction and session titles are not routable per role.** Claude Code
@@ -204,8 +206,10 @@ key ([decision](docs/decisions/2026-10-09-build-effort-in-model-settings.md)).
 An install made before that change left a top-level `effortLevel: "high"`;
 neither the merge nor the rollback touches it, so remove it by hand if you do
 not want it. It does not reach Opus 5.5, Sonnet 5.5 or Haiku 5.5; it still
-applies to Fable 5.1, where Expert's frontmatter `effort` takes precedence
-(evidence E1). `modelSettings` needs Claude Code 2.1.251 or later: an older
+applies to Fable 5.1, where Expert's frontmatter `effort` took precedence
+(evidence E1). The settings reference says models released after Opus 5.5
+ignore it; whether that covers Fable 5.2 was not observed, and Expert's
+frontmatter `effort` wins either way. `modelSettings` needs Claude Code 2.1.251 or later: an older
 version ignores it, and Build falls to Opus 5.5's default effort.
 
 ## Alignment check
@@ -250,7 +254,9 @@ and effort pair, are recorded in
 [`docs/evidence/2026-10-06-capability.md`](docs/evidence/2026-10-06-capability.md)
 and, for Claude Code 2.1.295, the Haiku 5.5 and Fable 5.1 pairs and the
 effort each request actually carries,
-[`docs/evidence/2026-10-09-capability.md`](docs/evidence/2026-10-09-capability.md).
+[`docs/evidence/2026-10-09-capability.md`](docs/evidence/2026-10-09-capability.md);
+the Fable 5.2 pair on Claude Code 2.1.322 is in
+[`docs/evidence/2026-11-10-capability.md`](docs/evidence/2026-11-10-capability.md).
 Role fixtures, which would show each model is fit for its role, are out of
 scope.
 

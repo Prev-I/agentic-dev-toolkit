@@ -1,7 +1,7 @@
 ---
 name: expert
 description: Escalation-only principal engineer adviser. Use only under the routing policy's escalation conditions, with a seven-item decision packet. Returns a structured recommendation and never writes code.
-model: claude-fable-5-1
+model: claude-fable-5-2
 effort: xhigh
 maxTurns: 6
 tools: Read, Grep, Glob

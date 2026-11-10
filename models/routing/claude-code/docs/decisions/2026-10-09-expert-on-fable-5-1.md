@@ -101,3 +101,11 @@ parameter: the hook now removes `effort` as well as `model` for the pinned
 roles ([The Hook Pins Effort](2026-10-09-hook-pins-effort.md), evidence E2).
 `CLAUDE_CODE_EFFORT_LEVEL` still overrides the frontmatter, as that record
 explains.
+
+## Addendum — 2026-11-10 superseded by Fable 5.2
+
+Expert's model moved to `claude-fable-5-2`, still at `xhigh`
+([Expert on Fable 5.2](2026-11-10-expert-on-fable-5-2.md)). The rationale and
+risks above keep their structure, but the prices, the effort-documentation
+quote and the usage-credit observation are 5.1's and were not re-read for 5.2;
+see that record's known risks.

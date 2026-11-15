@@ -2108,7 +2108,7 @@ test_opencode_install_refreshes_path_for_the_official_destination() {
         '#!/usr/bin/env bash' \
         'set -eu' \
         'mkdir -p "$HOME/.opencode/bin"' \
-        'printf '\''#!/usr/bin/env bash\nprintf "opencode test\\n"\n'\'' > "$HOME/.opencode/bin/opencode"' \
+        'printf '\''#!/usr/bin/env bash\nprintf "2.3.0\\n"\n'\'' > "$HOME/.opencode/bin/opencode"' \
         'chmod 755 "$HOME/.opencode/bin/opencode"' \
         > "$DOWNLOADED_INSTALLER"
       chmod 755 "$DOWNLOADED_INSTALLER"
@@ -2130,17 +2130,29 @@ test_opencode_install_refreshes_path_for_the_official_destination() {
 # status in OPENCODE_STATUS and the installer's arguments in $sandbox/installer-args.
 # $1 sandbox name, $2 existing binary version ("" for none), $3 "db" to create
 # the database, $4 "upgrade" for --upgrade, $5 "dry-run" for --dry-run.
+# Optional knobs, set by the caller before the call and reset by it afterwards:
+#   OC_SKIP=1            run with --skip-opencode
+#   OC_DB_NAME=NAME      the database file name (default opencode.db)
+#   OC_PATH_VERSION=V    put a binary reporting V on PATH, outside ~/.opencode/bin
+#   OC_PATH_FIRST=1      with OC_PATH_VERSION, put it ahead of ~/.opencode/bin
+#   OC_DB_ENV=PATH       export OPENCODE_DB=PATH
+#   OC_INSTALLED=V       what the stub installer installs (default 2.3.0)
 # shellcheck disable=SC2030,SC2031,SC2329
 run_install_opencode_case() {
   local sandbox="$TEMP_DIR/opencode-guard-$1"
   local version="$2" with_db="${3:-}" mode="${4:-}" dry="${5:-}"
   rm -rf "$sandbox"
-  mkdir -p "$sandbox/home/.opencode/bin" "$sandbox/home/.local/share/opencode" "$sandbox/bin"
+  mkdir -p "$sandbox/home/.opencode/bin" "$sandbox/home/.local/share/opencode" "$sandbox/bin" "$sandbox/pathbin"
   if [[ -n "$version" ]]; then
     printf '#!/usr/bin/env bash\nprintf "%s\\n"\n' "$version" > "$sandbox/home/.opencode/bin/opencode"
     chmod 755 "$sandbox/home/.opencode/bin/opencode"
   fi
-  [[ "$with_db" != db ]] || printf 'sqlite' > "$sandbox/home/.local/share/opencode/opencode.db"
+  if [[ -n "${OC_PATH_VERSION:-}" ]]; then
+    printf '#!/usr/bin/env bash\nprintf "%s\\n"\n' "$OC_PATH_VERSION" > "$sandbox/pathbin/opencode"
+    chmod 755 "$sandbox/pathbin/opencode"
+  fi
+  [[ "$with_db" != db ]] || \
+    printf 'sqlite' > "$sandbox/home/.local/share/opencode/${OC_DB_NAME:-opencode.db}"
   local before=""
   [[ ! -e "$sandbox/home/.opencode/bin/opencode" ]] || \
     before="$(sha256sum "$sandbox/home/.opencode/bin/opencode")"
@@ -2148,8 +2160,16 @@ run_install_opencode_case() {
   OPENCODE_STATUS=0
   OPENCODE_OUTPUT="$(
     HOME="$sandbox/home"
-    PATH="/usr/bin:/bin"
+    PATH="$sandbox/pathbin:/usr/bin:/bin"
+    if [[ "${OC_PATH_FIRST:-0}" == 1 ]]; then
+      # ~/.opencode/bin is on PATH but behind the stale copy, as in a real shell.
+      PATH="$sandbox/pathbin:$sandbox/home/.opencode/bin:/usr/bin:/bin"
+    else
+      PATH="$sandbox/home/.opencode/bin:$PATH"
+    fi
     export XDG_DATA_HOME="$sandbox/home/.local/share"
+    unset OPENCODE_DB
+    [[ -z "${OC_DB_ENV:-}" ]] || export OPENCODE_DB="$OC_DB_ENV"
     # Read indirectly by install_opencode from the sourced installer.
     # shellcheck disable=SC2034
     SKIP_OPENCODE=0
@@ -2157,6 +2177,7 @@ run_install_opencode_case() {
     DRY_RUN=0
     [[ "$mode" != upgrade ]] || UPGRADE=1
     [[ "$dry" != dry-run ]] || DRY_RUN=1
+    [[ "${OC_SKIP:-0}" != 1 ]] || SKIP_OPENCODE=1
 
     download_installer() {
       DOWNLOADED_INSTALLER="$sandbox/bin/opencode-installer"
@@ -2167,7 +2188,7 @@ run_install_opencode_case() {
         'set -eu' \
         'printf "%s\n" "$@" > "$(dirname "$0")/../installer-args"' \
         'mkdir -p "$HOME/.opencode/bin"' \
-        'printf '\''#!/usr/bin/env bash\nprintf "2.3.0\\n"\n'\'' > "$HOME/.opencode/bin/opencode"' \
+        "printf '#!/usr/bin/env bash\\nprintf \"${OC_INSTALLED:-2.3.0}\\\\n\"\\n' > \"\$HOME/.opencode/bin/opencode\"" \
         'chmod 755 "$HOME/.opencode/bin/opencode"' \
         > "$DOWNLOADED_INSTALLER"
       chmod 755 "$DOWNLOADED_INSTALLER"
@@ -2246,6 +2267,125 @@ test_opencode_2x_with_data_installs_normally_and_upgrades_to_the_pin() {
   assert_equal "$OPENCODE_STATUS" "0" "--upgrade on 2.x must succeed: $OPENCODE_OUTPUT"
   assert_contains "$(tr '\n' ' ' < "$OPENCODE_SANDBOX/installer-args")" "--version 2.3.0 " \
     "--upgrade must move a 2.x binary to the pinned version"
+}
+
+test_opencode_data_guard_covers_every_channel_database_and_opencode_db() {
+  # shellcheck disable=SC2030,SC2031
+  local name
+  for name in opencode-next.db opencode-beta.db; do
+    OC_DB_NAME="$name" run_install_opencode_case "channel2-$name" 1.19.5 db "" ""
+    assert_contains "$OPENCODE_OUTPUT" "WARNING" "$name must count as OpenCode data"
+    [[ ! -e "$OPENCODE_SANDBOX/installer-args" ]] || fail "$name must stop the install"
+  done
+
+  # A write-ahead log file alone is not a database.
+  OC_DB_NAME="opencode.db-wal" run_install_opencode_case wal-only 1.19.5 db "" ""
+  assert_contains "$OPENCODE_OUTPUT" "already installed" "-wal/-shm files are not data"
+
+  # OPENCODE_DB can put the database anywhere.
+  mkdir -p "$TEMP_DIR/elsewhere"
+  printf 'sqlite' > "$TEMP_DIR/elsewhere/custom.db"
+  OC_DB_ENV="$TEMP_DIR/elsewhere/custom.db" run_install_opencode_case db-env 1.19.5 "" "" ""
+  assert_contains "$OPENCODE_OUTPUT" "WARNING" "OPENCODE_DB must count as OpenCode data"
+  [[ ! -e "$OPENCODE_SANDBOX/installer-args" ]] || fail "OPENCODE_DB data must stop the install"
+}
+
+# --upgrade must never move a migrated database back under an older binary.
+test_opencode_upgrade_never_downgrades_over_data() {
+  run_install_opencode_case newer 2.4.0 db upgrade ""
+  assert_equal "$OPENCODE_STATUS" "0" "a newer 2.x must not fail the run: $OPENCODE_OUTPUT"
+  assert_contains "$OPENCODE_OUTPUT" "WARNING" "a newer installed 2.x must be warned about"
+  assert_contains "$OPENCODE_OUTPUT" "newer than the pin" "the warning must say why"
+  [[ ! -e "$OPENCODE_SANDBOX/installer-args" ]] || fail "a downgrade must not run the installer"
+  assert_equal "$(sha256sum "$OPENCODE_SANDBOX/home/.opencode/bin/opencode")" "$OPENCODE_BINARY_BEFORE" \
+    "the newer binary must stay untouched"
+
+  # With no data there is nothing to protect, and the pin applies.
+  run_install_opencode_case newer-nodata 2.4.0 "" upgrade ""
+  assert_contains "$(tr '\n' ' ' < "$OPENCODE_SANDBOX/installer-args")" "--version 2.3.0 " \
+    "without data --upgrade moves to the pin"
+}
+
+test_opencode_pin_must_be_an_exact_2x_version() {
+  local output bad
+  for bad in 1.19.5 latest 3.0.0 2.3; do
+    output="$(ADT_OPENCODE_VERSION="$bad" bash "$INSTALLER" --dry-run </dev/null 2>&1 || true)"
+    assert_contains "$output" "invalid value for 'opencode' from ADT_OPENCODE_VERSION" \
+      "'$bad' must be rejected naming key and source"
+    [[ "$output" != *"Installing Debian/Ubuntu prerequisites"* ]] \
+      || fail "'$bad' must be rejected before installing anything"
+  done
+}
+
+test_opencode_install_verifies_the_installed_version() {
+  OC_INSTALLED=2.9.0 run_install_opencode_case wrong-version "" "" "" ""
+  assert_equal "$OPENCODE_STATUS" "1" "an installer that installs another version must fail"
+  assert_contains "$OPENCODE_OUTPUT" "Expected OpenCode 2.3.0" "the failure must name the pin"
+}
+
+test_opencode_dry_run_still_applies_the_data_guard() {
+  run_install_opencode_case dry-v1 1.19.5 db "" dry-run
+  assert_equal "$OPENCODE_STATUS" "0" "dry run with 1.x data must succeed: $OPENCODE_OUTPUT"
+  assert_contains "$OPENCODE_OUTPUT" "WARNING" "dry run must warn about the 1.x binary"
+  run_install_opencode_case dry-orphan "" db "" dry-run
+  assert_equal "$OPENCODE_STATUS" "1" "dry run with data and no binary must stop"
+  assert_contains "$OPENCODE_OUTPUT" "none found in ~/.opencode/bin or on PATH" \
+    "the stop must say where it looked"
+}
+
+test_opencode_skip_flag_bypasses_the_data_guard() {
+  OC_SKIP=1 run_install_opencode_case skip-orphan "" db "" ""
+  assert_equal "$OPENCODE_STATUS" "0" "--skip-opencode must pass with data and no binary: $OPENCODE_OUTPUT"
+  assert_contains "$OPENCODE_OUTPUT" "Skipping OpenCode" "the skip must be reported"
+  [[ ! -e "$OPENCODE_SANDBOX/installer-args" ]] || fail "--skip-opencode must install nothing"
+}
+
+test_opencode_binary_found_on_path_is_judged_like_any_other() {
+  OC_PATH_VERSION=1.19.4 run_install_opencode_case path-v1 "" db upgrade ""
+  assert_equal "$OPENCODE_STATUS" "0" "a 1.x binary on PATH with data must only warn: $OPENCODE_OUTPUT"
+  assert_contains "$OPENCODE_OUTPUT" "WARNING" "a 1.x binary on PATH must be warned about"
+  [[ ! -e "$OPENCODE_SANDBOX/installer-args" ]] || fail "nothing may be installed over 1.x data"
+
+  OC_PATH_VERSION=2.3.0 run_install_opencode_case path-v2 "" db "" ""
+  assert_contains "$OPENCODE_OUTPUT" "already installed" "a 2.x binary on PATH is an install"
+}
+
+test_opencode_unreadable_version_with_data_is_not_2x() {
+  run_install_opencode_case garbage garbage db upgrade ""
+  assert_equal "$OPENCODE_STATUS" "0" "an unreadable binary must not fail the run: $OPENCODE_OUTPUT"
+  assert_contains "$OPENCODE_OUTPUT" "WARNING" "an unreadable version must be warned about"
+  [[ ! -e "$OPENCODE_SANDBOX/installer-args" ]] || fail "an unreadable version must not be installed over"
+}
+
+test_opencode_warns_when_another_binary_shadows_the_install() {
+  OC_PATH_VERSION=1.19.4 OC_PATH_FIRST=1 run_install_opencode_case shadow 2.3.0 "" upgrade ""
+  assert_equal "$OPENCODE_STATUS" "0" "a shadowed install must still succeed: $OPENCODE_OUTPUT"
+  assert_contains "$OPENCODE_OUTPUT" "shadow" "a binary ahead on PATH must be reported"
+}
+
+test_installed_opencode_version_comes_from_the_binary_not_path() {
+  local home="$TEMP_DIR/probe-home" fake="$TEMP_DIR/probe-shadow"
+  mkdir -p "$home/.opencode/bin" "$fake"
+  printf '#!/usr/bin/env bash\nprintf "2.3.0\\n"\n' > "$home/.opencode/bin/opencode"
+  printf '#!/usr/bin/env bash\nprintf "9.9.9\\n"\n' > "$fake/opencode"
+  chmod +x "$home/.opencode/bin/opencode" "$fake/opencode"
+  # shellcheck disable=SC2034
+  SKIP_RUNTIMES=1; SKIP_OPENSPEC=1; SKIP_QUALITY_TOOLS=1; SKIP_OPENCODE=0
+  # shellcheck disable=SC2034
+  INSTALLED_KARPATHY_SHA256=""
+  local output
+  # shellcheck disable=SC2031
+  output="$(HOME="$home" PATH="$fake:$PATH" write_installed_versions 2>&1)"
+  assert_contains "$output" "installed.opencode=2.3.0" "the receipt must record the install, not the shadow"
+}
+
+test_main_checks_opencode_data_before_installing_anything() {
+  local body pre pkg
+  body="$(sed -n '/^main() {/,/^}/p' "$INSTALLER")"
+  pre="$(grep -n 'preflight_opencode$' <<<"$body" | head -n1 | cut -d: -f1)"
+  pkg="$(grep -n 'install_system_packages' <<<"$body" | head -n1 | cut -d: -f1)"
+  [[ -n "$pre" && -n "$pkg" && "$pre" -lt "$pkg" ]] \
+    || fail "preflight_opencode must run before install_system_packages in main"
 }
 
 test_installer_dies_on_a_malformed_catalog_key() {
@@ -2608,7 +2748,7 @@ EOF_FAKE_MISE
   local output
   # PATH was intentionally changed only in the earlier OpenCode test subshell.
   # shellcheck disable=SC2031
-  output="$(MISE_BIN="$fake_mise" PATH="$fake_bin:$PATH" write_installed_versions 2>&1)"
+  output="$(HOME="$TEMP_DIR/probe-table-home" MISE_BIN="$fake_mise" PATH="$fake_bin:$PATH" write_installed_versions 2>&1)"
   # Synthetic leading and trailing newlines let every assertion below use the
   # same "\nkey=value\n" shape: the first key has no newline before it, and
   # "$(...)" strips the trailing newline off the last one.
@@ -3131,6 +3271,17 @@ test_opencode_install_dry_run_names_the_pin_and_changes_nothing
 test_opencode_data_with_a_1x_binary_is_left_untouched
 test_opencode_data_without_a_binary_stops_before_mutation
 test_opencode_2x_with_data_installs_normally_and_upgrades_to_the_pin
+test_opencode_data_guard_covers_every_channel_database_and_opencode_db
+test_opencode_upgrade_never_downgrades_over_data
+test_opencode_pin_must_be_an_exact_2x_version
+test_opencode_install_verifies_the_installed_version
+test_opencode_dry_run_still_applies_the_data_guard
+test_opencode_skip_flag_bypasses_the_data_guard
+test_opencode_binary_found_on_path_is_judged_like_any_other
+test_opencode_unreadable_version_with_data_is_not_2x
+test_opencode_warns_when_another_binary_shadows_the_install
+test_installed_opencode_version_comes_from_the_binary_not_path
+test_main_checks_opencode_data_before_installing_anything
 test_installer_dies_on_a_malformed_catalog_key
 test_installer_dies_on_a_missing_required_catalog_key
 test_installer_version_flag

@@ -2,7 +2,7 @@
 
 `wsl-toolchain-doctor.sh` enforces a Linux-first development boundary inside WSL, audits PATH hygiene, validates `mise`-managed tool bindings, and can conservatively remediate persistent PATH sources.
 
-Current tool version: `0.5.0`.
+Current tool version: `0.5.1`.
 
 ## Policy
 
@@ -466,7 +466,7 @@ Schema version remains `1`:
 ```json
 {
   "schemaVersion": 1,
-  "toolVersion": "0.5.0",
+  "toolVersion": "0.5.1",
   "action": "audit",
   "status": "PASS",
   "findings": []

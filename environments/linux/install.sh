@@ -723,6 +723,11 @@ validate_requested_values() {
     if [[ ! "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._:+@/-]*$ ]]; then
       die "invalid value for '$key' from $source: '$value'"
     fi
+    # OpenCode is pinned to an exact 2.x release: 1.x would run its installer
+    # over a migrated database, and "latest" is not a pin.
+    if [[ "$key" == "opencode" && ! "$value" =~ ^2\.[0-9]+\.[0-9]+$ ]]; then
+      die "invalid value for '$key' from $source: '$value' (must be an exact 2.x.y version)"
+    fi
   done
 }
 
@@ -1047,22 +1052,43 @@ install_python_quality_libraries() {
   fi
 }
 
-# OpenCode 2.x migrates ${XDG_DATA_HOME:-~/.local/share}/opencode/opencode.db in
-# place on its first start, and upstream supports no downgrade. So the decision
-# to install it is made on the DATA, not on the binary:
+# OpenCode 2.x migrates its database in place on its first start, and upstream
+# supports no downgrade. So the decision to install it is made on the DATA, not
+# on the binary:
 #
-#   data present, installed binary not 2.x   never install 2.x
-#       binary present  -> leave it alone and warn (also under --upgrade)
+#   data present, installed binary not 2.x (including unreadable)
+#       binary present  -> never install; leave it alone and warn (also under
+#                          --upgrade)
 #       no binary       -> stop before any mutation
-#   data present, binary already 2.x         normal; --upgrade moves to the pin
-#   no data                                  normal
+#   data present, binary 2.x newer than the pin -> leave it alone and warn: an
+#                          install would move a migrated database under an older
+#                          binary
+#   data present, binary 2.x not newer          -> normal; --upgrade moves to the pin
+#   no data                                     -> normal
+#
+# "Data" is any opencode*.db in the data directory (the default channel is
+# opencode.db, other channels opencode-<channel>.db; the -wal/-shm companions do
+# not match), plus the file OPENCODE_DB names when it is set.
 #
 # Version detection runs `opencode --version`, which does not open the database.
-# A binary whose version cannot be read counts as not 2.x.
 OPENCODE_RUNBOOK="docs/opencode-service.md, section 'Moving an existing 1.x installation to 2.x'"
 
-opencode_data_db() {
-  printf '%s/opencode/opencode.db' "${XDG_DATA_HOME:-$HOME/.local/share}"
+# Prints the existing OpenCode database files, one per line.
+opencode_data_files() {
+  local data_dir="${XDG_DATA_HOME:-$HOME/.local/share}/opencode" file
+  for file in "$data_dir"/opencode*.db; do
+    [[ -f "$file" ]] && printf '%s\n' "$file"
+  done
+  if [[ -n "${OPENCODE_DB:-}" ]]; then
+    for file in "$OPENCODE_DB" "$data_dir/$OPENCODE_DB"; do
+      [[ -f "$file" ]] && { printf '%s\n' "$file"; break; }
+    done
+  fi
+  return 0
+}
+
+opencode_data_present() {
+  [[ -n "$(opencode_data_files)" ]]
 }
 
 # Prints the path of the installed opencode binary, or nothing.
@@ -1074,24 +1100,38 @@ opencode_binary_path() {
   fi
 }
 
-# Prints the major version of the given binary, or nothing when it cannot be read.
-opencode_binary_major() {
-  local bin="$1" output version
+# Prints the X.Y.Z version of the given binary, or nothing when it cannot be read.
+opencode_binary_version() {
+  local bin="$1" output
   if command -v timeout >/dev/null 2>&1; then
     output="$(timeout 10s "$bin" --version 2>/dev/null || true)"
   else
     output="$("$bin" --version 2>/dev/null || true)"
   fi
-  version="$(grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' <<<"$output" | head -n1 || true)"
-  printf '%s' "${version%%.*}"
+  grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' <<<"$output" | head -n1 || true
+}
+
+# Succeeds when version $1 sorts strictly after version $2.
+version_is_newer() {
+  [[ "$1" != "$2" && "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n1)" == "$1" ]]
+}
+
+# A binary earlier on PATH than the one just installed wins in every shell that
+# resolves it, so the pin would be silently ignored.
+warn_if_opencode_is_shadowed() {
+  local resolved
+  resolved="$(command -v opencode 2>/dev/null || true)"
+  [[ -x "$HOME/.opencode/bin/opencode" && -n "$resolved" \
+    && "$resolved" != "$HOME/.opencode/bin/opencode" ]] || return 0
+  warn "The opencode on PATH is $resolved, which shadows $HOME/.opencode/bin/opencode. Remove it or put ~/.opencode/bin first, or the pinned version is not the one that runs."
 }
 
 # Runs before anything is mutated: data with no binary to judge it by is the one
 # state that must stop the whole run rather than one component.
 preflight_opencode() {
   (( SKIP_OPENCODE == 0 )) || return 0
-  [[ -e "$(opencode_data_db)" && -z "$(opencode_binary_path)" ]] || return 0
-  die "OpenCode data exists at $(opencode_data_db) but no opencode binary is installed. Installing 2.x would migrate that database in place, and upstream supports no downgrade. Re-run with --skip-opencode, then follow $OPENCODE_RUNBOOK."
+  opencode_data_present && [[ -z "$(opencode_binary_path)" ]] || return 0
+  die "OpenCode data exists ($(opencode_data_files | head -n1)) but no opencode binary was found (none found in ~/.opencode/bin or on PATH). Installing 2.x would migrate that database in place, and upstream supports no downgrade. Re-run with --skip-opencode, then follow $OPENCODE_RUNBOOK."
 }
 
 install_opencode() {
@@ -1100,18 +1140,28 @@ install_opencode() {
     return
   fi
 
-  local binary major=""
+  local binary version="" major=""
   binary="$(opencode_binary_path)"
-  [[ -z "$binary" ]] || major="$(opencode_binary_major "$binary")"
+  if [[ -n "$binary" ]]; then
+    version="$(opencode_binary_version "$binary")"
+    major="${version%%.*}"
+  fi
 
-  if [[ -e "$(opencode_data_db)" && "$major" != "2" ]]; then
-    preflight_opencode
-    warn "OpenCode data exists at $(opencode_data_db) and the installed binary ($binary) is not 2.x. Leaving it untouched: installing 2.x would migrate that database in place, and upstream supports no downgrade. Follow $OPENCODE_RUNBOOK."
-    return
+  if opencode_data_present; then
+    if [[ "$major" != "2" ]]; then
+      preflight_opencode
+      warn "OpenCode data exists and the installed binary ($binary) is not 2.x (version: ${version:-unreadable}). Leaving it untouched: installing 2.x would migrate that database in place, and upstream supports no downgrade. Follow $OPENCODE_RUNBOOK."
+      return
+    fi
+    if version_is_newer "$version" "$OPENCODE_VERSION"; then
+      warn "The installed OpenCode ($version, $binary) is newer than the pin ($OPENCODE_VERSION) and OpenCode data exists. Leaving it untouched: installing the pin would put a migrated database under an older binary. Raise the pin (catalog opencode= or ADT_OPENCODE_VERSION) instead."
+      return
+    fi
   fi
 
   if [[ -n "$binary" ]] && (( UPGRADE == 0 )); then
     log "OpenCode is already installed: $binary"
+    warn_if_opencode_is_shadowed
     return
   fi
 
@@ -1121,7 +1171,7 @@ install_opencode() {
     return
   fi
 
-  local installer
+  local installer current
   download_installer "$OPENCODE_INSTALL_URL"
   installer="$DOWNLOADED_INSTALLER"
   bash "$installer" --version "$OPENCODE_VERSION" --no-modify-path
@@ -1129,6 +1179,10 @@ install_opencode() {
   export PATH
   hash -r
   command -v opencode >/dev/null 2>&1 || die "OpenCode installation completed but 'opencode' is not on PATH"
+  current="$(opencode_binary_version "$HOME/.opencode/bin/opencode")"
+  [[ "$current" == "$OPENCODE_VERSION" ]] || die "Expected OpenCode $OPENCODE_VERSION after installation; detected '${current:-unknown}'"
+  warn_if_opencode_is_shadowed
+  info "OpenCode can upgrade itself and so move past the pin. To keep the pin, set \"autoupdate\": false in the OpenCode config, or export OPENCODE_DISABLE_AUTOUPDATE=1 (a service unit should carry it; see docs/opencode-service.md). The installer does not write either."
 }
 
 # A mise shim is a symlink to mise itself, so it says nothing about how the
@@ -2148,7 +2202,7 @@ write_installed_versions() {
     warn "timeout is unavailable; no installed versions will be recorded."
   fi
 
-  local output candidate
+  local output candidate opencode_probe_bin
 
   if [[ -n "$timeout_bin" ]]; then
     if [[ -z "${skip[java-17]+set}" ]]; then
@@ -2281,7 +2335,9 @@ write_installed_versions() {
     # `opencode --version` does not open the data directory, so this probe is
     # safe on a machine whose database has not been migrated yet.
     if [[ -z "${skip[opencode]+set}" ]]; then
-      if output="$(run_bounded_probe "$timeout_bin" opencode --version 2>/dev/null)"; then
+      opencode_probe_bin="$(opencode_binary_path)"
+      if [[ -n "$opencode_probe_bin" ]] &&
+          output="$(run_bounded_probe "$timeout_bin" "$opencode_probe_bin" --version 2>/dev/null)"; then
         candidate="$(grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' <<<"$output" | head -n1 || true)"
         emit_or_warn_installed opencode "$candidate"
       else

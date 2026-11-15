@@ -209,7 +209,7 @@ one bundle; a copy of the script without its catalog does not run.
 | Karpathy guidelines skill | `multica-ai/andrej-karpathy-skills` at a pinned commit |
 
 Every pin has an `ADT_*` environment variable of the same name. **Not every
-pin has a CLI flag** — `maven` and `dotnet-ef` have none. Where a flag exists,
+pin has a CLI flag** — `maven`, `dotnet-ef` and `opencode` have none. Where a flag exists,
 the effective value's precedence is: the CLI flag, then a set-and-non-empty
 `ADT_*` variable, then the catalog's value.
 

@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-SCRIPT_VERSION="0.5.0"
+SCRIPT_VERSION="0.5.1"
 SCHEMA_VERSION=1
 WSL_CONF="${WTD_WSL_CONF:-/etc/wsl.conf}"
 MOUNTS_FILE="${WTD_MOUNTS_FILE:-/proc/self/mounts}"
@@ -47,7 +47,7 @@ PATH_CHANGED=0
 # beside the finding accumulators below.
 #
 # TOOLKIT_MISE_DOMAIN is comparison A's exact twelve-key domain: the keys the
-# generated [tools] table is able to express. pyyaml, openspec, superpowers,
+# generated [tools] table is able to express. pyyaml, openspec, opencode, superpowers,
 # karpathy-ref and karpathy-sha256 are outside it because mise is not how
 # they are installed or configured.
 TOOLKIT_MISE_DOMAIN=(
@@ -55,7 +55,7 @@ TOOLKIT_MISE_DOMAIN=(
   shellcheck gitleaks
 )
 
-# CATALOG_REQUIRED is the full seventeen-key catalog contract -- the same
+# CATALOG_REQUIRED is the full eighteen-key catalog contract -- the same
 # required set install.sh's CATALOG_REQUIRED declares, in catalog declaration
 # order -- not to be confused with TOOLKIT_MISE_DOMAIN above, which is
 # comparison A's narrower twelve-key mise domain. load_catalog below passes
@@ -65,7 +65,7 @@ TOOLKIT_MISE_DOMAIN=(
 # shellcheck disable=SC2034 # read by validate_kv through its nameref
 CATALOG_REQUIRED=(
   java-17 java-21 dotnet-10 dotnet-8 python node bun maven
-  dotnet-ef uv shellcheck gitleaks pyyaml openspec superpowers
+  dotnet-ef uv shellcheck gitleaks pyyaml openspec opencode superpowers
   karpathy-ref karpathy-sha256
 )
 

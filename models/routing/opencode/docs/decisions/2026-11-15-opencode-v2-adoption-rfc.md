@@ -39,7 +39,12 @@ eval adapter and the observe tool (see "Follow-ups").
 (flags `--version <v>`, `--binary`, `--no-modify-path`; destination
 `~/.opencode/bin`). The version is pinned by the catalog entry
 `opencode=2.3.0`, overridable with `ADT_OPENCODE_VERSION`, and passed with
-`--version`. The toolkit keeps no 1.x pin and no 1.x install path.
+`--version`. The pin must be an exact 2.x.y version (1.x and `latest` are
+rejected), and after installing, the installed version must equal it. A binary
+earlier on `PATH` than `~/.opencode/bin` is reported as shadowing the install.
+The installer does not write `autoupdate: false` into the user's config; it
+prints the setting in its summary, and the service unit carries
+`OPENCODE_DISABLE_AUTOUPDATE=1` itself. The toolkit keeps no 1.x pin and no 1.x install path.
 
 The installer guards on data, not on the binary. The 2.x first start migrates
 `opencode.db` in place and upstream does not support downgrade, so the
@@ -47,9 +52,10 @@ installer never starts that path for an existing database:
 
 | State | Behaviour |
 |---|---|
-| `${XDG_DATA_HOME:-~/.local/share}/opencode/opencode.db` exists, installed binary is 1.x | Binary left untouched, clear warning (also under `--upgrade`) naming the runbook's major-upgrade procedure; the rest of the run succeeds |
-| DB exists, no binary | Stops before any mutation, naming `--skip-opencode` and the runbook |
-| DB exists, binary already 2.x | Normal; under `--upgrade` moves to the pinned 2.x |
+| An OpenCode database exists (any `opencode*.db` in `${XDG_DATA_HOME:-~/.local/share}/opencode`, or the file `OPENCODE_DB` names), installed binary is not 2.x (including unreadable) | Binary left untouched, clear warning (also under `--upgrade`) naming the runbook's major-upgrade procedure; the rest of the run succeeds |
+| DB exists, no binary (none found in `~/.opencode/bin` or on `PATH`) | Stops before any mutation, naming `--skip-opencode` and the runbook |
+| DB exists, binary 2.x newer than the pin | Left untouched with a warning: installing the pin would put a migrated database under an older binary |
+| DB exists, binary 2.x not newer than the pin | Normal; under `--upgrade` moves to the pinned 2.x |
 | No DB | Fresh install of the pinned 2.x |
 
 Version detection runs `opencode --version`. A sentinel-database test measured
@@ -93,12 +99,17 @@ Rejected alternatives:
   14.8 GB / 1,688-session database: the server answered within 1 s,
   `GET /api/experimental/migration/v1` reported `{"status":"completed"}` after
   34 s, every session was preserved and the file mode became 0600. The
-  procedure is preflight, a required rehearsal gate in an isolated sandbox
-  restored from the backup artifact, an at-rest backup with SQLite's backup
-  API taken with everything stopped, the binary swap, a foreground migration
-  step outside the unit (the unit's readiness window could expire mid-migration
-  on a slower host), verification, an explicit no-go point and a rollback that
-  restores the database, config, auth and the saved 1.x binary.
+  procedure is: a per-filesystem space preflight; a required rehearsal gate in
+  an isolated sandbox restored from a verified backup artifact, with a rollback
+  rehearsal; stop and mask every unit, sidecar and client (a bare client can
+  start a 2.x server against the real data); an at-rest backup with SQLite's
+  backup API that also keeps the 1.x binary, probes, units and drop-ins; the
+  binary swap followed at once by `opencode service set disabled true`; the
+  `secrets.env` conversion; a foreground migration step outside the unit (the
+  unit's readiness window could expire mid-migration on a slower host); the unit
+  and probe swap as a pair, with `READY_TOOL_MARKER` removed from every drop-in;
+  verification; an explicit no-go point; and a rollback that restores whole
+  directories, never single files over a live database.
 
 ### C. Readiness probe
 
@@ -191,6 +202,41 @@ edited. It was not measured whether 1.x sent the agent-level temperature.
 - 2.x did not call the gateway's `/v1/models` and listed only declared models:
   there is no discovery of undeclared models.
 - Credentials in V1 `auth.json` are imported into the database on first start.
+- 2.x runs as a single process: the launched pid equals the pid `/api/info`
+  reports, so the probe's `MAINPID` comparison holds.
+- A 2.x server started without a password still enforces authentication and
+  answers 401 to everyone. It generates a random password and prints `server
+  password <value>` to stdout, which under systemd lands in the journal. A
+  password is therefore mandatory for this deployment, and the probe's
+  anonymous-200 check is defensive (a proxy, or a future change).
+- The migration status (`GET /api/experimental/migration/v1`, from the 2.3.0
+  OpenAPI) is one of `{status: "required"|"completed"}`,
+  `{status: "running", progress: {label, numerator?, denominator?}}` or
+  `{status: "error", error: string}`. A fresh, empty data directory reports
+  `completed`.
+- `--version`, `--help`, `service get`, `service set disabled true` and `service
+  status` do not open the database (sentinel-database test). `opencode web ...`
+  and `opencode attach ...` print the usage, exit 0 and touch nothing. A bare
+  `opencode` in a terminal with the shared service at its default (enabled)
+  started a background server on a loopback port, while `service status` still
+  printed "stopped"; with `service set disabled true` it starts a private
+  in-process server instead. So between the binary swap and the end of the
+  foreground migration any interactive client run can start a 2.x server against
+  the real data.
+- Database naming: the default channel uses `opencode.db` and other channels
+  `opencode-<channel>.db` (2.3.0 contains `opencode-next.db`) on both 1.19.4 and
+  2.3.0. Both honour `OPENCODE_DB`; 1.x also has `OPENCODE_DISABLE_CHANNEL_DB`.
+- Session API on 2.3.0: `GET /api/session` (authenticated) lists sessions with
+  id, agent, model and variant; `GET /api/session/{sessionID}` and
+  `GET /api/session/{sessionID}/message` exist.
+- The 2.x installer takes `-v|--version <version>`, `-b|--binary <path>` (a local
+  binary) and `--no-modify-path`, always installs to `$HOME/.opencode/bin` and
+  ignores `XDG_BIN_DIR`. Release assets are named like
+  `opencode-linux-x64.tar.gz` and come with a `SHA256SUMS` file.
+- The readiness probe was run against a real 2.3.0 `opencode serve`: READY with
+  either password variable and the launched pid as `MAINPID`; not ready with a
+  wrong password or a wrong pid; exit 2 with `READY_TOOL_MARKER` set; and against
+  a live 1.19.4 server it fails at once as a 1.x server.
 - The first 2.x start marks the V1 import as done (anomalyco/opencode#57226), so
   later V1 data is not re-imported.
 
@@ -208,3 +254,7 @@ edited. It was not measured whether 1.x sent the agent-level temperature.
 2. The observe tool on the 2.x database tables.
 3. `opencode-gateway-restart.sh` on 2.x.
 4. A live cutover verification record for the runbook.
+5. The installer's Superpowers config writer is V1-shaped only (it edits
+   `.plugin`). On a V2-shaped config it would mix shapes within one section,
+   which upstream warns silently loses settings (anomalyco/opencode#56816); it
+   needs a V2 path before any config is converted.

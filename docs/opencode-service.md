@@ -35,8 +35,10 @@ merely working.
 - **Never disable TLS verification.** No `curl -k` / `--insecure`, no
   `NODE_TLS_REJECT_UNAUTHORIZED=0`. Every legitimate problem below has a fix
   that *adds* trust rather than removing verification.
-- **A password is mandatory.** The 2.x server starts without one, and then
-  answers everyone. The readiness probe refuses such a server.
+- **A password is mandatory.** A 2.x server started without one still enforces
+  authentication, but it invents a random password and prints `server password
+  <value>` to stdout, which under systemd is the journal. Never start the unit
+  without a password in its `EnvironmentFile`.
 - **No client starts or uses the shared background service, and its `remote`
   option is never set.** See [The shared background service](#the-shared-background-service).
 - **Credentials never reach an interactive shell, a process argument list, a
@@ -523,9 +525,20 @@ curl -si http://127.0.0.1:4096/api/info | head -2        # expect: 401 + WWW-Aut
 Do not use `/global/health` for this: in 2.x it is not a health endpoint. It
 returns `200 text/html` (the web UI's fallback page) even without credentials.
 
-**A `200` from that anonymous call means authentication is not enabled.** Stop
-and fix that before going any further; Part 2 would then publish an unauthenticated
-server to the LAN.
+A `200` from that anonymous call is not expected from the server itself, which
+enforces authentication even with no password configured. It would mean something
+in front of it (a proxy, or a future upstream change) is answering instead. Stop
+and fix that before going any further; Part 2 would otherwise publish whatever
+answers to the LAN.
+
+**Never start the unit without a password in `secrets.env`.** The server then
+generates one and prints `server password <value>` to its stdout, which lands in
+the journal, readable by anyone who can read it. If that ever happens, rotate the
+password and treat the journal as exposed.
+
+The credential snippets in this runbook and the readiness probes hand the password
+to curl as `user = "opencode:<password>"` in a configuration read from stdin. A
+password containing `"` or `\` would break that quoting; use one without them.
 
 ### The shared background service
 
@@ -598,8 +611,12 @@ It is READY only when all of these hold:
 Things it gets right that are easy to miss. A status code or a substring grep is
 not evidence: the web UI answers `200 text/html` on any path the API does not
 own, so the body must parse as the API's JSON. A `200` for the anonymous request
-fails the start at once, because a server without a password is not something
-waiting can fix. A `1.x` server (`/global/health` answering JSON with
+fails the start at once. The server itself does not do that, even with no
+password, so it is a defensive check against a proxy or a future change, and
+waiting cannot fix it. A password that stays rejected (three consecutive `401`
+answers on the authenticated request) also fails the start at once: the unit and
+the probe read the same file, so it is misconfiguration, and polling out the
+window on every start would defeat the start limit. A `1.x` server (`/global/health` answering JSON with
 `"healthy":true`) fails at once too, so a unit still pointing at the old binary
 trips the start limit instead of polling out its window on every cycle. It
 never calls anything external, so an outage at a message channel cannot fail a
@@ -999,17 +1016,19 @@ systemctl --user is-active  opencode.service          # active
 ss -ltn | grep 4096                                   # 127.0.0.1:4096 ONLY
 ss -ltn | grep -c '0.0.0.0:4096'                      # 0
 curl -so /dev/null -w '%{http_code}\n' http://127.0.0.1:4096/api/info   # 401
-curl -s -u "opencode:$OPENCODE_PASSWORD" http://127.0.0.1:4096/api/info | jq '{version, pid}'
-                                       # 200 JSON, version 2.x, pid = MainPID
+( set -a; . ~/.config/opencode-runtime/secrets.env; set +a
+  pw="${OPENCODE_PASSWORD:-${OPENCODE_SERVER_PASSWORD:-}}"
+  printf 'user = "opencode:%s"\nsilent\nurl = "http://127.0.0.1:4096/api/info"\n' "$pw" \
+    | curl -K - | jq '{version, pid}' )      # 200 JSON, version 2.x, pid = MainPID
 systemctl --user show -p MainPID --value opencode.service
 opencode service get                   # disabled true, remote unset
 ```
 
-Source the password into the shell for the second command only if you accept it
-being in that shell's environment; otherwise run it in a subshell that sources
-`secrets.env`. Do **not** treat `/global/health` as a health check: in 2.x it
-returns `200 text/html` (the web UI's fallback), even without credentials, so a
-check expecting `401` there would pass or fail for the wrong reason.
+The subshell keeps the password out of your interactive environment and, through
+`-K -`, out of the process argument list. Do **not** treat `/global/health` as a
+health check: in 2.x it returns `200 text/html` (the web UI's fallback), even
+without credentials, so a check expecting `401` there would pass or fail for the
+wrong reason.
 
 Then restart the machine (or `systemctl --user restart`) and confirm the server
 returns on its own.
@@ -1038,16 +1057,20 @@ flag is set and the consumer is not.
 **This is one-way.** On its first start, 2.x migrates `opencode.db` in place,
 and upstream does not support a downgrade (anomalyco/opencode#60394, #55555,
 #53221). The installer therefore never installs 2.x over an existing database:
-with 1.x data and a 1.x binary it leaves the binary untouched and warns, even
-under `--upgrade`; with data and no binary it stops and names `--skip-opencode`.
-This section is the procedure it points at. Upstream's own guide is
-`https://opencode.ai/v2/docs/migrate-v1`.
+with data and a binary that is not 2.x (including one whose version cannot be
+read) it leaves the binary untouched and warns, even under `--upgrade`; with data
+and no binary it stops and names `--skip-opencode`; and it never moves a
+migrated database under an older 2.x binary. This section is the procedure it
+points at. Upstream's own guide is `https://opencode.ai/v2/docs/migrate-v1`.
 
 What was measured, in an isolated sandbox with 2.3.0, on a 14.8 GB database
 holding 1,688 sessions: the server answered within 1 s of starting;
 `GET /api/experimental/migration/v1` reported `{"status":"completed"}` after
 34 s; every session was preserved; the file mode became `0600`. A slower host
-takes longer, which is why step 7 runs the migration outside the unit.
+takes longer, which is why step 7 runs the migration outside the unit. The
+status is one of `{status: "required"|"completed"}`,
+`{status: "running", progress: {label, numerator?, denominator?}}` or
+`{status: "error", error: "..."}`.
 
 Also true on the first 2.x start: credentials in the 1.x `auth.json` are
 imported into the database, and the V1 import is then marked done
@@ -1056,7 +1079,19 @@ A V1-shaped `opencode.jsonc` keeps working: 2.x normalises it in memory and does
 not rewrite the file. One field is dropped silently, the provider `blacklist`;
 see the adoption RFC for the full translation.
 
-Do the steps in order. Variables used below:
+> **Between the binary swap (step 5) and the end of the foreground migration
+> (step 7), do not run any `opencode` client.** A bare `opencode` in a terminal
+> starts a 2.x server against the real data, with the shared service at its
+> default (enabled) *and* with it disabled: disabled, the client starts a private
+> in-process server on the same database instead. That is why step 3 stops and
+> masks everything and step 5 disables the service the moment the binary changes.
+> Only `--version`, `--help` and `opencode service ...` are safe in that window;
+> they do not open the database. (`opencode web` and `opencode attach` print the
+> usage and start nothing on 2.x.)
+
+Variables used below. The variables and the `snapshot` helper (step 2) must live
+in **one shell**, so run the steps in the same terminal; `pin` reads the catalog,
+so run that line from the repository root:
 
 ```bash
 db="${XDG_DATA_HOME:-$HOME/.local/share}/opencode/opencode.db"
@@ -1064,16 +1099,29 @@ backup="$HOME/opencode-1x-backup-$(date +%Y%m%d)"
 pin="$(sed -n 's/^opencode=//p' catalog/software-catalog.env)"   # the 2.x pin
 ```
 
-**1. Preflight.** Free space must be at least twice the database size, on the
-filesystem holding the database and on the one that will hold the backup. If it
-is not, stop: nothing has been touched.
+**1. Preflight.** Sum the free space needed on each filesystem involved, because
+the data directory, `$HOME` (rehearsal sandbox and backup) and the backup target
+may or may not be the same one. The rehearsal needs about 3x the database (the
+snapshot, the migrated copy and the rollback copy); the cutover needs 2x more
+(the backup and the in-place migration's headroom). If any filesystem falls
+short, stop: nothing has been touched.
 
 ```bash
-size="$(stat -c %s "$db")"
-for dir in "$(dirname "$db")" "$(dirname "$backup")"; do
-  avail="$(df --output=avail -B1 "$dir" | tail -n1 | tr -d ' ')"
-  (( avail >= 2 * size )) || { echo "not enough free space in $dir" >&2; false; }
-done
+(
+  size="$(stat -c %s "$db")"
+  declare -A need=() where=()
+  want() {   # want PATH BYTES: add BYTES to the filesystem holding PATH
+    local dev; dev="$(stat -c %d "$1")"
+    need[$dev]=$(( ${need[$dev]:-0} + $2 )); where[$dev]="$1"
+  }
+  want "$HOME" $(( 3 * size ))              # rehearsal sandbox
+  want "$(dirname "$backup")" "$size"       # at-rest backup
+  want "$(dirname "$db")" "$size"           # migration headroom
+  for dev in "${!need[@]}"; do
+    avail="$(df --output=avail -B1 "${where[$dev]}" | tail -n1 | tr -d ' ')"
+    (( avail >= need[$dev] )) || { echo "not enough free space near ${where[$dev]}" >&2; exit 1; }
+  done
+)
 ```
 
 **2. Rehearsal gate.** Required before touching the real installation. It
@@ -1082,22 +1130,35 @@ isolated sandbox: a clean environment, `HOME` and every `XDG_*` pointed at a
 scratch directory, and a spare loopback port. A rehearsal does not need the
 final at-rest backup of step 4; SQLite's backup API takes a consistent snapshot
 of a database that is still in use, so rehearse first, while the service runs.
+The sandbox is created under `$HOME`, not `/tmp`, which is often too small, and
+it holds credentials, so remove it at the end.
 
-The snapshot helper is used again in step 4:
+The snapshot helper refuses an empty source, an unreadable copy and a copy that
+lost sessions, and is used again in step 4:
 
 ```bash
-snapshot() {   # snapshot SRC_DB DST_DB: consistent copy through SQLite's backup API
+snapshot() {   # snapshot SRC_DB DST_DB: a verified copy through SQLite's backup API
   python3 - "$1" "$2" <<'PY'
-import sqlite3, sys
-src, dst = sqlite3.connect(sys.argv[1]), sqlite3.connect(sys.argv[2])
+import os, sqlite3, sys
+src_path, dst_path = sys.argv[1:3]
+if not os.path.exists(src_path) or os.path.getsize(src_path) == 0:
+    sys.exit(f"source missing or empty: {src_path}")
+src = sqlite3.connect(f"file:{src_path}?mode=ro", uri=True)
+dst = sqlite3.connect(dst_path)
 with dst:
     src.backup(dst)
-print("quick_check:", dst.execute("PRAGMA quick_check").fetchone()[0])  # expect: ok
-src.close(); dst.close()
+check = dst.execute("PRAGMA quick_check").fetchone()[0]
+if check != "ok":
+    sys.exit(f"quick_check failed: {check}")
+count = lambda conn: conn.execute("select count(*) from session").fetchone()[0]
+before, after = count(src), count(dst)
+if before != after:
+    sys.exit(f"session count differs: source {before}, copy {after}")
+print(f"snapshot ok: {after} sessions")
 PY
 }
 
-sb="$(mktemp -d)"; mkdir -p "$sb"/{home,data/opencode,config,state,cache,snap}
+sb="$(mktemp -d -p "$HOME")"; mkdir -p "$sb"/{home,data/opencode,config,state,cache,snap}
 snapshot "$db" "$sb/snap/opencode.db"
 cp -r "${XDG_CONFIG_HOME:-$HOME/.config}/opencode" "$sb/snap/config"
 cp "$(dirname "$db")/auth.json" "$sb/snap/auth.json"
@@ -1117,124 +1178,213 @@ env -i PATH=/usr/bin:/bin HOME="$sb/home" XDG_DATA_HOME="$sb/data" \
   "$sb/home/.opencode/bin/opencode" serve --hostname 127.0.0.1 --port 4197 &
 ```
 
-Check all three, then stop that server and compare counts on the file it
-migrated:
+Check all of these, then stop that server:
 
 - `curl -s -u opencode:rehearsal-only http://127.0.0.1:4197/api/experimental/migration/v1`
-  reports `completed` (poll until it does);
-- the `session_v2` row count equals the `session` row count of the *source*
-  (`python3` with `sqlite3`, `select count(*)` on each, against the snapshot and
-  the migrated sandbox database);
-- one old session, an id taken from the snapshot's `session` table, is readable
-  through the `/api/session` routes.
+  reports `completed` (poll until it does; `running` and `required` mean wait,
+  `error` carries a message and means stop);
+- the `session_v2` row count of the migrated sandbox database equals the
+  `session` row count of the *source* (`python3` with `sqlite3`);
+- `GET /api/session` lists the sessions (id, agent, model, variant), and for one
+  id taken from the snapshot's `session` table, `GET /api/session/<id>` and
+  `GET /api/session/<id>/message` both answer 200. The list may be paginated;
+  that was not measured, so compare counts against the table, not a page.
 
 Then rehearse the **rollback**: copy the snapshot into a *fresh* sandbox (the one
 above is already migrated) and start the saved 1.x binary (`$sb/snap/opencode-1.x`)
 there, on another spare port, with its own scratch `XDG_*`. It must serve a
 session from the restored database. If either rehearsal fails, stop here: the
-real installation is untouched.
-
-**3. Stop everything.** The unit, any sidecar (the Telegram bot, the restart
-path unit) and every client. Confirm no `opencode` process is alive; a client
-still holding the database defeats the at-rest backup.
+real installation is untouched. Remove the sandbox when done:
 
 ```bash
-systemctl --user stop opencode-telegram-bot.service opencode-gateway-restart.path 2>/dev/null || true
-systemctl --user stop opencode.service
-pgrep -a opencode && echo "an opencode process is still running" >&2
+kill %1 2>/dev/null; rm -rf "$sb"
 ```
 
+**3. Stop and mask everything.** The unit, every sidecar (the Telegram bot, the
+restart path unit) and every client. Masking for this boot stops anything from
+being started again by a path trigger, a dependency or a hurried hand until step
+8. Each unit is touched only if it exists. The process check is fatal: do not go
+on while any `opencode` process lives, because a client still holding the
+database defeats the at-rest backup.
+
+```bash
+for u in opencode.service opencode-telegram-bot.service opencode-gateway-restart.path; do
+  systemctl --user cat "$u" >/dev/null 2>&1 && systemctl --user mask --runtime --now "$u"
+done
+! pgrep -x opencode || { echo "an opencode process is still running" >&2; false; }
+```
+
+Also remove the 1.x `oca` block from `~/.bashrc` now (it calls `opencode attach`,
+which 2.x does not have, and a stray call must not start anything); the 2.x
+replacement is installed in step 8. Open a new shell afterwards.
+
 **4. At-rest backup.** With everything stopped, take the backup that rollback
-will use, with the same backup-API helper (the `sqlite3` command-line tool may be
-absent; Python's standard library has the same API). Back up the config directory
-and `auth.json` too, and keep the current 1.x binary in the set, so rollback does
-not depend on upstream still hosting it. Record checksums, and read the
-`quick_check` the helper prints: it must say `ok`.
+will use, with the same verified helper (the `sqlite3` command-line tool may be
+absent; Python's standard library has the same API). Back up every database file
+(`opencode.db` and any `opencode-<channel>.db`), the rest of the data directory,
+the config directory, the **current 1.x binary**, the installed **1.x probes**
+and the **current unit files and drop-ins**, so rollback depends on nothing
+upstream or in this repository's history. Record checksums.
 
 ```bash
 mkdir -p "$backup" && chmod 700 "$backup"
-snapshot "$db" "$backup/opencode.db"
+data="$(dirname "$db")"
+for f in "$data"/opencode*.db; do snapshot "$f" "$backup/$(basename "$f")"; done
+tar --exclude='opencode*.db*' -cf "$backup/data-rest.tar" -C "$data" .   # includes auth.json
 cp -r "${XDG_CONFIG_HOME:-$HOME/.config}/opencode" "$backup/config"
-cp "$(dirname "$db")/auth.json" "$backup/auth.json"
 cp "$HOME/.opencode/bin/opencode" "$backup/opencode-1.x"
-cp ~/.config/systemd/user/opencode.service "$backup/opencode.service"
-cp -r ~/.config/systemd/user/opencode.service.d "$backup/" 2>/dev/null || true
-( cd "$backup" && sha256sum opencode.db auth.json opencode-1.x > SHA256SUMS )
+mkdir -p "$backup/libexec" "$backup/systemd"
+cp ~/.local/libexec/opencode/* "$backup/libexec/"            # startup and telegram probes
+cp -r ~/.config/systemd/user/opencode* "$backup/systemd/"     # units and drop-ins
+( cd "$backup" && find . -type f ! -name SHA256SUMS -print0 | xargs -0 sha256sum > SHA256SUMS )
 ```
 
 The backup holds credentials; keep it out of any repository.
 
-**5. Swap the binary.** Run the 2.x installer with the catalog pin (the
-installer's data guard will refuse while 1.x data is present, so run the vendor
-installer directly):
+**5. Swap the binary, then disable the shared service at once.** Run the 2.x
+installer with the catalog pin (the toolkit installer's data guard refuses while
+1.x data is present, so run the vendor installer directly):
 
 ```bash
 curl -fsSL https://opencode.ai/v2/install -o /tmp/opencode-v2-install.sh
 bash /tmp/opencode-v2-install.sh --version "$pin" --no-modify-path
 ~/.opencode/bin/opencode --version        # expect: the pin
-```
-
-`opencode --version` and `--help` do not open the database. After this, the
-installer sees a 2.x binary and behaves normally, including under `--upgrade`.
-
-**6. Disable the shared background service**, before any client runs, and
-verify it (see [The shared background service](#the-shared-background-service)):
-
-```bash
+type -a opencode                          # the first line must be ~/.opencode/bin/opencode
 ~/.opencode/bin/opencode service set disabled true
 ~/.opencode/bin/opencode service get      # expect: disabled true, remote unset
+```
+
+`type -a opencode` matters: an older copy earlier on `PATH` (for instance in
+`~/.local/bin`, left by the 1.x installer, or an npm copy) shadows the new binary.
+Remove it. `--version`, `--help` and `opencode service ...` do not open the
+database; nothing else is safe until step 7 has completed.
+
+An alternative that does not let the installer fetch the binary for you: download
+the release asset for your platform (named like `opencode-linux-x64.tar.gz`) and
+its `SHA256SUMS` from upstream's GitHub release for the pinned version, run
+`sha256sum -c --ignore-missing SHA256SUMS`, unpack, and install with
+`bash /tmp/opencode-v2-install.sh --binary ./opencode --version "$pin" --no-modify-path`.
+That also leaves a verifiable 2.x artifact to keep with the rollback set.
+
+**6. Convert `secrets.env`.** The 2.x server reads `OPENCODE_PASSWORD`; it also
+accepts `OPENCODE_SERVER_PASSWORD`, and `OPENCODE_PASSWORD` wins. This runbook
+standardises on `OPENCODE_PASSWORD`: rename the variable (keep a second
+`OPENCODE_SERVER_PASSWORD=` line with the same value only if a sidecar you run
+reads that name), and delete `OPENCODE_SERVER_USERNAME`, which 2.x ignores (the
+username is always `opencode`). The file must keep a password: a server started
+without one still enforces authentication, but invents a random one and prints it
+to stdout, which is the journal.
+
+```bash
+f=~/.config/opencode-runtime/secrets.env
+sed -i -e 's/^OPENCODE_SERVER_PASSWORD=/OPENCODE_PASSWORD=/' -e '/^OPENCODE_SERVER_USERNAME=/d' "$f"
+grep -c '^OPENCODE_PASSWORD=.' "$f"       # expect: 1
+stat -c '%a' "$f"                          # expect: 600
 ```
 
 **7. Run the migration on its own**, in the foreground, outside the unit. The
 unit's readiness window could expire mid-migration on a slower host, and systemd
 would then kill a migration it started. Use a spare loopback port and the real
-password, then poll until it reports `completed` and stop it:
+password. The loop waits on `running` and `required`, stops on `error` and on any
+status it does not recognise, notices a dead server, and is bounded:
 
 ```bash
 (
   set -a; . ~/.config/opencode-runtime/secrets.env; set +a
+  pw="${OPENCODE_PASSWORD:-${OPENCODE_SERVER_PASSWORD:-}}"
+  [ -n "$pw" ] || { echo "no password in secrets.env" >&2; exit 1; }
+  export OPENCODE_PASSWORD="$pw"
   OPENCODE_DISABLE_AUTOUPDATE=1 ~/.opencode/bin/opencode serve \
     --hostname 127.0.0.1 --port 4197 &
   server=$!
-  until [ "$(curl -s -u "opencode:$OPENCODE_PASSWORD" \
-      http://127.0.0.1:4197/api/experimental/migration/v1 | jq -r .status)" = completed ]; do
-    sleep 5
+  trap 'kill "$server" 2>/dev/null' EXIT
+  deadline=$(( SECONDS + 3600 ))
+  while :; do
+    kill -0 "$server" 2>/dev/null || { echo "the server exited" >&2; exit 1; }
+    (( SECONDS < deadline )) || { echo "timed out waiting for the migration" >&2; exit 1; }
+    body="$(printf 'user = "opencode:%s"\nsilent\nmax-time = 5\nurl = "http://127.0.0.1:4197/api/experimental/migration/v1"\n' "$pw" \
+      | curl -K - 2>/dev/null || true)"
+    status="$(jq -r '.status // empty' <<<"$body" 2>/dev/null || true)"
+    case "$status" in
+      completed) break ;;
+      running | required | "") sleep 5 ;;
+      error) echo "migration failed: $(jq -r '.error' <<<"$body")" >&2; exit 1 ;;
+      *) echo "unexpected migration status: $status" >&2; exit 1 ;;
+    esac
   done
-  kill "$server"; wait "$server" 2>/dev/null
 )
 ```
 
-**8. Install the new unit and probe, then start.** Replace the unit with the one
-in [The unit](#the-unit) (`opencode serve`, `OPENCODE_DISABLE_AUTOUPDATE=1`, no
-`READY_TOOL_MARKER`), replace `20-direnv.conf`'s `ExecStart` the same way if you
-use it, install the 2.x probe, then:
+(Credentials are given to curl over stdin so they never appear in a process
+argument list. A password containing `"` or `\` would break that curl
+configuration, as it does the readiness probes; use a password without them.)
+
+**8. Install the new unit, probes and clients, then start.**
+
+- Replace the unit with the one in [The unit](#the-unit) (`opencode serve`,
+  `OPENCODE_DISABLE_AUTOUPDATE=1`), and `20-direnv.conf`'s `ExecStart` the same
+  way if you use it.
+- Remove `READY_TOOL_MARKER` from **every** drop-in, the gateway one included;
+  the probe refuses to run with it set, even empty:
+  `grep -rn READY_TOOL_MARKER ~/.config/systemd/user/` must print nothing.
+- Install the 2.x probe, and set `"autoupdate": false` in the OpenCode config.
+- Install the 2.x `oca` block from [The client wrapper](#the-client-wrapper).
+- Telegram: keep the bot masked until it is on `@grinev/opencode-telegram-bot`
+  0.26.0 or newer with `OPENCODE_SERVER_VERSION=v2` and `OPENCODE_API_URL` pointed
+  at this unit; then reinstall `opencode-telegram-ready` (1.0.0 or newer) and
+  unmask it.
+- The restart path unit (`opencode-gateway-restart.path`) stays masked or
+  disabled on 2.x: its consumer is 1.x only and refuses to act.
 
 ```bash
 install -D -m 755 opencode-service/opencode-startup-ready.sh \
   ~/.local/libexec/opencode/opencode-startup-ready
 systemctl --user daemon-reload
 systemd-analyze --user verify ~/.config/systemd/user/opencode.service
+systemctl --user unmask --runtime opencode.service
 systemctl --user start opencode.service
 ```
 
 **9. Verify.** The probe reports READY (`journalctl --user -u opencode.service`);
 the unauthenticated `/api/info` is 401 and the authenticated one is 200 JSON
 with a 2.x `version` and the unit's `MainPID` as `pid` (see
-[Verification](#verification)); one migrated session is readable; **one call per
-routed role** succeeds against the gateway; and `opencode service get` shows
-`disabled true` with `remote` unset. Restart the sidecars last.
+[Verification](#verification)); `GET /api/session` lists as many sessions as the
+backup's `session` table holds, and one old session's `/api/session/<id>/message`
+answers 200; **one call per role your routing declares** succeeds against its
+provider, whatever that provider is; and `opencode service get` shows
+`disabled true` with `remote` unset. Bring the sidecars back last.
 
 **10. The no-go point.** Once real use begins after this verification, the
 migration is behind you and the backup no longer holds current work: **fix
 forward**. Roll back only while nothing worth keeping has been created on 2.x.
 
-**11. Rollback.** Stop the unit and every client, restore the database, config
-and `auth.json` from the backup (replace the files; do not merge), reinstall the
-saved 1.x binary from `$backup/opencode-1.x` into `~/.opencode/bin/opencode`,
-restore the old unit and its drop-ins from the backup, reload systemd and start
-it. The 1.x probe you replaced is in the repository history at the revision
-before this change. Anything created after the cutover is lost.
+**11. Rollback.** Stop and mask the unit and every client (as in step 3), check
+the backup, then restore **whole directories**, never single files laid over a
+live database: a stale `opencode.db-wal` or `opencode.db-shm` beside a restored
+`opencode.db` corrupts it.
 
+```bash
+sha256sum --check "$backup/SHA256SUMS" --quiet || { echo "backup does not verify" >&2; false; }
+stamp="$(date +%s)"
+mv "$data" "$data.2x-$stamp" && mkdir -p "$data"        # the whole data directory, aside
+cp "$backup"/opencode*.db "$data/"
+tar -xf "$backup/data-rest.tar" -C "$data"               # includes auth.json
+rm -f "$data"/opencode*.db-wal "$data"/opencode*.db-shm
+cfg="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
+mv "$cfg" "$cfg.2x-$stamp" && cp -r "$backup/config" "$cfg"
+install -m 755 "$backup/opencode-1.x" ~/.opencode/bin/opencode
+cp "$backup/libexec/"* ~/.local/libexec/opencode/
+rm -rf ~/.config/systemd/user/opencode.service.d
+cp -r "$backup/systemd/"* ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user unmask --runtime opencode.service opencode-telegram-bot.service opencode-gateway-restart.path 2>/dev/null
+systemctl --user start opencode.service
+```
+
+The saved 1.x probes and units come from the backup, so this needs nothing from
+the repository's history. Anything created after the cutover is lost; the 2.x
+data directory and config sit beside the originals with a `.2x-<stamp>` suffix
+until you remove them.
 
 ## Part 2 — optional TLS LAN edge
 

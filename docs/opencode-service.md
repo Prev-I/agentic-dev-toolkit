@@ -1218,18 +1218,21 @@ fatal: do not go on while any `opencode` process lives, because a client still
 holding the database defeats the at-rest backup.
 
 ```bash
-mkdir -p "$backup/systemd" && chmod 700 "$backup"          # the hold directory is the backup set
-unitdir=~/.config/systemd/user
-for u in opencode.service opencode-telegram-bot.service \
-         opencode-gateway-restart.path opencode-gateway-restart.service; do
-  systemctl --user stop "$u" 2>/dev/null || true
-done
-for f in "$unitdir"/opencode*; do
-  [ -e "$f" ] && mv "$f" "$backup/systemd/"                # units and .d drop-in directories
-done
-systemctl --user daemon-reload
-! systemctl --user cat opencode.service >/dev/null 2>&1 || { echo "opencode.service still loads" >&2; false; }
-! pgrep -x opencode || { echo "an opencode process is still running" >&2; false; }
+( set -euo pipefail                  # a failed guard must stop the paste, not just print
+  : "${backup:?set backup first (see the variables above)}"
+  mkdir -p "$backup/systemd" && chmod 700 "$backup"   # the hold directory is the backup set
+  unitdir=~/.config/systemd/user
+  for u in opencode.service opencode-telegram-bot.service \
+           opencode-gateway-restart.path opencode-gateway-restart.service; do
+    systemctl --user stop "$u" 2>/dev/null || true
+  done
+  for f in "$unitdir"/opencode*; do
+    if [ -e "$f" ]; then mv "$f" "$backup/systemd/"; fi   # units and .d drop-in directories
+  done
+  systemctl --user daemon-reload
+  ! systemctl --user cat opencode.service >/dev/null 2>&1 || { echo "opencode.service still loads" >&2; false; }
+  ! pgrep -x opencode || { echo "an opencode process is still running" >&2; false; }
+)
 ```
 
 Save `~/.bashrc` to `"$backup/bashrc"` (rollback restores the 1.x `oca` block from
@@ -1247,15 +1250,19 @@ there by step 3), so rollback depends on nothing
 upstream or in this repository's history. Record checksums.
 
 ```bash
-mkdir -p "$backup" && chmod 700 "$backup"       # step 3 already moved the units into $backup/systemd
-data="$(dirname "$db")"
-for f in "$data"/opencode*.db; do snapshot "$f" "$backup/$(basename "$f")"; done
-tar --exclude='opencode*.db*' -cf "$backup/data-rest.tar" -C "$data" .   # includes auth.json
-cp -r "${XDG_CONFIG_HOME:-$HOME/.config}/opencode" "$backup/config"
-cp "$HOME/.opencode/bin/opencode" "$backup/opencode-1.x"
-mkdir -p "$backup/libexec"
-cp ~/.local/libexec/opencode/* "$backup/libexec/"            # startup and telegram probes
-( cd "$backup" && find . -type f ! -name SHA256SUMS -print0 | xargs -0 sha256sum > SHA256SUMS )
+( set -euo pipefail                  # a failed snapshot must stop the paste, not yield a bad backup
+  : "${backup:?set backup first (see the variables above)}"
+  mkdir -p "$backup" && chmod 700 "$backup"   # step 3 already moved the units into $backup/systemd
+  data="$(dirname "$db")"
+  for f in "$data"/opencode*.db; do snapshot "$f" "$backup/$(basename "$f")"; done
+  tar --exclude='opencode*.db*' -cf "$backup/data-rest.tar" -C "$data" .   # includes auth.json
+  cp -r "${XDG_CONFIG_HOME:-$HOME/.config}/opencode" "$backup/config"
+  cp "$HOME/.opencode/bin/opencode" "$backup/opencode-1.x"
+  mkdir -p "$backup/libexec"
+  cp ~/.local/libexec/opencode/* "$backup/libexec/"            # startup and telegram probes
+  ( cd "$backup" && find . -type f ! -name SHA256SUMS -print0 | xargs -0 sha256sum > SHA256SUMS )
+)
+data="$(dirname "$db")"   # the later steps use it too
 ```
 
 The backup holds credentials; keep it out of any repository.
@@ -1285,7 +1292,7 @@ curl -fsSL https://opencode.ai/v2/install -o /tmp/opencode-v2-install.sh
   cd "$(mktemp -d -p "$HOME")" || exit 1
   curl -fsSLO "$rel/opencode-linux-x64.tar.gz" && curl -fsSLO "$rel/SHA256SUMS" || exit 1
   grep ' opencode-linux-x64.tar.gz$' SHA256SUMS | sha256sum -c - || exit 1
-  tar -xzf opencode-linux-x64.tar.gz
+  tar -xzf opencode-linux-x64.tar.gz || exit 1
   bash /tmp/opencode-v2-install.sh --binary ./opencode --version "$pin" --no-modify-path
 )
 ```
@@ -1409,35 +1416,45 @@ then check the backup and restore **whole directories**, never single files laid
 over a live database: a stale `opencode.db-wal` or `opencode.db-shm` beside a
 restored `opencode.db` corrupts it.
 
+Run it in a fresh shell if you like: it asks for `backup` (the step-4 backup
+directory) and re-derives everything else, and any failed guard stops it.
+
 ```bash
-# 1. the 2.x units out of play (same sequence as step 3)
-unitdir=~/.config/systemd/user
-mkdir -p "$backup/2x-systemd"
-for u in opencode.service opencode-telegram-bot.service \
-         opencode-gateway-restart.path opencode-gateway-restart.service; do
-  systemctl --user stop "$u" 2>/dev/null || true
-done
-for f in "$unitdir"/opencode*; do [ -e "$f" ] && mv "$f" "$backup/2x-systemd/"; done
-systemctl --user daemon-reload
-! systemctl --user cat opencode.service >/dev/null 2>&1 || { echo "opencode.service still loads" >&2; false; }
-! pgrep -x opencode || { echo "an opencode process is still running" >&2; false; }
+( set -euo pipefail
+  : "${backup:?set backup to the step-4 backup directory}"
+  db="${XDG_DATA_HOME:-$HOME/.local/share}/opencode/opencode.db"; data="$(dirname "$db")"
 
-# 2. only now verify the backup and touch the data
-sha256sum --check "$backup/SHA256SUMS" --quiet || { echo "backup does not verify" >&2; false; }
-stamp="$(date +%s)"
-mv "$data" "$data.2x-$stamp" && mkdir -p "$data"        # the whole data directory, aside
-cp "$backup"/opencode*.db "$data/"
-tar -xf "$backup/data-rest.tar" -C "$data"               # includes auth.json
-rm -f "$data"/opencode*.db-wal "$data"/opencode*.db-shm
-cfg="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
-mv "$cfg" "$cfg.2x-$stamp" && cp -r "$backup/config" "$cfg"
-install -m 755 "$backup/opencode-1.x" ~/.opencode/bin/opencode
-cp "$backup/libexec/"* ~/.local/libexec/opencode/
+  # 1. the 2.x units out of play (same sequence as step 3)
+  unitdir=~/.config/systemd/user
+  mkdir -p "$backup/2x-systemd"
+  for u in opencode.service opencode-telegram-bot.service \
+           opencode-gateway-restart.path opencode-gateway-restart.service; do
+    systemctl --user stop "$u" 2>/dev/null || true
+  done
+  for f in "$unitdir"/opencode*; do
+    if [ -e "$f" ]; then mv "$f" "$backup/2x-systemd/"; fi
+  done
+  systemctl --user daemon-reload
+  ! systemctl --user cat opencode.service >/dev/null 2>&1 || { echo "opencode.service still loads" >&2; false; }
+  ! pgrep -x opencode || { echo "an opencode process is still running" >&2; false; }
 
-# 3. the held 1.x units back, reload, and only then start
-cp -r "$backup/systemd/"* "$unitdir/"
-systemctl --user daemon-reload
-systemctl --user enable --now opencode.service
+  # 2. only now verify the backup and touch the data
+  sha256sum --check "$backup/SHA256SUMS" --quiet || { echo "backup does not verify" >&2; false; }
+  stamp="$(date +%s)"
+  mv "$data" "$data.2x-$stamp" && mkdir -p "$data"        # the whole data directory, aside
+  cp "$backup"/opencode*.db "$data/"
+  tar -xf "$backup/data-rest.tar" -C "$data"               # includes auth.json
+  rm -f "$data"/opencode*.db-wal "$data"/opencode*.db-shm
+  cfg="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
+  mv "$cfg" "$cfg.2x-$stamp" && cp -r "$backup/config" "$cfg"
+  install -m 755 "$backup/opencode-1.x" ~/.opencode/bin/opencode
+  cp "$backup/libexec/"* ~/.local/libexec/opencode/
+
+  # 3. the held 1.x units back, reload, and only then start
+  cp -r "$backup/systemd/"* "$unitdir/"
+  systemctl --user daemon-reload
+  systemctl --user enable --now opencode.service
+)
 ```
 
 Restore the 1.x `oca` block as well: replace the 2.x `opencode-attach-wrapper`

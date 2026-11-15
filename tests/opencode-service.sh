@@ -1058,6 +1058,9 @@ test_runbook_documents_the_2x_service() {
     || fail "rollback must hold the 2.x units and prove they no longer load"
   (( ${#hold} < ${#cat_check} && ${#cat_check} < ${#verify} && ${#verify} < ${#restore} )) \
     || fail "rollback must take the units away before it verifies the backup and restores data"
+  assert_contains "$rollback" "set -euo pipefail" "the rollback block must stop at its first failure"
+  # shellcheck disable=SC2016 # literal runbook text, not an expansion
+  assert_contains "$rollback" '${backup:?' "the rollback block must require \$backup"
   assert_contains "$text" "sha256sum --check" "rollback must verify the backup first"
   # shellcheck disable=SC2016 # literal runbook text, not an expansion
   assert_contains "$text" 'rm -f "$data"/opencode*.db-wal' "rollback must remove stale WAL files"

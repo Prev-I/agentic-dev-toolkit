@@ -1047,7 +1047,7 @@ test_runbook_documents_the_2x_service() {
   assert_contains "$text" "Moving an existing 1.x installation to 2.x" \
     "the migration section must exist"
   assert_contains "$text" "Never set \`remote\`" "the runbook must forbid the public tunnel"
-  assert_contains "$text" "mask --runtime --now" "the cutover must mask units while migrating"
+  assert_contains "$text" "systemctl --user cat opencode.service" "the cutover must prove the unit no longer loads"
   # shellcheck disable=SC2016 # literal runbook text, not an expansion
   assert_contains "$text" '! pgrep -x opencode ||' "the process check must be fatal"
   assert_contains "$text" "sha256sum --check" "rollback must verify the backup first"

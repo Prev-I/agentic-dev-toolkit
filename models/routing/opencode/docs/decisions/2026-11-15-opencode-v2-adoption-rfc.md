@@ -101,8 +101,10 @@ Rejected alternatives:
   34 s, every session was preserved and the file mode became 0600. The
   procedure is: a per-filesystem space preflight; a required rehearsal gate in
   an isolated sandbox restored from a verified backup artifact, with a rollback
-  rehearsal; stop and mask every unit, sidecar and client (a bare client can
-  start a 2.x server against the real data); an at-rest backup with SQLite's
+  rehearsal; stop every unit, sidecar and client and move the unit files out of
+  `~/.config/systemd/user` (a bare client can start a 2.x server against the real
+  data; `systemctl --user mask --runtime` was measured not to override units
+  defined there, and a persistent `mask` fails because the file exists); an at-rest backup with SQLite's
   backup API that also keeps the 1.x binary, probes, units and drop-ins; the
   binary swap followed at once by `opencode service set disabled true`; the
   `secrets.env` conversion; a foreground migration step outside the unit (the

@@ -1083,8 +1083,8 @@ see the adoption RFC for the full translation.
 > (step 7), do not run any `opencode` client.** A bare `opencode` in a terminal
 > starts a 2.x server against the real data, with the shared service at its
 > default (enabled) *and* with it disabled: disabled, the client starts a private
-> in-process server on the same database instead. That is why step 3 stops and
-> masks everything and step 5 disables the service the moment the binary changes.
+> in-process server on the same database instead. That is why step 3 stops
+> everything and takes the unit files away, and step 5 disables the service the moment the binary changes.
 > Only `--version`, `--help` and `opencode service ...` are safe in that window;
 > they do not open the database. (`opencode web` and `opencode attach` print the
 > usage and start nothing on 2.x.)
@@ -1200,17 +1200,30 @@ real installation is untouched. Remove the sandbox when done:
 kill %1 2>/dev/null; rm -rf "$sb"
 ```
 
-**3. Stop and mask everything.** The unit, every sidecar (the Telegram bot, the
-restart path unit) and every client. Masking for this boot stops anything from
-being started again by a path trigger, a dependency or a hurried hand until step
-8. Each unit is touched only if it exists. The process check is fatal: do not go
-on while any `opencode` process lives, because a client still holding the
-database defeats the at-rest backup.
+**3. Stop everything and take the units away.** The unit, every sidecar (the
+Telegram bot, the restart path unit) and every client. Moving the unit files out
+of `~/.config/systemd/user/` is what stops anything starting them again, by a path
+trigger, a dependency or a hurried hand, until step 8; the same files become part
+of the step-4 backup set, so they are moved once, not copied. Each unit is touched
+only if it exists. `systemctl --user mask --runtime` is not used: the runtime
+directory ranks below `~/.config/systemd/user` in the user unit search path, so it
+does not override units defined there (measured: the unit still started). A
+persistent `mask` fails because the file already exists. The process check is
+fatal: do not go on while any `opencode` process lives, because a client still
+holding the database defeats the at-rest backup.
 
 ```bash
-for u in opencode.service opencode-telegram-bot.service opencode-gateway-restart.path; do
-  systemctl --user cat "$u" >/dev/null 2>&1 && systemctl --user mask --runtime --now "$u"
+mkdir -p "$backup/systemd" && chmod 700 "$backup"          # the hold directory is the backup set
+unitdir=~/.config/systemd/user
+for u in opencode.service opencode-telegram-bot.service \
+         opencode-gateway-restart.path opencode-gateway-restart.service; do
+  systemctl --user stop "$u" 2>/dev/null || true
 done
+for f in "$unitdir"/opencode*; do
+  [ -e "$f" ] && mv "$f" "$backup/systemd/"                # units and .d drop-in directories
+done
+systemctl --user daemon-reload
+! systemctl --user cat opencode.service >/dev/null 2>&1 || { echo "opencode.service still loads" >&2; false; }
 ! pgrep -x opencode || { echo "an opencode process is still running" >&2; false; }
 ```
 
@@ -1223,19 +1236,19 @@ will use, with the same verified helper (the `sqlite3` command-line tool may be
 absent; Python's standard library has the same API). Back up every database file
 (`opencode.db` and any `opencode-<channel>.db`), the rest of the data directory,
 the config directory, the **current 1.x binary**, the installed **1.x probes**
-and the **current unit files and drop-ins**, so rollback depends on nothing
+and the **current unit files and drop-ins** (already in `$backup/systemd`, moved
+there by step 3), so rollback depends on nothing
 upstream or in this repository's history. Record checksums.
 
 ```bash
-mkdir -p "$backup" && chmod 700 "$backup"
+mkdir -p "$backup" && chmod 700 "$backup"       # step 3 already moved the units into $backup/systemd
 data="$(dirname "$db")"
 for f in "$data"/opencode*.db; do snapshot "$f" "$backup/$(basename "$f")"; done
 tar --exclude='opencode*.db*' -cf "$backup/data-rest.tar" -C "$data" .   # includes auth.json
 cp -r "${XDG_CONFIG_HOME:-$HOME/.config}/opencode" "$backup/config"
 cp "$HOME/.opencode/bin/opencode" "$backup/opencode-1.x"
-mkdir -p "$backup/libexec" "$backup/systemd"
+mkdir -p "$backup/libexec"
 cp ~/.local/libexec/opencode/* "$backup/libexec/"            # startup and telegram probes
-cp -r ~/.config/systemd/user/opencode* "$backup/systemd/"     # units and drop-ins
 ( cd "$backup" && find . -type f ! -name SHA256SUMS -print0 | xargs -0 sha256sum > SHA256SUMS )
 ```
 
@@ -1259,12 +1272,20 @@ type -a opencode                          # the first line must be ~/.opencode/b
 Remove it. `--version`, `--help` and `opencode service ...` do not open the
 database; nothing else is safe until step 7 has completed.
 
-An alternative that does not let the installer fetch the binary for you: download
-the release asset for your platform (named like `opencode-linux-x64.tar.gz`) and
-its `SHA256SUMS` from upstream's GitHub release for the pinned version, run
-`sha256sum -c --ignore-missing SHA256SUMS`, unpack, and install with
-`bash /tmp/opencode-v2-install.sh --binary ./opencode --version "$pin" --no-modify-path`.
-That also leaves a verifiable 2.x artifact to keep with the rollback set.
+An alternative that does not let the installer fetch the binary for you:
+download the release asset and its checksum file from upstream's GitHub release of
+the pinned version, verify, unpack, and install from the local binary. The
+tarball holds a single `opencode` binary at its root. This also leaves a
+verifiable 2.x artifact to keep with the rollback set.
+
+```bash
+rel="https://github.com/anomalyco/opencode/releases/download/v$pin"
+cd "$(mktemp -d -p "$HOME")"
+curl -fsSLO "$rel/opencode-linux-x64.tar.gz" && curl -fsSLO "$rel/SHA256SUMS"
+grep ' opencode-linux-x64.tar.gz$' SHA256SUMS | sha256sum -c -
+tar -xzf opencode-linux-x64.tar.gz
+bash /tmp/opencode-v2-install.sh --binary ./opencode --version "$pin" --no-modify-path
+```
 
 **6. Convert `secrets.env`.** The 2.x server reads `OPENCODE_PASSWORD`; it also
 accepts `OPENCODE_SERVER_PASSWORD`, and `OPENCODE_PASSWORD` wins. This runbook
@@ -1329,11 +1350,12 @@ configuration, as it does the readiness probes; use a password without them.)
   `grep -rn READY_TOOL_MARKER ~/.config/systemd/user/` must print nothing.
 - Install the 2.x probe, and set `"autoupdate": false` in the OpenCode config.
 - Install the 2.x `oca` block from [The client wrapper](#the-client-wrapper).
-- Telegram: keep the bot masked until it is on `@grinev/opencode-telegram-bot`
+- Install the new units from scratch; nothing from the held set is copied back.
+- Telegram: leave the bot unit absent until it is on `@grinev/opencode-telegram-bot`
   0.26.0 or newer with `OPENCODE_SERVER_VERSION=v2` and `OPENCODE_API_URL` pointed
   at this unit; then reinstall `opencode-telegram-ready` (1.0.0 or newer) and
-  unmask it.
-- The restart path unit (`opencode-gateway-restart.path`) stays masked or
+  install its unit.
+- The restart path unit (`opencode-gateway-restart.path`) stays absent or
   disabled on 2.x: its consumer is 1.x only and refuses to act.
 
 ```bash
@@ -1341,7 +1363,6 @@ install -D -m 755 opencode-service/opencode-startup-ready.sh \
   ~/.local/libexec/opencode/opencode-startup-ready
 systemctl --user daemon-reload
 systemd-analyze --user verify ~/.config/systemd/user/opencode.service
-systemctl --user unmask --runtime opencode.service
 systemctl --user start opencode.service
 ```
 
@@ -1358,7 +1379,7 @@ provider, whatever that provider is; and `opencode service get` shows
 migration is behind you and the backup no longer holds current work: **fix
 forward**. Roll back only while nothing worth keeping has been created on 2.x.
 
-**11. Rollback.** Stop and mask the unit and every client (as in step 3), check
+**11. Rollback.** Stop the unit and every client and take the 2.x unit files away (as in step 3, into a new hold directory), check
 the backup, then restore **whole directories**, never single files laid over a
 live database: a stale `opencode.db-wal` or `opencode.db-shm` beside a restored
 `opencode.db` corrupts it.
@@ -1374,10 +1395,10 @@ cfg="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
 mv "$cfg" "$cfg.2x-$stamp" && cp -r "$backup/config" "$cfg"
 install -m 755 "$backup/opencode-1.x" ~/.opencode/bin/opencode
 cp "$backup/libexec/"* ~/.local/libexec/opencode/
-rm -rf ~/.config/systemd/user/opencode.service.d
-cp -r "$backup/systemd/"* ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user unmask --runtime opencode.service opencode-telegram-bot.service opencode-gateway-restart.path 2>/dev/null
+mkdir -p "$backup/2x-systemd"
+for f in ~/.config/systemd/user/opencode*; do [ -e "$f" ] && mv "$f" "$backup/2x-systemd/"; done
+cp -r "$backup/systemd/"* ~/.config/systemd/user/    # the held 1.x units and drop-ins
+systemctl --user daemon-reload                        # only now can the unit be started
 systemctl --user start opencode.service
 ```
 

@@ -843,7 +843,7 @@ test_documented_attach_shortcut() (
   mkdir -p "$sandbox/bin" "$sandbox/home/.config/opencode-runtime" "$sandbox/work space" "$sandbox/other"
   export HOME="$sandbox/home" PATH="$sandbox/bin:$PATH"
   export ATTACH_RECORD="$sandbox/args"
-  unset OPENCODE_SERVER_PASSWORD OPENCODE_SERVER_USERNAME
+  unset OPENCODE_PASSWORD OPENCODE_SERVER_PASSWORD OPENCODE_SERVER_USERNAME
   export TELEGRAM_BOT_TOKEN=fixture-only
 
   cat > "$sandbox/bin/systemctl" <<'STUB'
@@ -853,16 +853,15 @@ exit "${ATTACH_SERVICE_STATUS:-0}"
 STUB
   cat > "$sandbox/bin/opencode" <<'STUB'
 #!/usr/bin/env bash
-[[ "${OPENCODE_SERVER_PASSWORD:-}" == fixture-password ]] || exit 91
-[[ "${OPENCODE_SERVER_USERNAME:-}" == fixture-user ]] || exit 92
+[[ "${OPENCODE_PASSWORD:-}" == fixture-password ||
+   "${OPENCODE_SERVER_PASSWORD:-}" == fixture-password ]] || exit 91
 [[ -z "${TELEGRAM_BOT_TOKEN+x}" ]] || exit 93
 printf '%s\n' "$@" > "$ATTACH_RECORD"
 exit "${ATTACH_EXIT_STATUS:-0}"
 STUB
   chmod +x "$sandbox/bin/systemctl" "$sandbox/bin/opencode"
   cat > "$HOME/.config/opencode-runtime/secrets.env" <<'ENV'
-OPENCODE_SERVER_USERNAME=fixture-user
-OPENCODE_SERVER_PASSWORD=fixture-password
+OPENCODE_PASSWORD=fixture-password
 ENV
   # Execute the shipped snippet, rather than a second implementation of it.
   sed -n '/^# >>> opencode-attach-wrapper >>>$/,/^# <<< opencode-attach-wrapper <<<$/{p;}' \
@@ -876,41 +875,74 @@ ENV
   oca --session 'session with spaces'
   local -a arguments
   mapfile -t arguments < "$ATTACH_RECORD"
-  assert_equal "${#arguments[@]}" 6 "attach arguments must keep their boundaries"
-  assert_equal "${arguments[0]}" attach "oca must attach"
+  assert_equal "${#arguments[@]}" 5 "client arguments must keep their boundaries"
+  assert_equal "${arguments[0]}" --server "oca must connect with --server (opencode attach is gone in 2.x)"
   assert_equal "${arguments[1]}" http://127.0.0.1:4096 "oca must use loopback"
-  assert_equal "${arguments[2]}" --dir "oca must select the backend directory"
-  assert_equal "${arguments[3]}" "$sandbox/work space" "directory with spaces must survive"
-  assert_equal "${arguments[4]}" --session "attach options must be forwarded"
-  assert_equal "${arguments[5]}" 'session with spaces' "option values must survive"
-  [[ -z "${OPENCODE_SERVER_PASSWORD+x}" && -z "${OPENCODE_SERVER_USERNAME+x}" ]] \
+  assert_equal "${arguments[2]}" "$sandbox/work space" "directory with spaces must survive as the positional directory"
+  assert_equal "${arguments[3]}" --session "client options must be forwarded"
+  assert_equal "${arguments[4]}" 'session with spaces' "option values must survive"
+  [[ -z "${OPENCODE_PASSWORD+x}" && -z "${OPENCODE_SERVER_PASSWORD+x}" ]] \
     || fail "server credentials must not leak into the caller"
   assert_equal "$TELEGRAM_BOT_TOKEN" fixture-only "caller environment must be preserved"
 
   cd "$sandbox/other"
   oca
   mapfile -t arguments < "$ATTACH_RECORD"
-  assert_equal "${arguments[3]}" "$sandbox/other" "directory must be evaluated at each invocation"
+  assert_equal "${arguments[2]}" "$sandbox/other" "directory must be evaluated at each invocation"
   local status=0
   ATTACH_EXIT_STATUS=17 oca || status=$?
-  assert_equal "$status" 17 "attach exit status must propagate"
+  assert_equal "$status" 17 "client exit status must propagate"
+
+  # The legacy variable name is accepted by the 2.x client as well.
+  printf 'OPENCODE_SERVER_PASSWORD=fixture-password\n' > "$HOME/.config/opencode-runtime/secrets.env"
+  oca
+  printf 'OPENCODE_PASSWORD=fixture-password\n' > "$HOME/.config/opencode-runtime/secrets.env"
 
   rm "$ATTACH_RECORD"
   status=0
   ATTACH_SERVICE_STATUS=1 oca >/dev/null 2>&1 || status=$?
-  [[ "$status" != 0 && ! -e "$ATTACH_RECORD" ]] || fail "inactive service must prevent attach"
+  [[ "$status" != 0 && ! -e "$ATTACH_RECORD" ]] || fail "inactive service must prevent connecting"
+  printf 'OTHER=1\n' > "$HOME/.config/opencode-runtime/secrets.env"
+  status=0
+  oca >/dev/null 2>&1 || status=$?
+  [[ "$status" != 0 && ! -e "$ATTACH_RECORD" ]] || fail "a missing password must prevent connecting"
   rm "$HOME/.config/opencode-runtime/secrets.env"
   status=0
   oca >/dev/null 2>&1 || status=$?
-  [[ "$status" != 0 && ! -e "$ATTACH_RECORD" ]] || fail "missing credentials must prevent attach"
+  [[ "$status" != 0 && ! -e "$ATTACH_RECORD" ]] || fail "missing credentials must prevent connecting"
   printf 'return 1\n' > "$HOME/.config/opencode-runtime/secrets.env"
   status=0
   oca >/dev/null 2>&1 || status=$?
-  [[ "$status" != 0 && ! -e "$ATTACH_RECORD" ]] || fail "failed credential load must prevent attach"
+  [[ "$status" != 0 && ! -e "$ATTACH_RECORD" ]] || fail "failed credential load must prevent connecting"
 )
+
+# The runbook is the deliverable for the unit text, so assert the 2.x facts that
+# a copy-paste of it depends on, rather than trusting that it was edited.
+test_runbook_documents_the_2x_service() {
+  local runbook="$REPOSITORY_ROOT/docs/opencode-service.md"
+  local text unit
+  text="$(<"$runbook")"
+  unit="$(sed -n '/^\[Unit\]$/,/^\[Install\]$/p' "$runbook" | sed -n '1,/^\[Install\]$/p')"
+
+  assert_contains "$unit" "ExecStart=%h/.opencode/bin/opencode serve --hostname 127.0.0.1 --port 4096" \
+    "the unit must run opencode serve on loopback"
+  assert_contains "$unit" "Environment=OPENCODE_DISABLE_AUTOUPDATE=1" \
+    "the unit must stop the server upgrading itself"
+  [[ "$text" != *"opencode web --"* ]] || fail "opencode web does not exist in 2.x"
+  [[ "$text" != *"opencode attach http"* ]] || fail "opencode attach does not exist in 2.x"
+  [[ "$text" != *'Environment="READY_TOOL_MARKER'* ]] || fail "READY_TOOL_MARKER is gone"
+  [[ "$text" != *"/global/health | head"* && "$text" != *"/global/health   # 401"* ]] \
+    || fail "/global/health is not an authentication check in 2.x"
+  assert_contains "$text" "opencode service set disabled true" \
+    "the runbook must disable the shared background service"
+  assert_contains "$text" "Moving an existing 1.x installation to 2.x" \
+    "the migration section must exist"
+  assert_contains "$text" "Never set \`remote\`" "the runbook must forbid the public tunnel"
+}
 
 TEMP_DIR="$(mktemp -d)"
 test_documented_attach_shortcut
+test_runbook_documents_the_2x_service
 install_stubs
 test_no_work_writes_nothing
 test_settled_status_is_left_untouched

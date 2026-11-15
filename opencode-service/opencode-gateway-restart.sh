@@ -46,6 +46,17 @@ IFS=$'\n\t'
 # stdin via `-K -`, never as arguments, so they cannot appear in `ps`,
 # /proc/<pid>/cmdline, the unit text or the journal.
 #
+# OPENCODE 1.x ONLY. The idle signal is the 1.x endpoint /session/status, which
+# 2.x does not provide. When an authenticated /api/info identifies the server as
+# 2.x, the consumer refuses: it consumes the request, records `failed` and
+# restarts nothing, because acting on a signal it cannot read is worse than
+# declining.
+#
+# A SESSION STATUS THAT CANNOT BE READ IS NOT IDLE. Only a connection that does
+# not answer at all counts as idle. An HTTP error, an HTML page or any non-JSON
+# body from /session/status says nothing about running sessions, and restarting
+# on it would cut a turn off.
+#
 # Requires `jq`. Install it from a system path: a unit does not inherit a
 # version manager's shims.
 
@@ -56,12 +67,12 @@ INTERVAL="${RESTART_IDLE_INTERVAL:-3}"
 HOST="${READY_HOST:-127.0.0.1}"
 PORT="${READY_PORT:-4096}"
 
-readonly SCRIPT_VERSION="0.1.0"
+readonly SCRIPT_VERSION="0.2.0"
 readonly REQUEST="$CONTROL_DIR/restart-request.json"
 readonly STATUS="$CONTROL_DIR/restart-status.json"
 readonly BASE="http://${HOST}:${PORT}"
 readonly USERNAME="${OPENCODE_SERVER_USERNAME:-opencode}"
-readonly PASSWORD="${OPENCODE_SERVER_PASSWORD:-}"
+readonly PASSWORD="${OPENCODE_PASSWORD:-${OPENCODE_SERVER_PASSWORD:-}}"
 
 now_ms() { printf '%s000\n' "$(date +%s)"; }
 
@@ -93,24 +104,41 @@ read_field() { # $1 file  $2 jq filter; prints the value, or fails
   jq -er "$2" < "$1" 2>/dev/null
 }
 
-curl_auth() { # $1 = path; prints the body, returns curl's status
-  printf 'user = "%s:%s"\nsilent\nshow-error\nfail\nmax-time = 5\nurl = "%s%s"\n' \
-    "$USERNAME" "$PASSWORD" "$BASE" "$1" | curl -K - 2>/dev/null
+# One authenticated request. Sets HTTP_CODE ("000" when curl could not connect)
+# and HTTP_BODY. A 2.x server always uses the username `opencode`.
+http_get() { # $1 = path  $2 = username
+  local out
+  if out="$(printf 'user = "%s:%s"\nsilent\nshow-error\nmax-time = 5\nwrite-out = "\\n%%{http_code}"\nurl = "%s%s"\n' \
+      "$2" "$PASSWORD" "$BASE" "$1" | curl -K - 2>/dev/null)"; then
+    HTTP_CODE="${out##*$'\n'}"
+    HTTP_BODY="${out%$'\n'*}"
+  else
+    HTTP_CODE="000"
+    HTTP_BODY=""
+  fi
+}
+
+# True when an authenticated /api/info is JSON reporting major 2.
+is_v2_server() {
+  http_get /api/info opencode
+  [[ "$HTTP_CODE" == 200 ]] || return 1
+  jq -e '(.version // "") | test("^2\\.")' >/dev/null 2>&1 <<< "$HTTP_BODY"
 }
 
 is_idle() {
-  local state body
+  local state
 
   state="$(systemctl --user show -p ActiveState --value "$UNIT" 2>/dev/null || true)"
   case "$state" in
     activating | deactivating | reloading) return 1 ;;
   esac
 
-  body="$(curl_auth /session/status)" || return 0
-  if [[ -z "$body" ]]; then
-    return 0
-  fi
-  jq -e 'length == 0' >/dev/null 2>&1 <<< "$body"
+  http_get /session/status "$USERNAME"
+  # Nothing is in flight through an API that is not answering.
+  [[ "$HTTP_CODE" == "000" ]] && return 0
+  # Anything else that is not the session map is not evidence of idleness.
+  [[ "$HTTP_CODE" == 200 ]] || return 1
+  jq -e 'type == "object" and length == 0' >/dev/null 2>&1 <<< "$HTTP_BODY"
 }
 
 # Prints the requested-at stamp when there is work, and fails when there is not.
@@ -154,6 +182,15 @@ main() {
   local requested started message
 
   requested="$(find_work)" || return 0
+
+  if is_v2_server; then
+    # Consume the request, or the path unit re-triggers this script for ever.
+    rm -f "$REQUEST"
+    message="the server is OpenCode 2.x; this consumer supports 1.x only (its idle signal, /session/status, does not exist on 2.x); restart not performed"
+    printf 'gateway-restart: %s\n' "$message" >&2
+    write_status failed "$requested" "$(now_ms)" "$(now_ms)" "$message"
+    return 1
+  fi
 
   started="$(now_ms)"
   printf 'gateway-restart: request accepted (requestedAtMs=%s), waiting for %s to go idle\n' \

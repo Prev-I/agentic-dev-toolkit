@@ -204,17 +204,28 @@ one bundle; a copy of the script without its catalog does not run.
 | dotnet-ef (EF Core CLI, `dotnet:` backend) | `latest` |
 | uv, shellcheck, gitleaks, PyYAML | `latest` |
 | OpenSpec | pinned |
+| OpenCode | pinned (2.x; `opencode` key, `ADT_OPENCODE_VERSION`, no CLI flag) |
 | Superpowers | pinned |
 | Karpathy guidelines skill | `multica-ai/andrej-karpathy-skills` at a pinned commit |
 
 Every pin has an `ADT_*` environment variable of the same name. **Not every
-pin has a CLI flag** — `maven` and `dotnet-ef` have none. Where a flag exists,
+pin has a CLI flag** — `maven`, `dotnet-ef` and `opencode` have none. Where a flag exists,
 the effective value's precedence is: the CLI flag, then a set-and-non-empty
 `ADT_*` variable, then the catalog's value.
 
 Bump a script's `SCRIPT_VERSION` in the same commit that changes its
 behaviour: patch for a fix, minor for a new flag or output field, major for a
 removal or a breaking output change.
+
+`install_opencode` uses the 2.x installer and decides on the **data**, not the
+binary: 2.x migrates `opencode.db` in place on first start and upstream supports
+no downgrade. With the database present and a binary that is not 2.x it leaves
+the binary untouched and warns (also under `--upgrade`); with the database and
+no binary, `preflight_opencode` stops the run before any mutation. A 2.x binary
+newer than the pin is also left alone when data is present, so `--upgrade` can
+never put a migrated database under an older binary. The toolkit
+keeps no 1.x pin. See `docs/opencode-service.md`, "Moving an existing 1.x
+installation to 2.x".
 
 `install_karpathy_skill` downloads one `SKILL.md` and verifies it against a
 SHA-256 digest before writing. Two destinations cover three harnesses:

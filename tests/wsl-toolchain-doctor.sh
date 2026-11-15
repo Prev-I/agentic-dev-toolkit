@@ -132,7 +132,7 @@ run_doctor_status() {
 
 # write_test_catalog DEST
 # Writes the toolkit's real software-catalog.env verbatim, so every
-# TOOLKIT_* test compares against the same seventeen keys the installer
+# TOOLKIT_* test compares against the same eighteen keys the installer
 # actually ships, without duplicating its content here.
 write_test_catalog() {
   cp "$ROOT_DIR/catalog/software-catalog.env" "$1"
@@ -223,7 +223,7 @@ setup_toolkit_baseline() {
 }
 
 # receipt_skip_all_except DEST KEEP...
-# Rewrites DEST's skipped= line so every one of the sixteen requested.* keys
+# Rewrites DEST's skipped= line so every one of the seventeen requested.* keys
 # is skipped except the ones named. Isolates a single component's probe in a
 # comparison-B test without needing a fixture that answers correctly for
 # all twelve mise-backed probes at once.
@@ -233,7 +233,7 @@ receipt_skip_all_except() {
   local -a keep=("$@")
   local -a all=(
     java-17 java-21 dotnet-10 dotnet-8 python node bun maven dotnet-ef uv
-    shellcheck gitleaks pyyaml openspec superpowers karpathy-ref
+    shellcheck gitleaks pyyaml openspec opencode superpowers karpathy-ref
   )
   local -a skip=()
   local key k found
@@ -758,7 +758,7 @@ setup_fixture
 WTD_TEST_SCAN_PATH="$TMP_ROOT/linux/bin" run_doctor audit --json
 assert_eq "clean JSON audit exits zero" "$LAST_RC" "0"
 assert_contains "JSON audit exposes schema version" "$LAST_OUT" '"schemaVersion":1'
-assert_contains "JSON audit exposes v0.5.0 tool version" "$LAST_OUT" '"toolVersion":"0.5.0"'
+assert_contains "JSON audit exposes v0.5.1 tool version" "$LAST_OUT" '"toolVersion":"0.5.1"'
 assert_contains "JSON audit exposes action" "$LAST_OUT" '"action":"audit"'
 assert_contains "JSON audit exposes PASS status" "$LAST_OUT" '"status":"PASS"'
 assert_contains "JSON audit contains finding code" "$LAST_OUT" '"code":"WSL_INTEROP_ENABLED"'
@@ -852,8 +852,8 @@ teardown_fixture
 # v0.3.0 regression: package version and PATH hygiene/remediation
 setup_fixture
 run_doctor --version
-assert_eq "tool reports v0.5.0" "$LAST_RC" "0"
-assert_eq "version string is exactly 0.5.0" "$LAST_OUT" "0.5.0"
+assert_eq "tool reports v0.5.1" "$LAST_RC" "0"
+assert_eq "version string is exactly 0.5.1" "$LAST_OUT" "0.5.1"
 teardown_fixture
 
 setup_fixture
@@ -1906,6 +1906,13 @@ WTD_TEST_OPENSPEC_BIN="" WTD_TEST_TIMEOUT_BIN="" run_doctor audit --probe
 assert_not_contains "toolkit findings are never FAIL (--probe)" "$LAST_OUT" "FAIL  TOOLKIT_"
 teardown_fixture
 
+
+# The doctor documents that its CATALOG_REQUIRED is the installer's. Prove it,
+# so adding a catalog key to one and not the other fails here.
+required_keys() { sed -n '/^CATALOG_REQUIRED=(/,/^)/p' "$1" | tr -s ' \n' '\n' | grep -v 'CATALOG_REQUIRED\|^)$' | grep .; }
+assert_eq "doctor CATALOG_REQUIRED equals the installer's" \
+  "$(required_keys "$ROOT_DIR/wsl-toolchain-doctor/wsl-toolchain-doctor.sh")" \
+  "$(required_keys "$ROOT_DIR/environments/linux/install.sh")"
 
 printf '\n%d passed, %d failed\n' "$PASS_COUNT" "$FAIL_COUNT"
 (( FAIL_COUNT == 0 ))

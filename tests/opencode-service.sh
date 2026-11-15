@@ -60,19 +60,86 @@ done
 printf '%s\n' "${STUB_ACTIVE_STATE:-active}"
 STUB
 
+  # The curl stub routes by the URL in the `-K -` option block, like the real
+  # scripts send it. A request without a `user =` line is unauthenticated. When
+  # the block asks for `write-out`, the stub appends "\n<http code>" as curl
+  # would, so the scripts under test can tell a 401 from a 200 from a network
+  # failure (STUB_CURL_STATUS, which makes curl exit non-zero instead).
   cat > "$TEMP_DIR/bin/curl" <<'STUB'
 #!/usr/bin/env bash
 options="$(cat)"                    # drain and inspect the -K - option block
-if [[ "${STUB_REQUIRE_AUTH:-0}" == "1" ]]; then
-  [[ "$options" == *'user = "test-user:test-password"'* ]] || exit 2
-fi
 exit_status="${STUB_CURL_STATUS:-0}"
 [[ "$exit_status" == "0" ]] || exit "$exit_status"
-case "$options" in
-  *'/global/health'*) printf '%s' "${STUB_HEALTH_BODY:-\{\}}" ;;
-  *'/experimental/tool/ids'*) printf '%s' "${STUB_TOOLS_BODY:-\[\]}" ;;
-  *) printf '%s' "${STUB_SESSION_BODY:-\{\}}" ;;
+
+url="$(sed -n 's/^url = "\(.*\)"$/\1/p' <<<"$options")"
+path="/${url#http://*/}"
+authenticated=0
+if [[ "$options" == *'user = "'* ]]; then
+  authenticated=1
+  if [[ "${STUB_REQUIRE_AUTH:-0}" == "1" &&
+        "$options" != *'user = "opencode:test-password"'* ]]; then
+    authenticated=0
+  fi
+fi
+
+code=200
+body=""
+case "$path" in
+  /api/info)
+    if (( authenticated )); then
+      code="${STUB_INFO_CODE:-200}"
+      if [[ -n "${STUB_INFO_BODY+x}" ]]; then
+        body="$STUB_INFO_BODY"
+      else
+        body="$(printf '{"version":"%s","pid":%s,"hostname":"h","urls":["http://127.0.0.1:4096"],"paths":{"tmp":"/tmp/opencode"},"capabilities":{"persistentPty":true}}' \
+          "${STUB_INFO_VERSION:-2.3.0}" "${STUB_INFO_PID:-1327923}")"
+      fi
+    else
+      code="${STUB_INFO_UNAUTH_CODE:-401}"
+    fi
+    ;;
+  /api/experimental/migration/v1)
+    if (( authenticated )); then
+      if [[ -n "${STUB_MIGRATION_BODY+x}" ]]; then
+        body="$STUB_MIGRATION_BODY"
+        code="${STUB_MIGRATION_CODE:-200}"
+      elif [[ -n "${STUB_MIGRATION_SEQ:-}" ]]; then
+        read -r -a sequence <<<"$STUB_MIGRATION_SEQ"
+        index=0
+        [[ ! -f "$STUB_DIR/migration-calls" ]] || index="$(<"$STUB_DIR/migration-calls")"
+        (( index < ${#sequence[@]} )) || index=$(( ${#sequence[@]} - 1 ))
+        printf '%s' "$(( index + 1 ))" > "$STUB_DIR/migration-calls"
+        body="{\"status\":\"${sequence[$index]}\"}"
+      else
+        body='{"status":"completed"}'
+      fi
+    else
+      code=401
+    fi
+    ;;
+  /global/health)
+    if [[ -n "${STUB_HEALTH_BODY+x}" ]]; then
+      body="$STUB_HEALTH_BODY"
+    else
+      body='<!doctype html><html><body>web ui</body></html>'
+    fi
+    ;;
+  /session/status)
+    code="${STUB_SESSION_CODE:-200}"
+    empty_map='{}'
+    body="${STUB_SESSION_BODY:-$empty_map}"
+    ;;
+  *)
+    code=404
+    body='not found'
+    ;;
 esac
+printf '%s' "$body"
+if [[ "$options" == *'write-out'* ]]; then
+  printf '\n%s' "$code"
+elif [[ "$code" != 200 ]]; then
+  exit 22
+fi
 STUB
 
   cat > "$TEMP_DIR/bin/journalctl" <<'STUB'
@@ -104,14 +171,25 @@ new_case() {
   export RESTART_IDLE_INTERVAL=1
   export STUB_ACTIVE_STATE="active"
   export STUB_SESSION_BODY="{}"
-  export STUB_HEALTH_BODY='{"healthy":true}'
-  export STUB_TOOLS_BODY='["bash"]'
+  # A stock 2.x server by default: HTML on /global/health, JSON on /api/info.
+  unset STUB_HEALTH_BODY STUB_INFO_BODY STUB_MIGRATION_SEQ STUB_MIGRATION_BODY STUB_MIGRATION_CODE MAINPID
+  export STUB_INFO_CODE=200
+  export STUB_INFO_VERSION=2.3.0
+  export STUB_INFO_PID=1327923
+  export STUB_INFO_UNAUTH_CODE=401
+  export STUB_SESSION_CODE=200
   export STUB_TELEGRAM_STARTED=1
   export STUB_MARKER_INVOCATION=test-invocation
   export STUB_REQUIRE_AUTH=0
   export STUB_CURL_STATUS=0
   export STUB_RESTART_STATUS=0
   export STUB_RESTART_OUTPUT=""
+}
+
+# The restart consumer is 1.x only; its cases run against a server that is not 2.x.
+new_v1_case() {
+  new_case "$1"
+  export STUB_INFO_CODE=404 STUB_INFO_BODY='not found'
 }
 
 run_consumer() {
@@ -136,7 +214,7 @@ status_field() {
 # on the very files it writes, so a gratuitous write is an infinite trigger
 # loop, which makes this the single most important case in the suite.
 test_no_work_writes_nothing() {
-  new_case no-work
+  new_v1_case no-work
   run_consumer
 
   assert_equal "$CONSUMER_STATUS" "0" "an idle consumer must succeed"
@@ -148,7 +226,7 @@ test_no_work_writes_nothing() {
 # The steady state on a healthy host is a status file left over from the last
 # restart. It must not be rewritten either.
 test_settled_status_is_left_untouched() {
-  new_case settled
+  new_v1_case settled
   printf '{\n  "state": "idle"\n}\n' > "$CONTROL_DIR/restart-status.json"
   local before
   before="$(cksum < "$CONTROL_DIR/restart-status.json")"
@@ -162,7 +240,7 @@ test_settled_status_is_left_untouched() {
 }
 
 test_request_file_is_consumed_and_the_unit_restarted() {
-  new_case request
+  new_v1_case request
   write_request 1757000000000
 
   run_consumer
@@ -184,7 +262,7 @@ test_request_file_is_consumed_and_the_unit_restarted() {
 
 # The interactive path: the tool recorded the intent but no request file exists.
 test_pending_status_alone_is_honoured() {
-  new_case pending
+  new_v1_case pending
   jq -n '{state: "pending", requestedAtMs: 1757111111000, completedAtMs: null, lastError: null}' \
     > "$CONTROL_DIR/restart-status.json"
 
@@ -200,7 +278,7 @@ test_pending_status_alone_is_honoured() {
 # The promise the plugin's tool makes to the user is that the restart waits for
 # current work to finish. A busy server must therefore not be restarted.
 test_a_busy_server_is_not_restarted() {
-  new_case busy
+  new_v1_case busy
   write_request 1757222222000
   export STUB_SESSION_BODY='{"ses_abc":{"running":true}}'
 
@@ -220,7 +298,7 @@ test_a_busy_server_is_not_restarted() {
 # response body differs — so a pass here proves the idle check reads the body
 # rather than merely passing whenever the probe succeeds.
 test_an_empty_session_body_is_idle() {
-  new_case empty-body
+  new_v1_case empty-body
   write_request 1757333333000
   export STUB_SESSION_BODY='{}'
 
@@ -233,7 +311,7 @@ test_an_empty_session_body_is_idle() {
 # Nothing can be in flight through an API that is not answering, and a restart
 # is the right move for a server in that state.
 test_an_unanswered_probe_counts_as_idle() {
-  new_case no-answer
+  new_v1_case no-answer
   write_request 1757444444000
   export STUB_CURL_STATUS=7
 
@@ -246,7 +324,7 @@ test_an_unanswered_probe_counts_as_idle() {
 # Restarting mid-start would cut off the readiness probe of the start already
 # running.
 test_a_unit_mid_start_is_not_idle() {
-  new_case activating
+  new_v1_case activating
   write_request 1757555555000
   export STUB_ACTIVE_STATE="activating"
 
@@ -258,7 +336,7 @@ test_a_unit_mid_start_is_not_idle() {
 }
 
 test_a_failed_restart_is_recorded_with_its_output() {
-  new_case restart-fails
+  new_v1_case restart-fails
   write_request 1757666666000
   export STUB_RESTART_STATUS=1
   export STUB_RESTART_OUTPUT="Job for opencode-test.service failed"
@@ -274,7 +352,7 @@ test_a_failed_restart_is_recorded_with_its_output() {
 # A malformed stamp is still a request. Discarding it would lose a restart the
 # user asked for; dating it now keeps the record well-formed.
 test_a_request_without_a_usable_stamp_is_still_honoured() {
-  new_case bad-stamp
+  new_v1_case bad-stamp
   printf '{"requestedAtMs": "not-a-number", "requestedBy": "gateway_restart"}\n' \
     > "$CONTROL_DIR/restart-request.json"
 
@@ -287,10 +365,53 @@ test_a_request_without_a_usable_stamp_is_still_honoured() {
   fi
 }
 
+# The 1.x endpoint is /session/status. A 404 or an HTML page from it carries no
+# information about sessions, so treating it as "no sessions" would restart a
+# server in the middle of a turn.
+test_a_404_from_session_status_is_not_idle() {
+  new_v1_case session-404
+  write_request 1757888888000
+  export STUB_SESSION_CODE=404 STUB_SESSION_BODY='not found'
+
+  run_consumer
+
+  assert_equal "$CONSUMER_STATUS" "1" "an unreadable session status is not idle"
+  assert_equal "$(restart_count)" "0" "an unreadable session status must not restart"
+  assert_contains "$(status_field '.lastError')" "not idle" "the refusal must say why"
+}
+
+test_a_non_json_session_status_is_not_idle() {
+  new_v1_case session-html
+  write_request 1757999999000
+  export STUB_SESSION_BODY='<!doctype html><html></html>'
+
+  run_consumer
+
+  assert_equal "$CONSUMER_STATUS" "1" "a non-JSON session status is not idle"
+  assert_equal "$(restart_count)" "0" "a non-JSON session status must not restart"
+}
+
+# 1.x only: on a 2.x server /session/status is not the idle signal, so the
+# consumer must refuse rather than act on something it cannot read.
+test_a_2x_server_is_refused_and_not_restarted() {
+  new_case gateway-2x
+  write_request 1758000000000
+
+  run_consumer
+
+  assert_equal "$CONSUMER_STATUS" "1" "a 2.x server must fail the consumer"
+  assert_equal "$(restart_count)" "0" "a 2.x server must not be restarted"
+  assert_contains "$CONSUMER_OUTPUT" "OpenCode 2.x" "the refusal must name the reason"
+  assert_equal "$(status_field '.state')" "failed" "the refusal must be recorded"
+  if [[ -f "$CONTROL_DIR/restart-request.json" ]]; then
+    fail "a refused request must still be consumed, or it re-triggers for ever"
+  fi
+}
+
 # Every state the consumer writes is read back by the plugin, which treats
 # malformed JSON as an error rather than as an absent file.
 test_every_written_status_is_well_formed_json() {
-  new_case shape
+  new_v1_case shape
   write_request 1757777777000
 
   run_consumer
@@ -301,41 +422,244 @@ test_every_written_status_is_well_formed_json() {
     "the status file must carry exactly the fields the contract defines"
 }
 
-test_server_readiness_defaults_to_a_builtin_tool() {
-  new_case server-ready
-
-  local output status
-  set +e
-  output="$(
-    PATH="$TEMP_DIR/bin:$PATH" \
-      READY_TIMEOUT=0 READY_INTERVAL=0 \
-      env -u READY_TOOL_MARKER bash "$READY" 2>&1
-  )"
-  status=$?
-  set -e
-
-  assert_equal "$status" "0" "a stock OpenCode server must pass readiness"
-  assert_contains "$output" "tool 'bash' registered" \
-    "the default marker must be a built-in OpenCode tool"
+# Runs the server probe with a short window and the fixture password. Extra
+# arguments are environment assignments for the run and override the defaults.
+run_ready() {
+  READY_OUTPUT="$(
+    PATH="$TEMP_DIR/bin:$PATH" env \
+      READY_TIMEOUT=0 READY_INTERVAL=0 OPENCODE_PASSWORD=test-password \
+      "$@" bash "$READY" 2>&1
+  )" && READY_STATUS=0 || READY_STATUS=$?
 }
 
-test_server_readiness_accepts_an_explicit_plugin_marker() {
-  new_case plugin-ready
-  export STUB_TOOLS_BODY='["gateway_status"]'
+test_server_readiness_accepts_a_stock_2x_server() {
+  new_case server-ready
+  export STUB_REQUIRE_AUTH=1
 
-  local output status
+  run_ready
+
+  assert_equal "$READY_STATUS" "0" "a stock 2.x server must pass readiness"
+  assert_contains "$READY_OUTPUT" "readiness: READY" "readiness must report READY"
+  assert_contains "$READY_OUTPUT" "OpenCode 2.3.0" \
+    "readiness must report the version the server identified itself as"
+}
+
+# The web UI's SPA fallback answers 200 text/html on unknown paths, so a status
+# code alone proves nothing and a substring grep over the body is not enough.
+test_server_readiness_rejects_a_spa_fallback_on_api_info() {
+  new_case ready-spa
+  export STUB_INFO_BODY='<!doctype html><html><body>web ui</body></html>'
+
+  run_ready
+
+  assert_equal "$READY_STATUS" "1" "an HTML body on /api/info is not a server"
+  assert_contains "$READY_OUTPUT" "NOT READY" "readiness must refuse"
+}
+
+test_server_readiness_requires_the_main_pid_to_match_api_info() {
+  new_case ready-pid
+  local live_pid
+  sleep 30 &
+  live_pid=$!
+
+  export STUB_INFO_PID=$(( live_pid + 1 ))
+  run_ready MAINPID="$live_pid"
+  assert_equal "$READY_STATUS" "1" "a pid other than MAINPID is another process"
+  assert_contains "$READY_OUTPUT" "does not match MAINPID" \
+    "readiness must say which half failed"
+
+  export STUB_INFO_PID="$live_pid"
+  run_ready MAINPID="$live_pid"
+  kill "$live_pid" 2>/dev/null || true
+  assert_equal "$READY_STATUS" "0" "the matching pid must pass"
+  assert_contains "$READY_OUTPUT" "readiness: READY" "readiness must report READY"
+}
+
+test_server_readiness_requires_major_2() {
+  new_case ready-v1-version
+  export STUB_INFO_VERSION=1.19.5
+
+  run_ready
+
+  assert_equal "$READY_STATUS" "1" "a 1.x version string is not a 2.x server"
+  assert_contains "$READY_OUTPUT" "NOT READY" "readiness must refuse"
+}
+
+# A 200 for an anonymous request means the server runs with no password. That is
+# fatal, not something to poll: waiting cannot change it.
+test_server_readiness_fails_when_the_server_has_no_password() {
+  new_case ready-open
+  export STUB_INFO_UNAUTH_CODE=200
+  local started=$SECONDS
+
+  run_ready READY_TIMEOUT=30 READY_INTERVAL=1
+
+  assert_equal "$READY_STATUS" "1" "an unauthenticated 200 must fail readiness"
+  (( SECONDS - started <= 3 )) || fail "an open server must fail at once, not after the window"
+  assert_contains "$READY_OUTPUT" "without a password" "readiness must say why"
+}
+
+test_server_readiness_waits_for_the_migration() {
+  new_case ready-migration
+  export STUB_MIGRATION_SEQ="running completed"
+
+  run_ready READY_TIMEOUT=10 READY_INTERVAL=1
+  assert_equal "$READY_STATUS" "0" "readiness must pass once the migration completes"
+  assert_contains "$READY_OUTPUT" "migration" "readiness must mention the migration wait"
+
+  rm -f "$STUB_DIR/migration-calls"
+  export STUB_MIGRATION_SEQ="running"
+  run_ready
+  assert_equal "$READY_STATUS" "1" "a migration still running is not ready"
+  assert_contains "$READY_OUTPUT" "migration" "readiness must name the migration"
+}
+
+test_server_readiness_refuses_a_tool_marker() {
+  new_case ready-marker
+
+  run_ready READY_TOOL_MARKER=gateway_status
+
+  assert_equal "$READY_STATUS" "2" "READY_TOOL_MARKER must be an error on 2.x"
+  assert_contains "$READY_OUTPUT" "READY_TOOL_MARKER" "the error must name the variable"
+
+  run_ready READY_TOOL_MARKER=
+  assert_equal "$READY_STATUS" "2" "an empty READY_TOOL_MARKER is still a stale unit setting"
+}
+
+# A unit that still starts a 1.x server must trip the start limit rather than
+# poll out the window on every cycle.
+test_server_readiness_fails_at_once_on_a_1x_server() {
+  new_case ready-v1-server
+  export STUB_HEALTH_BODY='{"healthy":true,"version":"1.19.5"}'
+  export STUB_INFO_CODE=404 STUB_INFO_BODY='not found'
+  local started=$SECONDS
+
+  run_ready READY_TIMEOUT=30 READY_INTERVAL=1
+
+  assert_equal "$READY_STATUS" "1" "a 1.x server must fail readiness"
+  (( SECONDS - started <= 3 )) || fail "a 1.x server must fail at once"
+  assert_contains "$READY_OUTPUT" "1.x" "readiness must say it found a 1.x server"
+}
+
+test_server_readiness_needs_a_password_and_prefers_opencode_password() {
+  new_case ready-password
+  export STUB_REQUIRE_AUTH=1
+
+  run_ready OPENCODE_PASSWORD= OPENCODE_SERVER_PASSWORD=
+  assert_equal "$READY_STATUS" "2" "a probe without a password cannot authenticate"
+  assert_contains "$READY_OUTPUT" "OPENCODE_PASSWORD" "the error must name the variable"
+
+  run_ready OPENCODE_PASSWORD= OPENCODE_SERVER_PASSWORD=test-password
+  assert_equal "$READY_STATUS" "0" "OPENCODE_SERVER_PASSWORD is accepted"
+
+  run_ready OPENCODE_PASSWORD=test-password OPENCODE_SERVER_PASSWORD=wrong
+  assert_equal "$READY_STATUS" "0" "OPENCODE_PASSWORD wins when both are set"
+
+  run_ready OPENCODE_SERVER_USERNAME=someone-else
+  assert_equal "$READY_STATUS" "0" "the Basic-auth username is always opencode"
+}
+
+# The 2.3.0 OpenAPI types the migration status as one of four shapes. Only
+# `completed` is ready; `running` and `required` wait; `error` and anything
+# unrecognised fail at once, because waiting cannot fix them.
+test_server_readiness_handles_every_migration_state() {
+  new_case ready-migration-states
+
+  export STUB_MIGRATION_BODY='{"status":"completed"}'
+  run_ready
+  assert_equal "$READY_STATUS" "0" "completed is ready"
+
+  export STUB_MIGRATION_BODY='{"status":"running","progress":{"label":"sessions","numerator":3,"denominator":9}}'
+  run_ready
+  assert_equal "$READY_STATUS" "1" "running is not ready"
+  assert_contains "$READY_OUTPUT" "running" "the wait must name the state"
+
+  export STUB_MIGRATION_BODY='{"status":"required"}'
+  run_ready
+  assert_equal "$READY_STATUS" "1" "required is not ready"
+  assert_contains "$READY_OUTPUT" "required" "the wait must name the state"
+
+  local started=$SECONDS
+  export STUB_MIGRATION_BODY='{"status":"error","error":"disk full"}'
+  run_ready READY_TIMEOUT=30 READY_INTERVAL=1
+  assert_equal "$READY_STATUS" "1" "error is not ready"
+  assert_contains "$READY_OUTPUT" "disk full" "the error text must be reported"
+  (( SECONDS - started <= 3 )) || fail "a migration error must fail at once"
+
+  started=$SECONDS
+  export STUB_MIGRATION_BODY='{"status":"exploded"}'
+  run_ready READY_TIMEOUT=30 READY_INTERVAL=1
+  assert_equal "$READY_STATUS" "1" "an unknown status is not ready"
+  (( SECONDS - started <= 3 )) || fail "an unknown status must fail at once"
+
+  started=$SECONDS
+  export STUB_MIGRATION_BODY='<!doctype html><html></html>'
+  run_ready READY_TIMEOUT=30 READY_INTERVAL=1
+  assert_equal "$READY_STATUS" "1" "a non-JSON 200 is an unknown shape"
+  (( SECONDS - started <= 3 )) || fail "an unknown shape must fail at once"
+
+  # An endpoint that does not answer (here 404) says nothing about a migration.
+  export STUB_MIGRATION_BODY='not found' STUB_MIGRATION_CODE=404
+  run_ready
+  assert_equal "$READY_STATUS" "0" "a non-200 migration endpoint is not evidence of a migration"
+}
+
+# The unit and the probe read the same EnvironmentFile, so a password that
+# stays rejected is misconfiguration. Polling out the window on every start
+# would defeat the start limit, so a few 401s fail the start.
+test_server_readiness_fails_fast_on_a_rejected_password() {
+  new_case ready-wrong-password
+  export STUB_REQUIRE_AUTH=1
+  local started=$SECONDS
+
+  run_ready OPENCODE_PASSWORD=wrong READY_TIMEOUT=30 READY_INTERVAL=1
+
+  assert_equal "$READY_STATUS" "1" "a rejected password must fail readiness"
+  (( SECONDS - started <= 5 )) || fail "a rejected password must not poll out the window"
+  assert_contains "$READY_OUTPUT" "401" "readiness must say the credentials were rejected"
+}
+
+test_probes_require_jq() {
+  local nojq="$TEMP_DIR/nojq-bin" bash_bin output status
+  mkdir -p "$nojq"
+  bash_bin="$(command -v bash)"
   set +e
-  output="$(
-    PATH="$TEMP_DIR/bin:$PATH" \
-      READY_TIMEOUT=0 READY_INTERVAL=0 READY_TOOL_MARKER=gateway_status \
-      bash "$READY" 2>&1
-  )"
+  output="$(PATH="$nojq" OPENCODE_PASSWORD=x INVOCATION_ID=i "$bash_bin" "$READY" 2>&1)"
   status=$?
   set -e
+  assert_equal "$status" "2" "the server probe must exit 2 without jq"
+  assert_contains "$output" "jq is required" "the server probe must say why"
+  set +e
+  output="$(PATH="$nojq" OPENCODE_PASSWORD=x INVOCATION_ID=i "$bash_bin" "$TELEGRAM_READY" 2>&1)"
+  status=$?
+  set -e
+  assert_equal "$status" "2" "the Telegram probe must exit 2 without jq"
+  assert_contains "$output" "jq is required" "the Telegram probe must say why"
+}
 
-  assert_equal "$status" "0" "an explicit plugin marker must remain supported"
-  assert_contains "$output" "tool 'gateway_status' registered" \
-    "readiness must report the configured marker"
+test_telegram_readiness_accepts_the_legacy_password_name() {
+  new_case telegram-legacy-password
+  export STUB_REQUIRE_AUTH=1
+
+  local output status=0
+  output="$(
+    PATH="$TEMP_DIR/bin:$PATH" env -u OPENCODE_PASSWORD \
+      INVOCATION_ID=test-invocation \
+      TELEGRAM_READY_TIMEOUT=0 TELEGRAM_READY_INTERVAL=0 \
+      OPENCODE_SERVER_PASSWORD=test-password \
+      bash "$TELEGRAM_READY" 2>&1
+  )" || status=$?
+  assert_equal "$status" "0" "OPENCODE_SERVER_PASSWORD must authenticate the Telegram probe: $output"
+
+  status=0
+  output="$(
+    PATH="$TEMP_DIR/bin:$PATH" \
+      INVOCATION_ID=test-invocation \
+      TELEGRAM_READY_TIMEOUT=0 TELEGRAM_READY_INTERVAL=0 \
+      OPENCODE_PASSWORD=test-password OPENCODE_SERVER_PASSWORD=wrong \
+      bash "$TELEGRAM_READY" 2>&1
+  )" || status=$?
+  assert_equal "$status" "0" "OPENCODE_PASSWORD must win when both are set: $output"
 }
 
 # A server that exits at once must fail the start at once. Polling out the window
@@ -350,41 +674,14 @@ test_server_readiness_fails_fast_when_the_main_process_is_gone() {
   dead_pid=$!
   wait "$dead_pid" || true
 
-  local output status started=$SECONDS
-  set +e
-  output="$(
-    PATH="$TEMP_DIR/bin:$PATH" MAINPID="$dead_pid" \
-      READY_TIMEOUT=30 READY_INTERVAL=1 bash "$READY" 2>&1
-  )"
-  status=$?
-  set -e
+  local started=$SECONDS
+  run_ready MAINPID="$dead_pid" READY_TIMEOUT=30 READY_INTERVAL=1
 
-  assert_equal "$status" "1" "a dead main process must fail readiness"
+  assert_equal "$READY_STATUS" "1" "a dead main process must fail readiness"
   (( SECONDS - started <= 3 )) \
     || fail "readiness must not poll out the window after the main process exits"
-  assert_contains "$output" "main process $dead_pid exited during startup" \
+  assert_contains "$READY_OUTPUT" "main process $dead_pid exited during startup" \
     "readiness must say why it gave up"
-}
-
-test_server_readiness_passes_while_the_main_process_lives() {
-  new_case ready-live-main
-
-  local live_pid
-  sleep 30 &
-  live_pid=$!
-
-  local output status
-  set +e
-  output="$(
-    PATH="$TEMP_DIR/bin:$PATH" MAINPID="$live_pid" \
-      READY_TIMEOUT=0 READY_INTERVAL=0 bash "$READY" 2>&1
-  )"
-  status=$?
-  set -e
-  kill "$live_pid" 2>/dev/null || true
-
-  assert_equal "$status" "0" "a live main process must not block readiness"
-  assert_contains "$output" "readiness: READY" "readiness must still report READY"
 }
 
 test_telegram_readiness_requires_polling_and_opencode() {
@@ -397,8 +694,7 @@ test_telegram_readiness_requires_polling_and_opencode() {
     PATH="$TEMP_DIR/bin:$PATH" \
       INVOCATION_ID=test-invocation \
       TELEGRAM_READY_TIMEOUT=0 TELEGRAM_READY_INTERVAL=0 \
-      OPENCODE_SERVER_USERNAME=test-user \
-      OPENCODE_SERVER_PASSWORD=test-password \
+      OPENCODE_PASSWORD=test-password \
       bash "$TELEGRAM_READY" 2>&1
   )"
   status=$?
@@ -414,8 +710,7 @@ test_telegram_readiness_requires_polling_and_opencode() {
     PATH="$TEMP_DIR/bin:$PATH" \
       INVOCATION_ID=test-invocation \
       TELEGRAM_READY_TIMEOUT=0 TELEGRAM_READY_INTERVAL=0 \
-      OPENCODE_SERVER_USERNAME=test-user \
-      OPENCODE_SERVER_PASSWORD=test-password \
+      OPENCODE_PASSWORD=test-password \
       bash "$TELEGRAM_READY" 2>&1
   )"
   status=$?
@@ -426,32 +721,30 @@ test_telegram_readiness_requires_polling_and_opencode() {
     "Telegram readiness must diagnose a missing polling marker"
 
   export STUB_TELEGRAM_STARTED=1
-  export STUB_HEALTH_BODY='{"healthy":false}'
+  export STUB_INFO_BODY='<!doctype html><html></html>'
   set +e
   output="$(
     PATH="$TEMP_DIR/bin:$PATH" \
       INVOCATION_ID=test-invocation \
       TELEGRAM_READY_TIMEOUT=0 TELEGRAM_READY_INTERVAL=0 \
-      OPENCODE_SERVER_USERNAME=test-user \
-      OPENCODE_SERVER_PASSWORD=test-password \
+      OPENCODE_PASSWORD=test-password \
       bash "$TELEGRAM_READY" 2>&1
   )"
   status=$?
   set -e
 
-  assert_equal "$status" "1" "Telegram readiness must fail without OpenCode health"
-  assert_contains "$output" "OpenCode health unavailable" \
-    "Telegram readiness must diagnose an unhealthy OpenCode dependency"
+  assert_equal "$status" "1" "Telegram readiness must fail without a 2.x API"
+  assert_contains "$output" "OpenCode 2.x API unavailable" \
+    "Telegram readiness must diagnose an unavailable OpenCode dependency"
 
-  export STUB_HEALTH_BODY='{"healthy":true}'
+  unset STUB_INFO_BODY
   export STUB_MARKER_INVOCATION=stale-invocation
   set +e
   output="$(
     PATH="$TEMP_DIR/bin:$PATH" \
       INVOCATION_ID=current-invocation \
       TELEGRAM_READY_TIMEOUT=0 TELEGRAM_READY_INTERVAL=0 \
-      OPENCODE_SERVER_USERNAME=test-user \
-      OPENCODE_SERVER_PASSWORD=test-password \
+      OPENCODE_PASSWORD=test-password \
       bash "$TELEGRAM_READY" 2>&1
   )"
   status=$?
@@ -460,6 +753,27 @@ test_telegram_readiness_requires_polling_and_opencode() {
   assert_equal "$status" "1" "a stale invocation marker must not satisfy readiness"
   assert_contains "$output" "polling marker absent" \
     "Telegram readiness must scope the marker to the current invocation"
+}
+
+test_telegram_readiness_requires_a_2x_server() {
+  new_case telegram-v1-version
+  export STUB_INFO_VERSION=1.19.5
+
+  local output status
+  set +e
+  output="$(
+    PATH="$TEMP_DIR/bin:$PATH" \
+      INVOCATION_ID=test-invocation \
+      TELEGRAM_READY_TIMEOUT=0 TELEGRAM_READY_INTERVAL=0 \
+      OPENCODE_PASSWORD=test-password \
+      bash "$TELEGRAM_READY" 2>&1
+  )"
+  status=$?
+  set -e
+
+  assert_equal "$status" "1" "a 1.x version must not satisfy Telegram readiness"
+  assert_contains "$output" "OpenCode 2.x API unavailable" \
+    "Telegram readiness must diagnose the version mismatch"
 }
 
 test_telegram_readiness_requires_systemd_invocation_id() {
@@ -485,7 +799,7 @@ test_telegram_readiness_requires_systemd_invocation_id() {
 # one start on a real host logged 22,307 lines. Matching must stay silent.
 test_telegram_readiness_does_not_echo_journal_matches() {
   new_case telegram-no-echo
-  export STUB_HEALTH_BODY='{"healthy":false}'   # keep it polling past the marker
+  export STUB_INFO_BODY='<!doctype html><html></html>'   # keep it polling past the marker
 
   local output status
   set +e
@@ -566,9 +880,9 @@ test_shipped_scripts_are_executable_and_syntactically_valid() {
 
 test_service_helpers_declare_and_print_their_versions() {
   local -A expected=(
-    ["$CONSUMER"]="0.1.0"
-    ["$READY"]="0.1.1"
-    ["$TELEGRAM_READY"]="0.1.1"
+    ["$CONSUMER"]="0.2.0"
+    ["$READY"]="1.0.0"
+    ["$TELEGRAM_READY"]="1.0.0"
   )
   local script
   for script in "$CONSUMER" "$READY" "$TELEGRAM_READY"; do
@@ -638,7 +952,7 @@ test_documented_attach_shortcut() (
   mkdir -p "$sandbox/bin" "$sandbox/home/.config/opencode-runtime" "$sandbox/work space" "$sandbox/other"
   export HOME="$sandbox/home" PATH="$sandbox/bin:$PATH"
   export ATTACH_RECORD="$sandbox/args"
-  unset OPENCODE_SERVER_PASSWORD OPENCODE_SERVER_USERNAME
+  unset OPENCODE_PASSWORD OPENCODE_SERVER_PASSWORD OPENCODE_SERVER_USERNAME
   export TELEGRAM_BOT_TOKEN=fixture-only
 
   cat > "$sandbox/bin/systemctl" <<'STUB'
@@ -648,16 +962,15 @@ exit "${ATTACH_SERVICE_STATUS:-0}"
 STUB
   cat > "$sandbox/bin/opencode" <<'STUB'
 #!/usr/bin/env bash
-[[ "${OPENCODE_SERVER_PASSWORD:-}" == fixture-password ]] || exit 91
-[[ "${OPENCODE_SERVER_USERNAME:-}" == fixture-user ]] || exit 92
+[[ "${OPENCODE_PASSWORD:-}" == fixture-password ||
+   "${OPENCODE_SERVER_PASSWORD:-}" == fixture-password ]] || exit 91
 [[ -z "${TELEGRAM_BOT_TOKEN+x}" ]] || exit 93
 printf '%s\n' "$@" > "$ATTACH_RECORD"
 exit "${ATTACH_EXIT_STATUS:-0}"
 STUB
   chmod +x "$sandbox/bin/systemctl" "$sandbox/bin/opencode"
   cat > "$HOME/.config/opencode-runtime/secrets.env" <<'ENV'
-OPENCODE_SERVER_USERNAME=fixture-user
-OPENCODE_SERVER_PASSWORD=fixture-password
+OPENCODE_PASSWORD=fixture-password
 ENV
   # Execute the shipped snippet, rather than a second implementation of it.
   sed -n '/^# >>> opencode-attach-wrapper >>>$/,/^# <<< opencode-attach-wrapper <<<$/{p;}' \
@@ -671,41 +984,91 @@ ENV
   oca --session 'session with spaces'
   local -a arguments
   mapfile -t arguments < "$ATTACH_RECORD"
-  assert_equal "${#arguments[@]}" 6 "attach arguments must keep their boundaries"
-  assert_equal "${arguments[0]}" attach "oca must attach"
+  assert_equal "${#arguments[@]}" 5 "client arguments must keep their boundaries"
+  assert_equal "${arguments[0]}" --server "oca must connect with --server (opencode attach is gone in 2.x)"
   assert_equal "${arguments[1]}" http://127.0.0.1:4096 "oca must use loopback"
-  assert_equal "${arguments[2]}" --dir "oca must select the backend directory"
-  assert_equal "${arguments[3]}" "$sandbox/work space" "directory with spaces must survive"
-  assert_equal "${arguments[4]}" --session "attach options must be forwarded"
-  assert_equal "${arguments[5]}" 'session with spaces' "option values must survive"
-  [[ -z "${OPENCODE_SERVER_PASSWORD+x}" && -z "${OPENCODE_SERVER_USERNAME+x}" ]] \
+  assert_equal "${arguments[2]}" "$sandbox/work space" "directory with spaces must survive as the positional directory"
+  assert_equal "${arguments[3]}" --session "client options must be forwarded"
+  assert_equal "${arguments[4]}" 'session with spaces' "option values must survive"
+  [[ -z "${OPENCODE_PASSWORD+x}" && -z "${OPENCODE_SERVER_PASSWORD+x}" ]] \
     || fail "server credentials must not leak into the caller"
   assert_equal "$TELEGRAM_BOT_TOKEN" fixture-only "caller environment must be preserved"
 
   cd "$sandbox/other"
   oca
   mapfile -t arguments < "$ATTACH_RECORD"
-  assert_equal "${arguments[3]}" "$sandbox/other" "directory must be evaluated at each invocation"
+  assert_equal "${arguments[2]}" "$sandbox/other" "directory must be evaluated at each invocation"
   local status=0
   ATTACH_EXIT_STATUS=17 oca || status=$?
-  assert_equal "$status" 17 "attach exit status must propagate"
+  assert_equal "$status" 17 "client exit status must propagate"
+
+  # The legacy variable name is accepted by the 2.x client as well.
+  printf 'OPENCODE_SERVER_PASSWORD=fixture-password\n' > "$HOME/.config/opencode-runtime/secrets.env"
+  oca
+  printf 'OPENCODE_PASSWORD=fixture-password\n' > "$HOME/.config/opencode-runtime/secrets.env"
 
   rm "$ATTACH_RECORD"
   status=0
   ATTACH_SERVICE_STATUS=1 oca >/dev/null 2>&1 || status=$?
-  [[ "$status" != 0 && ! -e "$ATTACH_RECORD" ]] || fail "inactive service must prevent attach"
+  [[ "$status" != 0 && ! -e "$ATTACH_RECORD" ]] || fail "inactive service must prevent connecting"
+  printf 'OTHER=1\n' > "$HOME/.config/opencode-runtime/secrets.env"
+  status=0
+  oca >/dev/null 2>&1 || status=$?
+  [[ "$status" != 0 && ! -e "$ATTACH_RECORD" ]] || fail "a missing password must prevent connecting"
   rm "$HOME/.config/opencode-runtime/secrets.env"
   status=0
   oca >/dev/null 2>&1 || status=$?
-  [[ "$status" != 0 && ! -e "$ATTACH_RECORD" ]] || fail "missing credentials must prevent attach"
+  [[ "$status" != 0 && ! -e "$ATTACH_RECORD" ]] || fail "missing credentials must prevent connecting"
   printf 'return 1\n' > "$HOME/.config/opencode-runtime/secrets.env"
   status=0
   oca >/dev/null 2>&1 || status=$?
-  [[ "$status" != 0 && ! -e "$ATTACH_RECORD" ]] || fail "failed credential load must prevent attach"
+  [[ "$status" != 0 && ! -e "$ATTACH_RECORD" ]] || fail "failed credential load must prevent connecting"
 )
+
+# The runbook is the deliverable for the unit text, so assert the 2.x facts that
+# a copy-paste of it depends on, rather than trusting that it was edited.
+test_runbook_documents_the_2x_service() {
+  local runbook="$REPOSITORY_ROOT/docs/opencode-service.md"
+  local text unit
+  text="$(<"$runbook")"
+  unit="$(sed -n '/^\[Unit\]$/,/^\[Install\]$/p' "$runbook" | sed -n '1,/^\[Install\]$/p')"
+
+  assert_contains "$unit" "ExecStart=%h/.opencode/bin/opencode serve --hostname 127.0.0.1 --port 4096" \
+    "the unit must run opencode serve on loopback"
+  assert_contains "$unit" "Environment=OPENCODE_DISABLE_AUTOUPDATE=1" \
+    "the unit must stop the server upgrading itself"
+  [[ "$text" != *"opencode web --"* ]] || fail "opencode web does not exist in 2.x"
+  [[ "$text" != *"opencode attach http"* ]] || fail "opencode attach does not exist in 2.x"
+  [[ "$text" != *'Environment="READY_TOOL_MARKER'* ]] || fail "READY_TOOL_MARKER is gone"
+  [[ "$text" != *"/global/health | head"* && "$text" != *"/global/health   # 401"* ]] \
+    || fail "/global/health is not an authentication check in 2.x"
+  assert_contains "$text" "opencode service set disabled true" \
+    "the runbook must disable the shared background service"
+  assert_contains "$text" "Moving an existing 1.x installation to 2.x" \
+    "the migration section must exist"
+  assert_contains "$text" "Never set \`remote\`" "the runbook must forbid the public tunnel"
+  assert_contains "$text" "systemctl --user cat opencode.service" "the cutover must prove the unit no longer loads"
+  # shellcheck disable=SC2016 # literal runbook text, not an expansion
+  assert_contains "$text" '! pgrep -x opencode ||' "the process check must be fatal"
+  local rollback="${text#*\*\*11. Rollback.\*\*}"
+  local hold cat_check verify restore
+  hold="${rollback%%2x-systemd*}"; cat_check="${rollback%%systemctl --user cat opencode.service*}"
+  verify="${rollback%%sha256sum --check*}"; restore="${rollback%%mv \"\$data\"*}"
+  [[ "$rollback" == *2x-systemd* && "$rollback" == *"systemctl --user cat opencode.service"* ]] \
+    || fail "rollback must hold the 2.x units and prove they no longer load"
+  (( ${#hold} < ${#cat_check} && ${#cat_check} < ${#verify} && ${#verify} < ${#restore} )) \
+    || fail "rollback must take the units away before it verifies the backup and restores data"
+  assert_contains "$rollback" "set -euo pipefail" "the rollback block must stop at its first failure"
+  # shellcheck disable=SC2016 # literal runbook text, not an expansion
+  assert_contains "$rollback" '${backup:?' "the rollback block must require \$backup"
+  assert_contains "$text" "sha256sum --check" "rollback must verify the backup first"
+  # shellcheck disable=SC2016 # literal runbook text, not an expansion
+  assert_contains "$text" 'rm -f "$data"/opencode*.db-wal' "rollback must remove stale WAL files"
+}
 
 TEMP_DIR="$(mktemp -d)"
 test_documented_attach_shortcut
+test_runbook_documents_the_2x_service
 install_stubs
 test_no_work_writes_nothing
 test_settled_status_is_left_untouched
@@ -718,11 +1081,25 @@ test_a_unit_mid_start_is_not_idle
 test_a_failed_restart_is_recorded_with_its_output
 test_a_request_without_a_usable_stamp_is_still_honoured
 test_every_written_status_is_well_formed_json
-test_server_readiness_defaults_to_a_builtin_tool
-test_server_readiness_accepts_an_explicit_plugin_marker
+test_a_404_from_session_status_is_not_idle
+test_a_non_json_session_status_is_not_idle
+test_a_2x_server_is_refused_and_not_restarted
+test_server_readiness_accepts_a_stock_2x_server
+test_server_readiness_rejects_a_spa_fallback_on_api_info
+test_server_readiness_requires_the_main_pid_to_match_api_info
+test_server_readiness_requires_major_2
+test_server_readiness_fails_when_the_server_has_no_password
+test_server_readiness_waits_for_the_migration
+test_server_readiness_refuses_a_tool_marker
+test_server_readiness_fails_at_once_on_a_1x_server
+test_server_readiness_needs_a_password_and_prefers_opencode_password
+test_server_readiness_handles_every_migration_state
+test_server_readiness_fails_fast_on_a_rejected_password
+test_probes_require_jq
+test_telegram_readiness_accepts_the_legacy_password_name
 test_server_readiness_fails_fast_when_the_main_process_is_gone
-test_server_readiness_passes_while_the_main_process_lives
 test_telegram_readiness_requires_polling_and_opencode
+test_telegram_readiness_requires_a_2x_server
 test_telegram_readiness_requires_systemd_invocation_id
 test_telegram_readiness_does_not_echo_journal_matches
 test_telegram_readiness_fails_fast_when_the_main_process_is_gone

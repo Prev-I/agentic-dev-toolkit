@@ -1050,6 +1050,14 @@ test_runbook_documents_the_2x_service() {
   assert_contains "$text" "systemctl --user cat opencode.service" "the cutover must prove the unit no longer loads"
   # shellcheck disable=SC2016 # literal runbook text, not an expansion
   assert_contains "$text" '! pgrep -x opencode ||' "the process check must be fatal"
+  local rollback="${text#*\*\*11. Rollback.\*\*}"
+  local hold cat_check verify restore
+  hold="${rollback%%2x-systemd*}"; cat_check="${rollback%%systemctl --user cat opencode.service*}"
+  verify="${rollback%%sha256sum --check*}"; restore="${rollback%%mv \"\$data\"*}"
+  [[ "$rollback" == *2x-systemd* && "$rollback" == *"systemctl --user cat opencode.service"* ]] \
+    || fail "rollback must hold the 2.x units and prove they no longer load"
+  (( ${#hold} < ${#cat_check} && ${#cat_check} < ${#verify} && ${#verify} < ${#restore} )) \
+    || fail "rollback must take the units away before it verifies the backup and restores data"
   assert_contains "$text" "sha256sum --check" "rollback must verify the backup first"
   # shellcheck disable=SC2016 # literal runbook text, not an expansion
   assert_contains "$text" 'rm -f "$data"/opencode*.db-wal' "rollback must remove stale WAL files"

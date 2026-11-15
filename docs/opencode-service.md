@@ -1109,13 +1109,14 @@ short, stop: nothing has been touched.
 ```bash
 (
   size="$(stat -c %s "$db")"
+  rest="$(du -sb --exclude='opencode*.db*' "$(dirname "$db")" | cut -f1)"   # the rest of the data directory
   declare -A need=() where=()
   want() {   # want PATH BYTES: add BYTES to the filesystem holding PATH
     local dev; dev="$(stat -c %d "$1")"
     need[$dev]=$(( ${need[$dev]:-0} + $2 )); where[$dev]="$1"
   }
   want "$HOME" $(( 3 * size ))              # rehearsal sandbox
-  want "$(dirname "$backup")" "$size"       # at-rest backup
+  want "$(dirname "$backup")" $(( size + rest ))   # at-rest backup, data directory included
   want "$(dirname "$db")" "$size"           # migration headroom
   for dev in "${!need[@]}"; do
     avail="$(df --output=avail -B1 "${where[$dev]}" | tail -n1 | tr -d ' ')"
@@ -1154,10 +1155,13 @@ count = lambda conn: conn.execute("select count(*) from session").fetchone()[0]
 before, after = count(src), count(dst)
 if before != after:
     sys.exit(f"session count differs: source {before}, copy {after}")
+dst.execute("PRAGMA wal_checkpoint(TRUNCATE)")   # no backup pages left in a -wal
+src.close(); dst.close()
 print(f"snapshot ok: {after} sessions")
 PY
 }
 
+pids=()   # every rehearsal server started below, killed by pid at the end
 sb="$(mktemp -d -p "$HOME")"; mkdir -p "$sb"/{home,data/opencode,config,state,cache,snap}
 snapshot "$db" "$sb/snap/opencode.db"
 cp -r "${XDG_CONFIG_HOME:-$HOME/.config}/opencode" "$sb/snap/config"
@@ -1176,6 +1180,7 @@ env -i PATH=/usr/bin:/bin HOME="$sb/home" XDG_DATA_HOME="$sb/data" \
   XDG_CACHE_HOME="$sb/cache" OPENCODE_PASSWORD=rehearsal-only \
   OPENCODE_DISABLE_AUTOUPDATE=1 \
   "$sb/home/.opencode/bin/opencode" serve --hostname 127.0.0.1 --port 4197 &
+pids+=($!)
 ```
 
 Check all of these, then stop that server:
@@ -1193,11 +1198,11 @@ Check all of these, then stop that server:
 Then rehearse the **rollback**: copy the snapshot into a *fresh* sandbox (the one
 above is already migrated) and start the saved 1.x binary (`$sb/snap/opencode-1.x`)
 there, on another spare port, with its own scratch `XDG_*`. It must serve a
-session from the restored database. If either rehearsal fails, stop here: the
+session from the restored database (append that server's pid to `pids` too). If either rehearsal fails, stop here: the
 real installation is untouched. Remove the sandbox when done:
 
 ```bash
-kill %1 2>/dev/null; rm -rf "$sb"
+kill "${pids[@]}" 2>/dev/null; wait "${pids[@]}" 2>/dev/null; rm -rf "$sb"
 ```
 
 **3. Stop everything and take the units away.** The unit, every sidecar (the
@@ -1227,7 +1232,8 @@ systemctl --user daemon-reload
 ! pgrep -x opencode || { echo "an opencode process is still running" >&2; false; }
 ```
 
-Also remove the 1.x `oca` block from `~/.bashrc` now (it calls `opencode attach`,
+Save `~/.bashrc` to `"$backup/bashrc"` (rollback restores the 1.x `oca` block from
+it), then remove the 1.x `oca` block from `~/.bashrc` now (it calls `opencode attach`,
 which 2.x does not have, and a stray call must not start anything); the 2.x
 replacement is installed in step 8. Open a new shell afterwards.
 
@@ -1254,13 +1260,39 @@ cp ~/.local/libexec/opencode/* "$backup/libexec/"            # startup and teleg
 
 The backup holds credentials; keep it out of any repository.
 
-**5. Swap the binary, then disable the shared service at once.** Run the 2.x
-installer with the catalog pin (the toolkit installer's data guard refuses while
-1.x data is present, so run the vendor installer directly):
+**5. Swap the binary, then disable the shared service at once.** The toolkit
+installer's data guard refuses while 1.x data is present, so install 2.x with the
+vendor installer directly. Choose **one** of the two ways.
+
+*Either* let the vendor installer fetch the pinned version:
 
 ```bash
 curl -fsSL https://opencode.ai/v2/install -o /tmp/opencode-v2-install.sh
 bash /tmp/opencode-v2-install.sh --version "$pin" --no-modify-path
+```
+
+*Or* install a checksum-verified binary: download the release asset and its
+checksum file from upstream's GitHub release of the pinned version, verify,
+unpack and install from the local binary. The tarball holds a single `opencode`
+binary at its root, and this leaves a verifiable 2.x artifact to keep with the
+rollback set. The subshell keeps your shell at the repository root, which step
+8's relative paths need:
+
+```bash
+curl -fsSL https://opencode.ai/v2/install -o /tmp/opencode-v2-install.sh
+(
+  rel="https://github.com/anomalyco/opencode/releases/download/v$pin"
+  cd "$(mktemp -d -p "$HOME")" || exit 1
+  curl -fsSLO "$rel/opencode-linux-x64.tar.gz" && curl -fsSLO "$rel/SHA256SUMS" || exit 1
+  grep ' opencode-linux-x64.tar.gz$' SHA256SUMS | sha256sum -c - || exit 1
+  tar -xzf opencode-linux-x64.tar.gz
+  bash /tmp/opencode-v2-install.sh --binary ./opencode --version "$pin" --no-modify-path
+)
+```
+
+Then, after either way:
+
+```bash
 ~/.opencode/bin/opencode --version        # expect: the pin
 type -a opencode                          # the first line must be ~/.opencode/bin/opencode
 ~/.opencode/bin/opencode service set disabled true
@@ -1271,21 +1303,6 @@ type -a opencode                          # the first line must be ~/.opencode/b
 `~/.local/bin`, left by the 1.x installer, or an npm copy) shadows the new binary.
 Remove it. `--version`, `--help` and `opencode service ...` do not open the
 database; nothing else is safe until step 7 has completed.
-
-An alternative that does not let the installer fetch the binary for you:
-download the release asset and its checksum file from upstream's GitHub release of
-the pinned version, verify, unpack, and install from the local binary. The
-tarball holds a single `opencode` binary at its root. This also leaves a
-verifiable 2.x artifact to keep with the rollback set.
-
-```bash
-rel="https://github.com/anomalyco/opencode/releases/download/v$pin"
-cd "$(mktemp -d -p "$HOME")"
-curl -fsSLO "$rel/opencode-linux-x64.tar.gz" && curl -fsSLO "$rel/SHA256SUMS"
-grep ' opencode-linux-x64.tar.gz$' SHA256SUMS | sha256sum -c -
-tar -xzf opencode-linux-x64.tar.gz
-bash /tmp/opencode-v2-install.sh --binary ./opencode --version "$pin" --no-modify-path
-```
 
 **6. Convert `secrets.env`.** The 2.x server reads `OPENCODE_PASSWORD`; it also
 accepts `OPENCODE_SERVER_PASSWORD`, and `OPENCODE_PASSWORD` wins. This runbook
@@ -1318,7 +1335,7 @@ status it does not recognise, notices a dead server, and is bounded:
   OPENCODE_DISABLE_AUTOUPDATE=1 ~/.opencode/bin/opencode serve \
     --hostname 127.0.0.1 --port 4197 &
   server=$!
-  trap 'kill "$server" 2>/dev/null' EXIT
+  trap 'kill "$server" 2>/dev/null; wait "$server" 2>/dev/null' EXIT
   deadline=$(( SECONDS + 3600 ))
   while :; do
     kill -0 "$server" 2>/dev/null || { echo "the server exited" >&2; exit 1; }
@@ -1363,8 +1380,12 @@ install -D -m 755 opencode-service/opencode-startup-ready.sh \
   ~/.local/libexec/opencode/opencode-startup-ready
 systemctl --user daemon-reload
 systemd-analyze --user verify ~/.config/systemd/user/opencode.service
-systemctl --user start opencode.service
+systemctl --user enable --now opencode.service
 ```
+
+`enable --now`, not `start`: the `default.target.wants` link from the 1.x install
+is by name and was left alone when the unit file moved, so it resolves again once
+the new file is in place, and `enable` makes sure it exists either way.
 
 **9. Verify.** The probe reports READY (`journalctl --user -u opencode.service`);
 the unauthenticated `/api/info` is 401 and the authenticated one is 200 JSON
@@ -1379,12 +1400,29 @@ provider, whatever that provider is; and `opencode service get` shows
 migration is behind you and the backup no longer holds current work: **fix
 forward**. Roll back only while nothing worth keeping has been created on 2.x.
 
-**11. Rollback.** Stop the unit and every client and take the 2.x unit files away (as in step 3, into a new hold directory), check
-the backup, then restore **whole directories**, never single files laid over a
-live database: a stale `opencode.db-wal` or `opencode.db-shm` beside a restored
-`opencode.db` corrupts it.
+**11. Rollback.** First take the 2.x units out of play, exactly as in step 3 but
+into a new hold directory. This comes before anything else: the 2.x Telegram unit
+(`Wants=opencode.service`, `Restart=on-failure`) could otherwise pull the
+still-loaded 2.x unit up against the freshly restored 1.x database and migrate it
+again, and moving the data directory under a running server is wrong anyway. Only
+then check the backup and restore **whole directories**, never single files laid
+over a live database: a stale `opencode.db-wal` or `opencode.db-shm` beside a
+restored `opencode.db` corrupts it.
 
 ```bash
+# 1. the 2.x units out of play (same sequence as step 3)
+unitdir=~/.config/systemd/user
+mkdir -p "$backup/2x-systemd"
+for u in opencode.service opencode-telegram-bot.service \
+         opencode-gateway-restart.path opencode-gateway-restart.service; do
+  systemctl --user stop "$u" 2>/dev/null || true
+done
+for f in "$unitdir"/opencode*; do [ -e "$f" ] && mv "$f" "$backup/2x-systemd/"; done
+systemctl --user daemon-reload
+! systemctl --user cat opencode.service >/dev/null 2>&1 || { echo "opencode.service still loads" >&2; false; }
+! pgrep -x opencode || { echo "an opencode process is still running" >&2; false; }
+
+# 2. only now verify the backup and touch the data
 sha256sum --check "$backup/SHA256SUMS" --quiet || { echo "backup does not verify" >&2; false; }
 stamp="$(date +%s)"
 mv "$data" "$data.2x-$stamp" && mkdir -p "$data"        # the whole data directory, aside
@@ -1395,12 +1433,16 @@ cfg="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
 mv "$cfg" "$cfg.2x-$stamp" && cp -r "$backup/config" "$cfg"
 install -m 755 "$backup/opencode-1.x" ~/.opencode/bin/opencode
 cp "$backup/libexec/"* ~/.local/libexec/opencode/
-mkdir -p "$backup/2x-systemd"
-for f in ~/.config/systemd/user/opencode*; do [ -e "$f" ] && mv "$f" "$backup/2x-systemd/"; done
-cp -r "$backup/systemd/"* ~/.config/systemd/user/    # the held 1.x units and drop-ins
-systemctl --user daemon-reload                        # only now can the unit be started
-systemctl --user start opencode.service
+
+# 3. the held 1.x units back, reload, and only then start
+cp -r "$backup/systemd/"* "$unitdir/"
+systemctl --user daemon-reload
+systemctl --user enable --now opencode.service
 ```
+
+Restore the 1.x `oca` block as well: replace the 2.x `opencode-attach-wrapper`
+block in `~/.bashrc` with the one saved in `$backup/bashrc` (step 3). The 2.x
+function connects with `--server`, which 1.x does not have. Open a new shell.
 
 The saved 1.x probes and units come from the backup, so this needs nothing from
 the repository's history. Anything created after the cutover is lost; the 2.x

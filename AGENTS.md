@@ -221,7 +221,9 @@ removal or a breaking output change.
 binary: 2.x migrates `opencode.db` in place on first start and upstream supports
 no downgrade. With the database present and a binary that is not 2.x it leaves
 the binary untouched and warns (also under `--upgrade`); with the database and
-no binary, `preflight_opencode` stops the run before any mutation. The toolkit
+no binary, `preflight_opencode` stops the run before any mutation. A 2.x binary
+newer than the pin is also left alone when data is present, so `--upgrade` can
+never put a migrated database under an older binary. The toolkit
 keeps no 1.x pin. See `docs/opencode-service.md`, "Moving an existing 1.x
 installation to 2.x".
 

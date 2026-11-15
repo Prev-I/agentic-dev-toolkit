@@ -2369,13 +2369,14 @@ test_installed_opencode_version_comes_from_the_binary_not_path() {
   printf '#!/usr/bin/env bash\nprintf "2.3.0\\n"\n' > "$home/.opencode/bin/opencode"
   printf '#!/usr/bin/env bash\nprintf "9.9.9\\n"\n' > "$fake/opencode"
   chmod +x "$home/.opencode/bin/opencode" "$fake/opencode"
-  # shellcheck disable=SC2034
-  SKIP_RUNTIMES=1; SKIP_OPENSPEC=1; SKIP_QUALITY_TOOLS=1; SKIP_OPENCODE=0
-  # shellcheck disable=SC2034
-  INSTALLED_KARPATHY_SHA256=""
   local output
-  # shellcheck disable=SC2031
-  output="$(HOME="$home" PATH="$fake:$PATH" write_installed_versions 2>&1)"
+  # Scoped to a subshell so no global SKIP_* value outlives this test.
+  # shellcheck disable=SC2031,SC2034
+  output="$(
+    SKIP_RUNTIMES=1; SKIP_OPENSPEC=1; SKIP_QUALITY_TOOLS=1; SKIP_OPENCODE=0
+    INSTALLED_KARPATHY_SHA256=""
+    HOME="$home" PATH="$fake:$PATH" write_installed_versions 2>&1
+  )"
   assert_contains "$output" "installed.opencode=2.3.0" "the receipt must record the install, not the shadow"
 }
 

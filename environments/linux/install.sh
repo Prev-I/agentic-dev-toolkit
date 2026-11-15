@@ -4,7 +4,7 @@ IFS=$'\n\t'
 
 readonly SCRIPT_NAME="${0##*/}"
 readonly MISE_INSTALL_URL="https://mise.run"
-readonly OPENCODE_INSTALL_URL="https://opencode.ai/install"
+readonly OPENCODE_INSTALL_URL="https://opencode.ai/v2/install"
 readonly CLAUDE_INSTALL_URL="https://claude.ai/install.sh"
 readonly CODEX_INSTALL_URL="https://chatgpt.com/codex/install.sh"
 readonly SUPERPOWERS_PLUGIN_BASE='superpowers@git+https://github.com/obra/superpowers.git'
@@ -12,7 +12,7 @@ readonly KARPATHY_RAW_BASE='https://raw.githubusercontent.com/multica-ai/andrej-
 readonly KARPATHY_SKILL_PATH='skills/karpathy-guidelines/SKILL.md'
 # The installer's own version, declared with the other constants for parity
 # with the repository's other versioned scripts. Printed verbatim by --version.
-readonly SCRIPT_VERSION="0.3.2"
+readonly SCRIPT_VERSION="0.4.0"
 
 log() {
   printf '\n==> %s\n' "$*"
@@ -256,7 +256,7 @@ fi
 # shellcheck disable=SC2034
 CATALOG_REQUIRED=(
   java-17 java-21 dotnet-10 dotnet-8 python node bun maven
-  dotnet-ef uv shellcheck gitleaks pyyaml openspec superpowers
+  dotnet-ef uv shellcheck gitleaks pyyaml openspec opencode superpowers
   karpathy-ref karpathy-sha256
 )
 # shellcheck disable=SC2034
@@ -275,6 +275,7 @@ resolve_pin MAVEN_VERSION maven ADT_MAVEN_VERSION "${ADT_MAVEN_VERSION:-}"
 resolve_pin DOTNET_EF_VERSION dotnet-ef ADT_DOTNET_EF_VERSION "${ADT_DOTNET_EF_VERSION:-}"
 resolve_pin UV_VERSION uv ADT_UV_VERSION "${ADT_UV_VERSION:-}"
 resolve_pin OPENSPEC_VERSION openspec ADT_OPENSPEC_VERSION "${ADT_OPENSPEC_VERSION:-}"
+resolve_pin OPENCODE_VERSION opencode ADT_OPENCODE_VERSION "${ADT_OPENCODE_VERSION:-}"
 resolve_pin SUPERPOWERS_REF superpowers ADT_SUPERPOWERS_REF "${ADT_SUPERPOWERS_REF:-}"
 OPENSPEC_TOOLS="${ADT_OPENSPEC_TOOLS:-opencode,claude,codex}"
 resolve_pin SHELLCHECK_VERSION shellcheck ADT_SHELLCHECK_VERSION "${ADT_SHELLCHECK_VERSION:-}"
@@ -502,7 +503,7 @@ Environment variables provide the same defaults:
   ADT_JAVA_17_VERSION, ADT_JAVA_21_VERSION,
   ADT_DOTNET_8_VERSION, ADT_DOTNET_10_VERSION,
   ADT_MAVEN_VERSION, ADT_DOTNET_EF_VERSION,
-  ADT_OPENSPEC_VERSION, ADT_SUPERPOWERS_REF, ADT_OPENSPEC_TOOLS,
+  ADT_OPENSPEC_VERSION, ADT_OPENCODE_VERSION, ADT_SUPERPOWERS_REF, ADT_OPENSPEC_TOOLS,
   ADT_KARPATHY_REF, ADT_KARPATHY_SHA256,
   ADT_SHELLCHECK_VERSION, ADT_GITLEAKS_VERSION, ADT_PYYAML_VERSION,
   ADT_GCM_PATH, ADT_DOCKER_WINCRED_PATH, ADT_AZ_PATH
@@ -1046,32 +1047,85 @@ install_python_quality_libraries() {
   fi
 }
 
+# OpenCode 2.x migrates ${XDG_DATA_HOME:-~/.local/share}/opencode/opencode.db in
+# place on its first start, and upstream supports no downgrade. So the decision
+# to install it is made on the DATA, not on the binary:
+#
+#   data present, installed binary not 2.x   never install 2.x
+#       binary present  -> leave it alone and warn (also under --upgrade)
+#       no binary       -> stop before any mutation
+#   data present, binary already 2.x         normal; --upgrade moves to the pin
+#   no data                                  normal
+#
+# Version detection runs `opencode --version`, which does not open the database.
+# A binary whose version cannot be read counts as not 2.x.
+OPENCODE_RUNBOOK="docs/opencode-service.md, section 'Moving an existing 1.x installation to 2.x'"
+
+opencode_data_db() {
+  printf '%s/opencode/opencode.db' "${XDG_DATA_HOME:-$HOME/.local/share}"
+}
+
+# Prints the path of the installed opencode binary, or nothing.
+opencode_binary_path() {
+  if [[ -x "$HOME/.opencode/bin/opencode" ]]; then
+    printf '%s' "$HOME/.opencode/bin/opencode"
+  else
+    command -v opencode 2>/dev/null || true
+  fi
+}
+
+# Prints the major version of the given binary, or nothing when it cannot be read.
+opencode_binary_major() {
+  local bin="$1" output version
+  if command -v timeout >/dev/null 2>&1; then
+    output="$(timeout 10s "$bin" --version 2>/dev/null || true)"
+  else
+    output="$("$bin" --version 2>/dev/null || true)"
+  fi
+  version="$(grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' <<<"$output" | head -n1 || true)"
+  printf '%s' "${version%%.*}"
+}
+
+# Runs before anything is mutated: data with no binary to judge it by is the one
+# state that must stop the whole run rather than one component.
+preflight_opencode() {
+  (( SKIP_OPENCODE == 0 )) || return 0
+  [[ -e "$(opencode_data_db)" && -z "$(opencode_binary_path)" ]] || return 0
+  die "OpenCode data exists at $(opencode_data_db) but no opencode binary is installed. Installing 2.x would migrate that database in place, and upstream supports no downgrade. Re-run with --skip-opencode, then follow $OPENCODE_RUNBOOK."
+}
+
 install_opencode() {
   if (( SKIP_OPENCODE == 1 )); then
     log "Skipping OpenCode installation"
     return
   fi
 
-  if command -v opencode >/dev/null 2>&1 && (( UPGRADE == 0 )); then
-    log "OpenCode is already installed: $(command -v opencode)"
+  local binary major=""
+  binary="$(opencode_binary_path)"
+  [[ -z "$binary" ]] || major="$(opencode_binary_major "$binary")"
+
+  if [[ -e "$(opencode_data_db)" && "$major" != "2" ]]; then
+    preflight_opencode
+    warn "OpenCode data exists at $(opencode_data_db) and the installed binary ($binary) is not 2.x. Leaving it untouched: installing 2.x would migrate that database in place, and upstream supports no downgrade. Follow $OPENCODE_RUNBOOK."
     return
   fi
 
-  log "Installing or updating OpenCode with the official installer"
+  if [[ -n "$binary" ]] && (( UPGRADE == 0 )); then
+    log "OpenCode is already installed: $binary"
+    return
+  fi
+
+  log "Installing or updating OpenCode $OPENCODE_VERSION with the official 2.x installer"
   if (( DRY_RUN == 1 )); then
-    info "Would install OpenCode from $OPENCODE_INSTALL_URL."
+    info "Would install OpenCode $OPENCODE_VERSION from $OPENCODE_INSTALL_URL."
     return
   fi
 
   local installer
   download_installer "$OPENCODE_INSTALL_URL"
   installer="$DOWNLOADED_INSTALLER"
-  mkdir -p "$HOME/.local/bin"
-  # Current releases use ~/.opencode/bin; keep XDG_BIN_DIR for releases that
-  # honor the requested shared binary directory.
-  XDG_BIN_DIR="$HOME/.local/bin" bash "$installer" --no-modify-path
+  bash "$installer" --version "$OPENCODE_VERSION" --no-modify-path
   prepend_path "$HOME/.opencode/bin"
-  prepend_path "$HOME/.local/bin"
   export PATH
   hash -r
   command -v opencode >/dev/null 2>&1 || die "OpenCode installation completed but 'opencode' is not on PATH"
@@ -2015,8 +2069,8 @@ serialize_catalog_set() {
 # separate gates produce that effect elsewhere (configure_runtimes returns
 # before rendering them, render_mise_configuration gates only on
 # SKIP_QUALITY_TOOLS, and install_python_quality_libraries gates on either
-# flag); --skip-opencode, --skip-claude, --skip-codex and --skip-git-credential
-# contribute nothing, because those components have no catalog key at all.
+# flag); --skip-claude, --skip-codex and --skip-git-credential contribute
+# nothing, because those components have no catalog key at all.
 populate_skipped_set() {
   local -n ps_set="$1"
   local key
@@ -2031,6 +2085,7 @@ populate_skipped_set() {
     done
   fi
   (( SKIP_OPENSPEC == 0 ))    || ps_set["openspec"]=1
+  (( SKIP_OPENCODE == 0 ))    || ps_set["opencode"]=1
   (( SKIP_SUPERPOWERS == 0 )) || ps_set["superpowers"]=1
   # shellcheck disable=SC2034 # read by the caller through populate_skipped_set's nameref
   (( SKIP_KARPATHY == 0 ))    || ps_set["karpathy-ref"]=1
@@ -2220,6 +2275,17 @@ write_installed_versions() {
         emit_or_warn_installed openspec "$candidate"
       else
         warn "Could not record installed version for openspec."
+      fi
+    fi
+
+    # `opencode --version` does not open the data directory, so this probe is
+    # safe on a machine whose database has not been migrated yet.
+    if [[ -z "${skip[opencode]+set}" ]]; then
+      if output="$(run_bounded_probe "$timeout_bin" opencode --version 2>/dev/null)"; then
+        candidate="$(grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' <<<"$output" | head -n1 || true)"
+        emit_or_warn_installed opencode "$candidate"
+      else
+        warn "Could not record installed version for opencode."
       fi
     fi
   fi
@@ -2594,6 +2660,7 @@ main() {
     return
   fi
 
+  preflight_opencode
   install_system_packages
   preflight_opencode_superpowers
   ensure_shell_configuration

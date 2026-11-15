@@ -26,6 +26,14 @@ assert_equal() {
   [[ "$actual" == "$expected" ]] || fail "$message: expected '$expected', got '$actual'"
 }
 
+assert_contains() {
+  local haystack="$1"
+  local needle="$2"
+  local message="$3"
+
+  [[ "$haystack" == *"$needle"* ]] || fail "$message: '$needle' not found in '$haystack'"
+}
+
 test_claude_template_resolves_after_copying_to_project_root() {
   local project_root="$TEMP_DIR/project"
   local import_path
@@ -1824,13 +1832,13 @@ test_shipped_catalog_satisfies_the_complete_schema() {
   local -A no_lists=() no_members=()
   local -a required=(
     java-17 java-21 dotnet-10 dotnet-8 python node bun maven
-    dotnet-ef uv shellcheck gitleaks pyyaml openspec superpowers
+    dotnet-ef uv shellcheck gitleaks pyyaml openspec opencode superpowers
     karpathy-ref karpathy-sha256
   )
 
   load_kv_file "$CATALOG_FILE" values lines order err \
     || fail "the shipped catalog must load: $err"
-  assert_equal "${#values[@]}" "17" "the catalog must carry seventeen keys"
+  assert_equal "${#values[@]}" "18" "the catalog must carry eighteen keys"
   validate_kv "$CATALOG_FILE" values lines order required no_lists no_members
 }
 
@@ -1967,6 +1975,7 @@ test_every_pin_is_wired_to_its_own_catalog_key() {
     'gitleaks|GITLEAKS_VERSION|ADT_GITLEAKS_VERSION'
     'pyyaml|PYYAML_VERSION|ADT_PYYAML_VERSION'
     'openspec|OPENSPEC_VERSION|ADT_OPENSPEC_VERSION'
+    'opencode|OPENCODE_VERSION|ADT_OPENCODE_VERSION'
     'superpowers|SUPERPOWERS_REF|ADT_SUPERPOWERS_REF'
     'karpathy-ref|KARPATHY_DEFAULT_REF|'
     'karpathy-sha256|KARPATHY_DEFAULT_SHA256|'
@@ -2021,7 +2030,7 @@ test_installer_loads_catalog_beside_a_standalone_copy() {
   fi
 
   assert_equal "$status" "0" "a standalone two-file bundle must find its adjacent catalog"
-  assert_equal "$output" "0.3.2" "the standalone bundle must run the copied installer"
+  assert_equal "$output" "0.4.0" "the standalone bundle must run the copied installer"
 }
 
 test_installer_prefers_explicit_then_repository_catalog() {
@@ -2039,7 +2048,7 @@ test_installer_prefers_explicit_then_repository_catalog() {
     status=$?
   fi
   assert_equal "$status" "0" "an explicit catalog must override an adjacent catalog"
-  assert_equal "$output" "0.3.2" "an explicit valid catalog must let a standalone bundle run"
+  assert_equal "$output" "0.4.0" "an explicit valid catalog must let a standalone bundle run"
 
   cp "$INSTALLER" "$checkout/environments/linux/install.sh"
   cp "$CATALOG_FILE" "$checkout/catalog/software-catalog.env"
@@ -2051,7 +2060,7 @@ test_installer_prefers_explicit_then_repository_catalog() {
     status=$?
   fi
   assert_equal "$status" "0" "a recognized repository catalog must override an adjacent catalog"
-  assert_equal "$output" "0.3.2" "a repository-layout copy must run with its repository catalog"
+  assert_equal "$output" "0.4.0" "a repository-layout copy must run with its repository catalog"
 }
 
 test_source_commit_requires_the_exact_repository_root() {
@@ -2083,6 +2092,8 @@ test_opencode_install_refreshes_path_for_the_official_destination() {
   (
     HOME="$sandbox/home"
     PATH="/usr/bin:/bin"
+    # The data guard reads this; never let a developer's real data directory in.
+    export XDG_DATA_HOME="$sandbox/home/.local/share"
     # Read indirectly by install_opencode from the sourced installer.
     # shellcheck disable=SC2034
     SKIP_OPENCODE=0
@@ -2109,6 +2120,134 @@ test_opencode_install_refreshes_path_for_the_official_destination() {
   )
 }
 
+# The 2.x installer migrates opencode.db in place on first start and upstream
+# supports no downgrade, so install_opencode decides on the DATA, not on the
+# binary. These cases drive it with a stub installer that records its
+# arguments, and a stub opencode that reports a version, so nothing here can
+# reach the network or a real OpenCode data directory.
+#
+# Runs the function in a subshell and leaves its output in OPENCODE_OUTPUT, its
+# status in OPENCODE_STATUS and the installer's arguments in $sandbox/installer-args.
+# $1 sandbox name, $2 existing binary version ("" for none), $3 "db" to create
+# the database, $4 "upgrade" for --upgrade, $5 "dry-run" for --dry-run.
+# shellcheck disable=SC2030,SC2031,SC2329
+run_install_opencode_case() {
+  local sandbox="$TEMP_DIR/opencode-guard-$1"
+  local version="$2" with_db="${3:-}" mode="${4:-}" dry="${5:-}"
+  rm -rf "$sandbox"
+  mkdir -p "$sandbox/home/.opencode/bin" "$sandbox/home/.local/share/opencode" "$sandbox/bin"
+  if [[ -n "$version" ]]; then
+    printf '#!/usr/bin/env bash\nprintf "%s\\n"\n' "$version" > "$sandbox/home/.opencode/bin/opencode"
+    chmod 755 "$sandbox/home/.opencode/bin/opencode"
+  fi
+  [[ "$with_db" != db ]] || printf 'sqlite' > "$sandbox/home/.local/share/opencode/opencode.db"
+  local before=""
+  [[ ! -e "$sandbox/home/.opencode/bin/opencode" ]] || \
+    before="$(sha256sum "$sandbox/home/.opencode/bin/opencode")"
+
+  OPENCODE_STATUS=0
+  OPENCODE_OUTPUT="$(
+    HOME="$sandbox/home"
+    PATH="/usr/bin:/bin"
+    export XDG_DATA_HOME="$sandbox/home/.local/share"
+    # Read indirectly by install_opencode from the sourced installer.
+    # shellcheck disable=SC2034
+    SKIP_OPENCODE=0
+    UPGRADE=0
+    DRY_RUN=0
+    [[ "$mode" != upgrade ]] || UPGRADE=1
+    [[ "$dry" != dry-run ]] || DRY_RUN=1
+
+    download_installer() {
+      DOWNLOADED_INSTALLER="$sandbox/bin/opencode-installer"
+      # Literal lines of the installer fixture, not expansions here.
+      # shellcheck disable=SC2016
+      printf '%s\n' \
+        '#!/usr/bin/env bash' \
+        'set -eu' \
+        'printf "%s\n" "$@" > "$(dirname "$0")/../installer-args"' \
+        'mkdir -p "$HOME/.opencode/bin"' \
+        'printf '\''#!/usr/bin/env bash\nprintf "2.3.0\\n"\n'\'' > "$HOME/.opencode/bin/opencode"' \
+        'chmod 755 "$HOME/.opencode/bin/opencode"' \
+        > "$DOWNLOADED_INSTALLER"
+      chmod 755 "$DOWNLOADED_INSTALLER"
+      printf '%s\n' "$1" > "$sandbox/installer-url"
+    }
+
+    preflight_opencode 2>&1 || exit $?
+    install_opencode 2>&1
+  )" || OPENCODE_STATUS=$?
+  OPENCODE_SANDBOX="$sandbox"
+  OPENCODE_BINARY_BEFORE="$before"
+}
+
+test_opencode_install_uses_the_pinned_2x_installer() {
+  run_install_opencode_case fresh "" "" "" ""
+  assert_equal "$OPENCODE_STATUS" "0" "a fresh install must succeed: $OPENCODE_OUTPUT"
+  assert_equal "$(cat "$OPENCODE_SANDBOX/installer-url")" "https://opencode.ai/v2/install" \
+    "OpenCode must come from the 2.x installer"
+  assert_contains "$(tr '\n' ' ' < "$OPENCODE_SANDBOX/installer-args")" "--version 2.3.0 " \
+    "the installer must be given the catalog pin"
+  assert_contains "$(tr '\n' ' ' < "$OPENCODE_SANDBOX/installer-args")" "--no-modify-path" \
+    "the installer must not edit shell profiles"
+}
+
+test_opencode_version_override_replaces_the_catalog_pin() {
+  local output
+  output="$(ADT_OPENCODE_VERSION=2.9.9 bash -c 'source "$1"; printf "%s\n" "$OPENCODE_VERSION"' \
+    _ "$TEMP_DIR/install-functions.sh" 2>&1)"
+  assert_equal "$(tail -n1 <<<"$output")" "2.9.9" \
+    "ADT_OPENCODE_VERSION must override the catalog pin"
+  # The program text is meant to expand in the child shell, not here.
+  # shellcheck disable=SC2016
+  output="$(env -u ADT_OPENCODE_VERSION bash -c 'source "$1"; printf "%s\n" "$OPENCODE_VERSION"' \
+    _ "$TEMP_DIR/install-functions.sh" 2>&1)"
+  assert_equal "$(tail -n1 <<<"$output")" "2.3.0" "the catalog pin is the default"
+}
+
+test_opencode_install_dry_run_names_the_pin_and_changes_nothing() {
+  run_install_opencode_case dry "" "" "" dry-run
+  assert_equal "$OPENCODE_STATUS" "0" "a dry run must succeed: $OPENCODE_OUTPUT"
+  assert_contains "$OPENCODE_OUTPUT" "Would install OpenCode 2.3.0 from https://opencode.ai/v2/install" \
+    "a dry run must say what it would install"
+  [[ ! -e "$OPENCODE_SANDBOX/installer-args" ]] || fail "a dry run must not run the installer"
+}
+
+test_opencode_data_with_a_1x_binary_is_left_untouched() {
+  local mode
+  for mode in "" upgrade; do
+    run_install_opencode_case "v1-${mode:-plain}" 1.19.5 db "$mode" ""
+    assert_equal "$OPENCODE_STATUS" "0" "a 1.x install with data must not fail the run: $OPENCODE_OUTPUT"
+    assert_contains "$OPENCODE_OUTPUT" "WARNING" "the 1.x binary must be warned about"
+    assert_contains "$OPENCODE_OUTPUT" "docs/opencode-service.md" "the warning must name the runbook"
+    assert_contains "$OPENCODE_OUTPUT" "Moving an existing 1.x installation to 2.x" \
+      "the warning must name the runbook's major-upgrade procedure"
+    [[ ! -e "$OPENCODE_SANDBOX/installer-args" ]] || fail "the 2.x installer must not run over 1.x data (${mode:-plain})"
+    assert_equal "$(sha256sum "$OPENCODE_SANDBOX/home/.opencode/bin/opencode")" "$OPENCODE_BINARY_BEFORE" \
+      "the 1.x binary must stay untouched (${mode:-plain})"
+  done
+}
+
+test_opencode_data_without_a_binary_stops_before_mutation() {
+  run_install_opencode_case orphan "" db "" ""
+  assert_equal "$OPENCODE_STATUS" "1" "data without a binary must stop the run"
+  assert_contains "$OPENCODE_OUTPUT" "--skip-opencode" "the stop must name --skip-opencode"
+  assert_contains "$OPENCODE_OUTPUT" "docs/opencode-service.md" "the stop must name the runbook"
+  [[ ! -e "$OPENCODE_SANDBOX/installer-args" ]] || fail "nothing may be installed over orphan data"
+}
+
+test_opencode_2x_with_data_installs_normally_and_upgrades_to_the_pin() {
+  run_install_opencode_case v2-plain 2.3.0 db "" ""
+  assert_equal "$OPENCODE_STATUS" "0" "a 2.x install with data must be fine: $OPENCODE_OUTPUT"
+  assert_contains "$OPENCODE_OUTPUT" "already installed" "an installed 2.x is left alone"
+  [[ ! -e "$OPENCODE_SANDBOX/installer-args" ]] || fail "no reinstall without --upgrade"
+
+  run_install_opencode_case v2-upgrade 2.1.0 db upgrade ""
+  assert_equal "$OPENCODE_STATUS" "0" "--upgrade on 2.x must succeed: $OPENCODE_OUTPUT"
+  assert_contains "$(tr '\n' ' ' < "$OPENCODE_SANDBOX/installer-args")" "--version 2.3.0 " \
+    "--upgrade must move a 2.x binary to the pinned version"
+}
+
 test_installer_dies_on_a_malformed_catalog_key() {
   local output
   output="$(run_installer_with_catalog 'Bad Key=1
@@ -2130,7 +2269,7 @@ test_installer_version_flag() {
   status=$?
   set -e
   assert_equal "$status" "0" "--version must exit 0"
-  assert_equal "$output" "0.3.2" "--version must print exactly the version"
+  assert_equal "$output" "0.4.0" "--version must print exactly the version"
   [[ "$output" != *"Unknown option"* ]] \
     || fail "--version must be parsed before the generic unknown-option arm"
 }
@@ -2154,7 +2293,7 @@ test_installer_version_ignores_ambiguous_opencode_config() {
   set -e
 
   assert_equal "$status" "0" "--version must not resolve the OpenCode config"
-  assert_equal "$output" "0.3.2" "--version with dual configs must print exactly the version"
+  assert_equal "$output" "0.4.0" "--version with dual configs must print exactly the version"
 }
 
 test_opencode_config_resolution_honors_skip_and_explicit_override() {
@@ -2244,7 +2383,7 @@ test_overridden_is_a_set_not_an_append_log() {
   # Both layers name node. One member, never node,node.
   OVERRIDDEN_SET=()
   INSTALLED_KARPATHY_SHA256=""
-  SKIP_RUNTIMES=1; SKIP_QUALITY_TOOLS=1; SKIP_OPENSPEC=1
+  SKIP_RUNTIMES=1; SKIP_QUALITY_TOOLS=1; SKIP_OPENSPEC=1; SKIP_OPENCODE=0
   SKIP_SUPERPOWERS=1; SKIP_KARPATHY=1
 
   resolve_pin NODE_VERSION node ADT_NODE_VERSION 22
@@ -2262,7 +2401,7 @@ test_overridden_is_a_set_not_an_append_log() {
 test_overridden_serializes_in_catalog_order() {
   OVERRIDDEN_SET=()
   INSTALLED_KARPATHY_SHA256=""
-  SKIP_RUNTIMES=1; SKIP_QUALITY_TOOLS=1; SKIP_OPENSPEC=1
+  SKIP_RUNTIMES=1; SKIP_QUALITY_TOOLS=1; SKIP_OPENSPEC=1; SKIP_OPENCODE=0
   SKIP_SUPERPOWERS=1; SKIP_KARPATHY=1
 
   parse_args --node-version 22 --python-version 3.11
@@ -2276,7 +2415,7 @@ test_overridden_serializes_in_catalog_order() {
 test_an_empty_environment_override_is_not_an_override() {
   OVERRIDDEN_SET=()
   INSTALLED_KARPATHY_SHA256=""
-  SKIP_RUNTIMES=1; SKIP_QUALITY_TOOLS=1; SKIP_OPENSPEC=1
+  SKIP_RUNTIMES=1; SKIP_QUALITY_TOOLS=1; SKIP_OPENSPEC=1; SKIP_OPENCODE=0
   SKIP_SUPERPOWERS=1; SKIP_KARPATHY=1
 
   resolve_pin NODE_VERSION node ADT_NODE_VERSION ""
@@ -2292,7 +2431,7 @@ test_an_empty_environment_override_is_not_an_override() {
 test_excluded_interfaces_never_enter_overridden() {
   OVERRIDDEN_SET=()
   INSTALLED_KARPATHY_SHA256=""
-  SKIP_RUNTIMES=1; SKIP_QUALITY_TOOLS=1; SKIP_OPENSPEC=1
+  SKIP_RUNTIMES=1; SKIP_QUALITY_TOOLS=1; SKIP_OPENSPEC=1; SKIP_OPENCODE=0
   SKIP_SUPERPOWERS=1; SKIP_KARPATHY=1
 
   # --gcm-path is a filesystem path and --karpathy-sha256 is integrity
@@ -2309,7 +2448,7 @@ test_excluded_interfaces_never_enter_overridden() {
 }
 
 test_skip_runtimes_expands_to_the_quality_tools() {
-  SKIP_RUNTIMES=1; SKIP_QUALITY_TOOLS=0; SKIP_OPENSPEC=0
+  SKIP_RUNTIMES=1; SKIP_QUALITY_TOOLS=0; SKIP_OPENSPEC=0; SKIP_OPENCODE=0
   SKIP_SUPERPOWERS=0; SKIP_KARPATHY=0
 
   assert_equal "$(skipped_keys)" \
@@ -2317,8 +2456,17 @@ test_skip_runtimes_expands_to_the_quality_tools() {
     "--skip-runtimes must expand to the runtimes and the three quality tools, in catalog order"
 }
 
+test_skip_opencode_is_recorded_as_skipped() {
+  SKIP_RUNTIMES=0; SKIP_QUALITY_TOOLS=0; SKIP_OPENSPEC=0; SKIP_OPENCODE=1
+  SKIP_SUPERPOWERS=0; SKIP_KARPATHY=0
+
+  assert_equal "$(skipped_keys)" "opencode" \
+    "--skip-opencode must be recorded now that OpenCode has a catalog pin"
+  SKIP_OPENCODE=0
+}
+
 test_skip_claude_alone_leaves_skipped_empty() {
-  SKIP_RUNTIMES=0; SKIP_QUALITY_TOOLS=0; SKIP_OPENSPEC=0
+  SKIP_RUNTIMES=0; SKIP_QUALITY_TOOLS=0; SKIP_OPENSPEC=0; SKIP_OPENCODE=0
   SKIP_SUPERPOWERS=0; SKIP_KARPATHY=0
   # SKIP_CLAUDE has no catalog key, so skipped_keys never reads it; that
   # absence of a read is exactly what this test asserts.
@@ -2329,16 +2477,16 @@ test_skip_claude_alone_leaves_skipped_empty() {
     "--skip-claude has no catalog key and must not appear in skipped="
 }
 
-test_selective_skip_still_writes_all_sixteen_requested_keys() {
+test_selective_skip_still_writes_all_seventeen_requested_keys() {
   OVERRIDDEN_SET=()
   INSTALLED_KARPATHY_SHA256=""
-  SKIP_RUNTIMES=1; SKIP_QUALITY_TOOLS=0; SKIP_OPENSPEC=1
+  SKIP_RUNTIMES=1; SKIP_QUALITY_TOOLS=0; SKIP_OPENSPEC=1; SKIP_OPENCODE=0
   SKIP_SUPERPOWERS=0; SKIP_KARPATHY=1
 
   local receipt
   receipt="$(write_receipt_body)"
 
-  assert_equal "$(grep -c '^requested\.' <<<"$receipt")" "16" \
+  assert_equal "$(grep -c '^requested\.' <<<"$receipt")" "17" \
     "every catalog key except karpathy-sha256 must be requested regardless of skipping"
   [[ "$receipt" != *$'\nrequested.karpathy-sha256='* ]] \
     || fail "karpathy-sha256 must never be a requested value"
@@ -2352,7 +2500,7 @@ test_skipped_component_produces_no_probe_and_no_warning() {
   # openspec) and print an installed.* line, or fail and warn -- either way
   # producing output. Empty output is exactly "no probe, no key, no warning".
   INSTALLED_KARPATHY_SHA256=""
-  SKIP_RUNTIMES=1; SKIP_QUALITY_TOOLS=1; SKIP_OPENSPEC=1
+  SKIP_RUNTIMES=1; SKIP_QUALITY_TOOLS=1; SKIP_OPENSPEC=1; SKIP_OPENCODE=1
   SKIP_SUPERPOWERS=1; SKIP_KARPATHY=1
 
   local output
@@ -2363,7 +2511,7 @@ test_skipped_component_produces_no_probe_and_no_warning() {
 }
 
 test_failing_probe_does_not_trip_err() {
-  SKIP_RUNTIMES=0; SKIP_QUALITY_TOOLS=1; SKIP_OPENSPEC=1
+  SKIP_RUNTIMES=0; SKIP_QUALITY_TOOLS=1; SKIP_OPENSPEC=1; SKIP_OPENCODE=0
   SKIP_SUPERPOWERS=1; SKIP_KARPATHY=1
 
   local original_mise_bin="$MISE_BIN"
@@ -2409,6 +2557,8 @@ test_probe_extraction_matches_the_design_table() {
   # just against guarded-failure paths.
   INSTALLED_KARPATHY_SHA256=""
   SKIP_RUNTIMES=0; SKIP_QUALITY_TOOLS=0; SKIP_OPENSPEC=0
+  # shellcheck disable=SC2034
+  SKIP_OPENCODE=0
   SKIP_SUPERPOWERS=0; SKIP_KARPATHY=1
   # The dynamically sourced installer reads these globals.
   # shellcheck disable=SC2034
@@ -2452,7 +2602,8 @@ EOF_FAKE_MISE
   local fake_bin="$TEMP_DIR/fake-bin-probe"
   mkdir -p "$fake_bin"
   printf '#!/usr/bin/env bash\nprintf "OpenSpec CLI v1.13.2\\n"\n' > "$fake_bin/openspec"
-  chmod +x "$fake_bin/openspec"
+  printf '#!/usr/bin/env bash\nprintf "2.3.0\\n"\n' > "$fake_bin/opencode"
+  chmod +x "$fake_bin/openspec" "$fake_bin/opencode"
 
   local output
   # PATH was intentionally changed only in the earlier OpenCode test subshell.
@@ -2491,6 +2642,8 @@ EOF_FAKE_MISE
     || fail "pyyaml: first line, first field: $output"
   [[ "$output" == *$'\ninstalled.openspec=1.13.2\n'* ]] \
     || fail "openspec: first X.Y.Z match: $output"
+  [[ "$output" == *$'\ninstalled.opencode=2.3.0\n'* ]] \
+    || fail "opencode: first X.Y.Z match: $output"
 }
 
 test_receipt_is_written_on_success_at_documented_path() {
@@ -2972,6 +3125,12 @@ test_installer_loads_catalog_beside_a_standalone_copy
 test_installer_prefers_explicit_then_repository_catalog
 test_source_commit_requires_the_exact_repository_root
 test_opencode_install_refreshes_path_for_the_official_destination
+test_opencode_install_uses_the_pinned_2x_installer
+test_opencode_version_override_replaces_the_catalog_pin
+test_opencode_install_dry_run_names_the_pin_and_changes_nothing
+test_opencode_data_with_a_1x_binary_is_left_untouched
+test_opencode_data_without_a_binary_stops_before_mutation
+test_opencode_2x_with_data_installs_normally_and_upgrades_to_the_pin
 test_installer_dies_on_a_malformed_catalog_key
 test_installer_dies_on_a_missing_required_catalog_key
 test_installer_version_flag
@@ -2989,8 +3148,9 @@ test_overridden_serializes_in_catalog_order
 test_an_empty_environment_override_is_not_an_override
 test_excluded_interfaces_never_enter_overridden
 test_skip_runtimes_expands_to_the_quality_tools
+test_skip_opencode_is_recorded_as_skipped
 test_skip_claude_alone_leaves_skipped_empty
-test_selective_skip_still_writes_all_sixteen_requested_keys
+test_selective_skip_still_writes_all_seventeen_requested_keys
 test_skipped_component_produces_no_probe_and_no_warning
 test_failing_probe_does_not_trip_err
 test_unresolvable_timeout_keeps_karpathy_sha256_and_drops_probe_derived_keys

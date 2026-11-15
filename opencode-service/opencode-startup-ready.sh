@@ -11,7 +11,10 @@ IFS=$'\n\t'
 #   3. its `version` has major 2;
 #   4. its `pid` equals MAINPID, when systemd handed one over;
 #   5. GET /api/experimental/migration/v1 does not report a status other than
-#      `completed` (the first 2.x start migrates a 1.x database in place);
+#      `completed` (the first 2.x start migrates a 1.x database in place).
+#      `running` and `required` wait; `error` and any unrecognised status or
+#      body fail at once, because waiting cannot fix them. An endpoint that does
+#      not answer 200 says nothing about a migration and is not a reason to wait;
 #   6. an UNauthenticated GET /api/info answers 401.
 #
 # Run it from `ExecStartPost=`. Without it `systemctl start` returns as soon as
@@ -23,9 +26,16 @@ IFS=$'\n\t'
 # credentials. A 200, or a substring in a body, therefore proves nothing: the
 # body must parse as the JSON the API returns, and say 2.x.
 #
-# AN OPEN SERVER IS A FAILURE, NOT A WAIT. A 200 for an anonymous /api/info means
-# the server runs without a password, which waiting cannot change. The probe
-# fails at once, so a misconfigured unit trips its start limit.
+# AN OPEN ANSWER IS A FAILURE, NOT A WAIT. A 2.x server started without a
+# password still enforces authentication (it generates one), so an anonymous 200
+# is not expected from the server itself. It is checked defensively, against a
+# proxy or a future change, and fails at once so a misconfigured unit trips its
+# start limit.
+#
+# A REJECTED PASSWORD IS A FAILURE, NOT A WAIT. The unit and this probe read the
+# same EnvironmentFile, so a persistent 401 on the authenticated request is
+# misconfiguration. After AUTH_GRACE consecutive 401s the probe fails at once;
+# polling the whole window on every start would defeat the start limit.
 #
 # 2.x ONLY. A detected 1.x server (/global/health answering JSON with
 # "healthy":true) fails at once, so a unit that still starts the old binary trips
@@ -58,6 +68,7 @@ TIMEOUT="${READY_TIMEOUT:-90}"
 INTERVAL="${READY_INTERVAL:-2}"
 
 readonly SCRIPT_VERSION="1.0.0"
+readonly AUTH_GRACE=3
 readonly BASE="http://${HOST}:${PORT}"
 readonly USERNAME="opencode"
 readonly PASSWORD="${OPENCODE_PASSWORD:-${OPENCODE_SERVER_PASSWORD:-}}"
@@ -96,10 +107,18 @@ is_v1_server() {
 # Why the last /api/info answer was not enough; empty when it was.
 NOT_READY_REASON=""
 INFO_VERSION=""
+AUTH_REJECTIONS=0
 
 check_api_info() {
   local version pid
   http_get /api/info auth
+  if [[ "$HTTP_CODE" == 401 ]]; then
+    AUTH_REJECTIONS=$(( AUTH_REJECTIONS + 1 ))
+    NOT_READY_REASON="/api/info answered HTTP 401: the password was rejected"
+    (( AUTH_REJECTIONS < AUTH_GRACE )) || return 2
+    return 1
+  fi
+  AUTH_REJECTIONS=0
   if [[ "$HTTP_CODE" != 200 ]]; then
     NOT_READY_REASON="/api/info answered HTTP $HTTP_CODE"
     return 1
@@ -124,16 +143,27 @@ check_api_info() {
   return 0
 }
 
-# Fails only on a status that is reported and is not `completed`. An endpoint
-# that does not answer says nothing about a migration.
+# Returns 0 when ready to go on, 1 to keep waiting, 2 to fail at once.
 check_migration() {
   local status
   http_get /api/experimental/migration/v1 auth
   [[ "$HTTP_CODE" == 200 ]] || return 0
-  status="$(jq -r '.status // empty' 2>/dev/null <<<"$HTTP_BODY" || true)"
-  [[ -z "$status" || "$status" == completed ]] && return 0
-  NOT_READY_REASON="data migration is $status"
-  return 1
+  status="$(jq -r 'if type == "object" then (.status // "") else "" end' 2>/dev/null <<<"$HTTP_BODY" || true)"
+  case "$status" in
+    completed) return 0 ;;
+    running | required)
+      NOT_READY_REASON="data migration is $status"
+      return 1
+      ;;
+    error)
+      NOT_READY_REASON="data migration failed: $(jq -r '.error // "no detail"' <<<"$HTTP_BODY")"
+      return 2
+      ;;
+    *)
+      NOT_READY_REASON="data migration reports an unrecognised state"
+      return 2
+      ;;
+  esac
 }
 
 main() {
@@ -142,7 +172,7 @@ main() {
     exit 0
   fi
 
-  if [[ -n "${READY_TOOL_MARKER:-}" ]]; then
+  if [[ -n "${READY_TOOL_MARKER+x}" ]]; then
     printf 'readiness: READY_TOOL_MARKER is not supported on OpenCode 2.x: it has no endpoint that lists tool IDs, so the tool guarantee cannot be checked. Unset it.\n' >&2
     return 2
   fi
@@ -171,7 +201,16 @@ main() {
     fi
 
     NOT_READY_REASON=""
-    if check_api_info && check_migration; then
+    local info_status=0 migration_status=0
+    check_api_info || info_status=$?
+    if (( info_status == 0 )); then
+      check_migration || migration_status=$?
+    fi
+    if (( info_status == 2 || migration_status == 2 )); then
+      printf 'readiness: NOT READY — %s\n' "$NOT_READY_REASON" >&2
+      return 1
+    fi
+    if (( info_status == 0 && migration_status == 0 )); then
       http_get /api/info anonymous
       case "$HTTP_CODE" in
         401)

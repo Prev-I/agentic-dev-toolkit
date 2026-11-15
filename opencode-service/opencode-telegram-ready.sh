@@ -44,6 +44,11 @@ if [[ "${1:-}" == "--version" ]]; then
   exit 0
 fi
 
+command -v jq >/dev/null 2>&1 || {
+  printf 'telegram-readiness: jq is required\n' >&2
+  exit 2
+}
+
 : "${INVOCATION_ID:?systemd invocation id is required}"
 
 readonly DEADLINE=$((SECONDS + TIMEOUT))

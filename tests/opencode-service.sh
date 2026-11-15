@@ -100,7 +100,10 @@ case "$path" in
     ;;
   /api/experimental/migration/v1)
     if (( authenticated )); then
-      if [[ -n "${STUB_MIGRATION_SEQ:-}" ]]; then
+      if [[ -n "${STUB_MIGRATION_BODY+x}" ]]; then
+        body="$STUB_MIGRATION_BODY"
+        code="${STUB_MIGRATION_CODE:-200}"
+      elif [[ -n "${STUB_MIGRATION_SEQ:-}" ]]; then
         read -r -a sequence <<<"$STUB_MIGRATION_SEQ"
         index=0
         [[ ! -f "$STUB_DIR/migration-calls" ]] || index="$(<"$STUB_DIR/migration-calls")"
@@ -169,7 +172,7 @@ new_case() {
   export STUB_ACTIVE_STATE="active"
   export STUB_SESSION_BODY="{}"
   # A stock 2.x server by default: HTML on /global/health, JSON on /api/info.
-  unset STUB_HEALTH_BODY STUB_INFO_BODY STUB_MIGRATION_SEQ MAINPID
+  unset STUB_HEALTH_BODY STUB_INFO_BODY STUB_MIGRATION_SEQ STUB_MIGRATION_BODY STUB_MIGRATION_CODE MAINPID
   export STUB_INFO_CODE=200
   export STUB_INFO_VERSION=2.3.0
   export STUB_INFO_PID=1327923
@@ -518,6 +521,9 @@ test_server_readiness_refuses_a_tool_marker() {
 
   assert_equal "$READY_STATUS" "2" "READY_TOOL_MARKER must be an error on 2.x"
   assert_contains "$READY_OUTPUT" "READY_TOOL_MARKER" "the error must name the variable"
+
+  run_ready READY_TOOL_MARKER=
+  assert_equal "$READY_STATUS" "2" "an empty READY_TOOL_MARKER is still a stale unit setting"
 }
 
 # A unit that still starts a 1.x server must trip the start limit rather than
@@ -551,6 +557,109 @@ test_server_readiness_needs_a_password_and_prefers_opencode_password() {
 
   run_ready OPENCODE_SERVER_USERNAME=someone-else
   assert_equal "$READY_STATUS" "0" "the Basic-auth username is always opencode"
+}
+
+# The 2.3.0 OpenAPI types the migration status as one of four shapes. Only
+# `completed` is ready; `running` and `required` wait; `error` and anything
+# unrecognised fail at once, because waiting cannot fix them.
+test_server_readiness_handles_every_migration_state() {
+  new_case ready-migration-states
+
+  export STUB_MIGRATION_BODY='{"status":"completed"}'
+  run_ready
+  assert_equal "$READY_STATUS" "0" "completed is ready"
+
+  export STUB_MIGRATION_BODY='{"status":"running","progress":{"label":"sessions","numerator":3,"denominator":9}}'
+  run_ready
+  assert_equal "$READY_STATUS" "1" "running is not ready"
+  assert_contains "$READY_OUTPUT" "running" "the wait must name the state"
+
+  export STUB_MIGRATION_BODY='{"status":"required"}'
+  run_ready
+  assert_equal "$READY_STATUS" "1" "required is not ready"
+  assert_contains "$READY_OUTPUT" "required" "the wait must name the state"
+
+  local started=$SECONDS
+  export STUB_MIGRATION_BODY='{"status":"error","error":"disk full"}'
+  run_ready READY_TIMEOUT=30 READY_INTERVAL=1
+  assert_equal "$READY_STATUS" "1" "error is not ready"
+  assert_contains "$READY_OUTPUT" "disk full" "the error text must be reported"
+  (( SECONDS - started <= 3 )) || fail "a migration error must fail at once"
+
+  started=$SECONDS
+  export STUB_MIGRATION_BODY='{"status":"exploded"}'
+  run_ready READY_TIMEOUT=30 READY_INTERVAL=1
+  assert_equal "$READY_STATUS" "1" "an unknown status is not ready"
+  (( SECONDS - started <= 3 )) || fail "an unknown status must fail at once"
+
+  started=$SECONDS
+  export STUB_MIGRATION_BODY='<!doctype html><html></html>'
+  run_ready READY_TIMEOUT=30 READY_INTERVAL=1
+  assert_equal "$READY_STATUS" "1" "a non-JSON 200 is an unknown shape"
+  (( SECONDS - started <= 3 )) || fail "an unknown shape must fail at once"
+
+  # An endpoint that does not answer (here 404) says nothing about a migration.
+  export STUB_MIGRATION_BODY='not found' STUB_MIGRATION_CODE=404
+  run_ready
+  assert_equal "$READY_STATUS" "0" "a non-200 migration endpoint is not evidence of a migration"
+}
+
+# The unit and the probe read the same EnvironmentFile, so a password that
+# stays rejected is misconfiguration. Polling out the window on every start
+# would defeat the start limit, so a few 401s fail the start.
+test_server_readiness_fails_fast_on_a_rejected_password() {
+  new_case ready-wrong-password
+  export STUB_REQUIRE_AUTH=1
+  local started=$SECONDS
+
+  run_ready OPENCODE_PASSWORD=wrong READY_TIMEOUT=30 READY_INTERVAL=1
+
+  assert_equal "$READY_STATUS" "1" "a rejected password must fail readiness"
+  (( SECONDS - started <= 5 )) || fail "a rejected password must not poll out the window"
+  assert_contains "$READY_OUTPUT" "401" "readiness must say the credentials were rejected"
+}
+
+test_probes_require_jq() {
+  local nojq="$TEMP_DIR/nojq-bin" bash_bin output status
+  mkdir -p "$nojq"
+  bash_bin="$(command -v bash)"
+  set +e
+  output="$(PATH="$nojq" OPENCODE_PASSWORD=x INVOCATION_ID=i "$bash_bin" "$READY" 2>&1)"
+  status=$?
+  set -e
+  assert_equal "$status" "2" "the server probe must exit 2 without jq"
+  assert_contains "$output" "jq is required" "the server probe must say why"
+  set +e
+  output="$(PATH="$nojq" OPENCODE_PASSWORD=x INVOCATION_ID=i "$bash_bin" "$TELEGRAM_READY" 2>&1)"
+  status=$?
+  set -e
+  assert_equal "$status" "2" "the Telegram probe must exit 2 without jq"
+  assert_contains "$output" "jq is required" "the Telegram probe must say why"
+}
+
+test_telegram_readiness_accepts_the_legacy_password_name() {
+  new_case telegram-legacy-password
+  export STUB_REQUIRE_AUTH=1
+
+  local output status=0
+  output="$(
+    PATH="$TEMP_DIR/bin:$PATH" env -u OPENCODE_PASSWORD \
+      INVOCATION_ID=test-invocation \
+      TELEGRAM_READY_TIMEOUT=0 TELEGRAM_READY_INTERVAL=0 \
+      OPENCODE_SERVER_PASSWORD=test-password \
+      bash "$TELEGRAM_READY" 2>&1
+  )" || status=$?
+  assert_equal "$status" "0" "OPENCODE_SERVER_PASSWORD must authenticate the Telegram probe: $output"
+
+  status=0
+  output="$(
+    PATH="$TEMP_DIR/bin:$PATH" \
+      INVOCATION_ID=test-invocation \
+      TELEGRAM_READY_TIMEOUT=0 TELEGRAM_READY_INTERVAL=0 \
+      OPENCODE_PASSWORD=test-password OPENCODE_SERVER_PASSWORD=wrong \
+      bash "$TELEGRAM_READY" 2>&1
+  )" || status=$?
+  assert_equal "$status" "0" "OPENCODE_PASSWORD must win when both are set: $output"
 }
 
 # A server that exits at once must fail the start at once. Polling out the window
@@ -967,6 +1076,10 @@ test_server_readiness_waits_for_the_migration
 test_server_readiness_refuses_a_tool_marker
 test_server_readiness_fails_at_once_on_a_1x_server
 test_server_readiness_needs_a_password_and_prefers_opencode_password
+test_server_readiness_handles_every_migration_state
+test_server_readiness_fails_fast_on_a_rejected_password
+test_probes_require_jq
+test_telegram_readiness_accepts_the_legacy_password_name
 test_server_readiness_fails_fast_when_the_main_process_is_gone
 test_telegram_readiness_requires_polling_and_opencode
 test_telegram_readiness_requires_a_2x_server

@@ -46,8 +46,11 @@ Ubuntu under WSL2; `--no-create-session-in-dir` with Claude Code 2.1.309.
 Check every item before creating the unit. Each one, when missing, produces a
 failure that is easy to misread later.
 
-**A systemd user manager.** `systemctl --user status` must report `running`. On
-WSL, systemd must be the init system: `[boot] systemd=true` in `/etc/wsl.conf`.
+**A systemd user manager, version 254 or later.** `systemctl --user status` must
+report `running`, and `systemctl --version` at least 254. On WSL, systemd must be
+the init system: `[boot] systemd=true` in `/etc/wsl.conf`. An older systemd (249
+on Ubuntu 22.04) ignores the unit's restart backoff with an `Unknown key name`
+warning and restarts every 10 seconds, without limit.
 
 **tmux, direnv, getent, pgrep and jq.** `command -v tmux direnv getent pgrep jq`.
 direnv is needed even for a project without an `.envrc`, because the unit always
@@ -140,12 +143,10 @@ Description=Claude Code Remote Control server for ~/code/%i (tmux session rc-%i)
 # Ordering only: a user manager cannot see the system's network-online.target.
 After=network-online.target
 
-# An immediate failure restarts every RestartSec, so five land within the window
-# and the unit ends `failed`. A start that cannot resolve the API name waits out
-# TimeoutStartSec instead, so at most one start falls in the window and systemd
-# keeps retrying.
-StartLimitIntervalSec=120
-StartLimitBurst=5
+# Never give up: a backend outage fails every start at once, just like a
+# configuration error, and a `failed` unit cannot be restarted from a remote
+# client. The restart delay below backs off instead.
+StartLimitIntervalSec=0
 
 [Service]
 Type=forking
@@ -173,7 +174,11 @@ ExecStopPost=-/usr/bin/timeout 5 /bin/sh -c 'while pgrep -f "^[^ ]*/claude remot
 ExecStopPost=-/usr/bin/pkill -KILL -f "^[^ ]*/claude remote-control --name %i "
 
 Restart=always
+# 10, 20, 39, 77, 152, then 300 seconds between starts. The count survives
+# successful runs and `restart`; only `stop` followed by `start` resets it.
 RestartSec=10
+RestartSteps=5
+RestartMaxDelaySec=300
 TimeoutStartSec=300
 TimeoutStopSec=30
 
@@ -213,15 +218,28 @@ it is stronger than that: given before the verb, Remote Control refuses to start
   user manager starts the unit with no network guarantee. It covers only a
   missing name: a network that resolves but cannot connect (a cached resolver
   with the uplink down, a captive portal, a proxy-only network) passes the wait,
-  claude fails at once, and that counts as an immediate failure.
-- **A start limit sized for both failure speeds.** `StartLimitIntervalSec` and
-  `StartLimitBurst` belong in `[Unit]`; systemd ignores the interval in
-  `[Service]` with a warning but silently accepts the burst there. A failure
-  that happens at once (an untrusted workspace, a blocked variable) restarts every
-  10 seconds, so five starts fall inside 120 seconds and the unit ends `failed`
-  — visible, instead of restarting for ever. A start that cannot resolve the API
-  name spends up to 300 seconds waiting, so the same window never holds a second
-  start and systemd keeps retrying until resolution returns.
+  claude fails at once, and the unit backs off as for any other failure.
+- **No start limit; the restart delay backs off instead.** A Remote Control
+  backend that is reachable but failing makes claude give up on a running server
+  after about ten minutes of failed polls, then refuse to register on each new
+  start until the backend recovers. That looks exactly like a configuration
+  error (an untrusted workspace, a blocked variable): claude exits within a
+  second. A start limit cannot tell the two apart. With one, a few minutes of
+  backend trouble left the unit `failed` for good, and a `failed` unit cannot be
+  restarted from the phone or browser that Remote Control exists to serve. So
+  `StartLimitIntervalSec=0` turns the limit off (it belongs in `[Unit]`; systemd
+  ignores it in `[Service]` with a warning), and `RestartSteps` with
+  `RestartMaxDelaySec` (systemd 254 or later) stretches the delay from 10 seconds
+  to a 300-second cap. A recovered backend is picked up within five minutes. The
+  cost is that a configuration error no longer ends `failed`: it shows as
+  `activating (auto-restart)` with a growing `NRestarts`, and retries every five
+  minutes until it is fixed.
+- **The backoff count survives successful runs, and `restart`.** On systemd 255
+  the count is not reset when a run goes well, nor by `systemctl --user restart`;
+  it is reset only by `stop` followed by `start`, or by a reboot. A server that
+  has restarted on its own five or more times since it was last stopped and
+  started waits the full 300 seconds after every later crash, including a
+  `Ctrl+C` typed in its pane by mistake. The cap is kept short for that reason.
 - **`ExecStop=-…`.** After claude exits, `kill-server` finds no server and returns
   1. The `-` prefix keeps that from marking the unit `failed` on every restart.
 - **`ExecStopPost` waits for claude itself, then forces it.** The tmux server
@@ -326,7 +344,7 @@ pgrep -aP "$pid" | grep -o -- '--session-id [^ ]*\|--permission-mode [^ ]*'
 | Task | Command |
 |---|---|
 | Watch the TUI | `tmux -L rc-<PROJECT> attach` |
-| Detach | `Ctrl+B` then `D` — `Ctrl+C` stops the server, which systemd then restarts |
+| Detach | `Ctrl+B` then `D` — `Ctrl+C` stops the server, which systemd then restarts after the backoff delay |
 | Stop | `systemctl --user stop claude-rc@<PROJECT>` |
 | Restart | `systemctl --user restart claude-rc@<PROJECT>` |
 | Logs | `journalctl --user -u claude-rc@<PROJECT> -f` |
@@ -337,9 +355,9 @@ server and finds no session.
 
 The environment is read once, at start. After editing `env.local` (or whatever the
 `.envrc` sources), restart the unit. After editing `.envrc` itself, run
-`direnv allow` in the project first; until then the start check fails. Once five
-starts have failed, the unit refuses a restart until the 120-second window passes
-or `systemctl --user reset-failed claude-rc@<PROJECT>` clears the counter.
+`direnv allow` in the project first; until then the start check fails, and the
+unit retries on its own with a growing delay of up to five minutes. A manual
+restart starts it at once; to also reset the delay, stop and then start it.
 
 ### Another project
 
@@ -411,21 +429,36 @@ the unit.
 
 ## Troubleshooting
 
-Both failures below end in `start-limit-hit`. systemd then refuses new starts,
-including a manual restart, until the 120-second window passes or the counter is
-cleared. After fixing the cause:
+The unit has no start limit, so a failing start does not end `failed`: it shows
+`activating (auto-restart)`, and the delay between starts grows from 10 seconds
+to five minutes. `systemctl --user show -p NRestarts claude-rc@<PROJECT>` counts
+the attempts. After fixing the cause, stop and then start the unit rather than
+waiting for the next attempt. Neither `restart`, which keeps the delay the
+counter has reached for the next failure, nor `start` alone, which waits for the
+pending restart, does the same:
 
 ```bash
-systemctl --user reset-failed claude-rc@<PROJECT>
-systemctl --user restart claude-rc@<PROJECT>
+systemctl --user stop claude-rc@<PROJECT>
+systemctl --user start claude-rc@<PROJECT>
 ```
 
-### The unit is `failed` and the journal shows `direnv: error … is blocked`
+A unit installed from an earlier revision of this runbook, with
+`StartLimitIntervalSec=120`, ends in `start-limit-hit` instead and refuses even
+a manual restart until it is cleared. Replace the unit, then reload, clear and
+start it:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user reset-failed claude-rc@<PROJECT>
+systemctl --user start claude-rc@<PROJECT>
+```
+
+### The unit keeps restarting and the journal shows `direnv: error … is blocked`
 
 The `.envrc` changed or was never approved. Review it, run `direnv allow` in the
-project, then reset and restart the unit.
+project, then stop and start the unit as above.
 
-### The unit restarts every 10 seconds, then fails with `start-limit-hit`
+### The unit keeps restarting, and the pane closes within a second each time
 
 `claude` exits as soon as it starts. Run the first-run step by hand.
 `Workspace not trusted` in the journal or the pane means the trust prompt was
@@ -439,9 +472,9 @@ device` with no other `claude remote-control` running for the project was seen
 once, on the first restart after `--no-create-session-in-dir` was added, while
 Claude Code updated itself from 2.1.308 to 2.1.309. The same command run by hand
 two minutes later started normally, and later restarts did not repeat it.
-Reset and restart the unit.
+The unit's own retries clear it.
 
-### The unit stays `activating` for minutes
+### The unit stays `activating (start-pre)` for minutes
 
 The first start check is waiting for `api.anthropic.com` to resolve: the machine
 has no network or no DNS. The unit starts on its own once the name resolves.
@@ -449,12 +482,23 @@ Meanwhile `systemctl --user start`, `restart` and `enable --now` wait for the
 start job and appear to hang for up to 300 seconds; add `--no-block` to return
 at once.
 
-### The name resolves, but the unit still ends in `start-limit-hit`
+### The name resolves, but the unit keeps restarting
 
 The network resolves names but cannot reach the API — a cached resolver with the
 uplink down, a captive portal, or a proxy the server does not know about. claude
-fails at once on each start, so the limit is reached. Check the proxy and
-certificate variables in the prerequisites, then reset and restart the unit.
+fails at once on each start. Check the proxy and certificate variables in the
+prerequisites, then stop and start the unit as above.
+
+### The server went offline on its own and came back minutes later
+
+The Remote Control backend failed, not the workstation. claude polls the backend
+for work; after about ten minutes of failed polls it closes its sessions, which
+end `interrupted`, and exits. Restarts then fail at once until the backend
+accepts registrations again, and the backoff carries the unit through that.
+Sessions interrupted this way do not resume on their own: reopen them from a
+client. This was seen on one instance while others on the same machine and
+version stayed connected, with nothing in the journal pointing at the local
+network.
 
 ### `tmux attach` says there is no session
 

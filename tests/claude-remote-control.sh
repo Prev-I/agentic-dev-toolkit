@@ -5,6 +5,9 @@ IFS=$'\n\t'
 REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly REPOSITORY_ROOT
 readonly RUNBOOK="$REPOSITORY_ROOT/docs/claude-remote-control.md"
+# The longest restart delay the unit may back off to. Past it a recovered backend
+# stays unused for too long.
+readonly MAX_RESTART_DELAY_CAP=600
 
 cleanup() {
   rm -rf "${TEMP_DIR:-}"
@@ -51,6 +54,12 @@ directive() {
   grep -E "^${name}=" <<< "$UNIT" || true
 }
 
+directive_value() {
+  local value
+  value="$(directive "$1")"
+  printf '%s' "${value#"$1"=}"
+}
+
 test_the_runbook_ships_exactly_one_unit() {
   local starts ends
   starts="$(grep -c '^# >>> claude-rc-unit >>>$' "$RUNBOOK")"
@@ -92,27 +101,41 @@ test_the_server_is_kept_alive_and_its_absence_tolerated() {
   [[ "$stop" == ExecStop=-* ]] || fail "ExecStop must tolerate an already exited tmux server: $stop"
 }
 
-# Two failure speeds must land on opposite sides of the start limit: an immediate
-# failure, RestartSec apart, must exhaust it (visible `failed`), while an offline
-# start, which waits out TimeoutStartSec first, must never accumulate a burst.
-test_the_start_limit_separates_fast_failures_from_offline_waits() {
-  local unit_section service_section interval burst restart_sec timeout_sec
+# A transient backend outage makes claude fail at once on every start, exactly
+# like a configuration error, and a server left `failed` cannot be recovered from
+# a remote client. So the unit never gives up: the start limit is off, and the
+# restart delay grows to a cap short enough that a recovered backend is picked up
+# within minutes. The auto-restart counter survives successful runs and `restart`,
+# so once it reaches the cap every later crash waits the full cap.
+test_restarts_back_off_and_never_exhaust_the_start_limit() {
+  local unit_section service_section interval restart_sec max_delay steps timeout_sec sequence
   unit_section="$(sed -n '/^\[Unit\]$/,/^\[/p' <<< "$UNIT")"
   service_section="$(sed -n '/^\[Service\]$/,/^\[/p' <<< "$UNIT")"
-  interval="$(sed -n 's/^StartLimitIntervalSec=\([0-9]\+\)$/\1/p' <<< "$unit_section")"
-  burst="$(sed -n 's/^StartLimitBurst=\([0-9]\+\)$/\1/p' <<< "$unit_section")"
-  restart_sec="$(directive RestartSec)"
-  restart_sec="${restart_sec#RestartSec=}"
-  timeout_sec="$(directive TimeoutStartSec)"
-  timeout_sec="${timeout_sec#TimeoutStartSec=}"
-  [[ -n "$interval" && -n "$burst" ]] || fail "StartLimitIntervalSec and StartLimitBurst must be in [Unit], in seconds"
+  interval="$(sed -n 's/^StartLimitIntervalSec=\(.*\)$/\1/p' <<< "$unit_section")"
+  [[ "$interval" == 0 ]] || fail "StartLimitIntervalSec=0 must be in [Unit], found '$interval'"
+  ! grep -qE '^StartLimitBurst=' <<< "$unit_section" || fail "StartLimitBurst is meaningless with the limit off"
   ! grep -qE '^StartLimit' <<< "$service_section" || fail "start limits in [Service] are ignored or half-applied"
-  [[ "$restart_sec" =~ ^[0-9]+$ && "$timeout_sec" =~ ^[0-9]+$ ]] \
-    || fail "RestartSec and TimeoutStartSec must be plain seconds"
-  (( interval > restart_sec * (burst - 1) )) \
-    || fail "a ${interval}s window cannot hold $burst starts ${restart_sec}s apart"
-  (( (timeout_sec + restart_sec) * (burst - 1) > interval )) \
-    || fail "offline starts $((timeout_sec + restart_sec))s apart would hit the ${interval}s limit"
+  restart_sec="$(directive_value RestartSec)"
+  max_delay="$(directive_value RestartMaxDelaySec)"
+  steps="$(directive_value RestartSteps)"
+  timeout_sec="$(directive_value TimeoutStartSec)"
+  # Positive and without a leading zero: with no start limit, RestartSec=0 would
+  # be a tight loop (systemd skips the backoff), and (( )) reads 08 as octal.
+  [[ "$restart_sec" =~ ^[1-9][0-9]*$ && "$max_delay" =~ ^[1-9][0-9]*$ \
+    && "$steps" =~ ^[1-9][0-9]*$ && "$timeout_sec" =~ ^[1-9][0-9]*$ ]] \
+    || fail "RestartSec, RestartMaxDelaySec, RestartSteps and TimeoutStartSec must be positive integers"
+  (( max_delay > restart_sec )) \
+    || fail "the restart delay must grow: ${restart_sec}s to ${max_delay}s"
+  (( max_delay <= MAX_RESTART_DELAY_CAP )) \
+    || fail "a ${max_delay}s cap leaves a recovered backend unused too long; keep it within ${MAX_RESTART_DELAY_CAP}s"
+
+  # The unit's comment states the delays; keep it in step with the directives,
+  # and on one line, since UNIT keeps comment line breaks.
+  sequence="$(awk -v r="$restart_sec" -v m="$max_delay" -v s="$steps" 'BEGIN {
+    for (n = 0; n < s; n++) printf "%.0f, ", r * (m / r) ^ (n / s)
+    printf "then %d seconds between starts.", m
+  }')"
+  assert_contains "$UNIT" "# $sequence" "the unit comment must state the restart delays"
 }
 
 # The pane runs in its own scope, so systemd neither waits for nor kills claude.
@@ -209,7 +232,7 @@ readonly RAW_UNIT UNIT
 test_the_runbook_ships_exactly_one_unit
 test_every_tmux_call_uses_the_instance_socket
 test_the_server_is_kept_alive_and_its_absence_tolerated
-test_the_start_limit_separates_fast_failures_from_offline_waits
+test_restarts_back_off_and_never_exhaust_the_start_limit
 test_the_start_waits_for_the_api_name
 test_the_stop_waits_for_and_then_forces_the_instance_payload
 test_the_project_environment_is_loaded_and_checked_first

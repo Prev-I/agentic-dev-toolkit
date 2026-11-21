@@ -12,7 +12,7 @@ readonly KARPATHY_RAW_BASE='https://raw.githubusercontent.com/multica-ai/andrej-
 readonly KARPATHY_SKILL_PATH='skills/karpathy-guidelines/SKILL.md'
 # The installer's own version, declared with the other constants for parity
 # with the repository's other versioned scripts. Printed verbatim by --version.
-readonly SCRIPT_VERSION="0.4.0"
+readonly SCRIPT_VERSION="0.5.0"
 
 log() {
   printf '\n==> %s\n' "$*"
@@ -351,12 +351,142 @@ resolve_opencode_config() {
   fi
 }
 
+# The converter that turns a V1 config into the OpenCode 2 shape, named in
+# refusals. It is a repository-relative path: the installer ships alone and
+# only names it.
+readonly OPENCODE_V1_CONVERTER='models/routing/opencode/eval/runtime/opencode-v2-adapter/convert-v1-config.sh'
+
+# Print the shape of an OpenCode config: empty, v1, v2 or unparseable.
+#
+# The rule mirrors the repository's v2config.py `shape` and is inlined because
+# the installer ships alone. A file mixing V1 and V2 keys silently loses settings
+# upstream (anomalyco/opencode#56816), so V1 is detected rather than written into.
+#   empty: missing or zero bytes.
+#   v1: any of the V1 top-level keys, or `mcp` as an object without `servers`.
+#   unparseable: not an object, or not readable as JSON/JSONC.
+opencode_config_shape() {
+  local file="$1"
+
+  if [[ ! -s "$file" ]]; then
+    printf 'empty\n'
+    return
+  fi
+
+  if command -v jq >/dev/null 2>&1 && jq empty "$file" >/dev/null 2>&1; then
+    jq -r '
+      . as $doc |
+      if ($doc | type) != "object" then "unparseable"
+      elif (["agent", "provider", "permission", "plugin", "disabled_providers", "autoupdate", "server"]
+            | any(. as $key | $doc | has($key)))
+        or (($doc.mcp | type) == "object" and ($doc.mcp | has("servers") | not)) then "v1"
+      else "v2" end
+    ' "$file"
+    return
+  fi
+
+  if ! command -v python3 >/dev/null 2>&1; then
+    printf 'unparseable\n'
+    return
+  fi
+
+  python3 - "$file" <<'PYTHON_SHAPE'
+import json
+import sys
+
+V1_KEYS = ("agent", "provider", "permission", "plugin",
+           "disabled_providers", "autoupdate", "server")
+
+
+def strip_jsonc(raw):
+    """Remove // and /* */ comments and trailing commas, string-aware."""
+    out = []
+    index = 0
+    size = len(raw)
+    in_string = False
+    escaped = False
+    while index < size:
+        char = raw[index]
+        if in_string:
+            out.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            index += 1
+            continue
+        if char == '"':
+            in_string = True
+            out.append(char)
+            index += 1
+            continue
+        if char == "/" and index + 1 < size and raw[index + 1] == "/":
+            while index < size and raw[index] != "\n":
+                index += 1
+            continue
+        if char == "/" and index + 1 < size and raw[index + 1] == "*":
+            index += 2
+            while index + 1 < size and not (raw[index] == "*" and raw[index + 1] == "/"):
+                index += 1
+            index += 2
+            continue
+        out.append(char)
+        index += 1
+    text = "".join(out)
+    result = []
+    in_string = False
+    escaped = False
+    for pos, char in enumerate(text):
+        if in_string:
+            result.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+            result.append(char)
+            continue
+        if char == ",":
+            rest = text[pos + 1:].lstrip()
+            if rest[:1] in ("}", "]"):
+                continue
+        result.append(char)
+    return "".join(result)
+
+
+try:
+    with open(sys.argv[1], encoding="utf-8-sig") as handle:
+        document = json.loads(strip_jsonc(handle.read()))
+except (ValueError, OSError):
+    print("unparseable")
+    sys.exit(0)
+if not isinstance(document, dict):
+    print("unparseable")
+    sys.exit(0)
+mcp = document.get("mcp")
+if any(key in document for key in V1_KEYS) or (
+        isinstance(mcp, dict) and "servers" not in mcp):
+    print("v1")
+else:
+    print("v2")
+PYTHON_SHAPE
+}
+
+die_opencode_v1_config() {
+  die "$OPENCODE_CONFIG is an OpenCode 1.x config (V1 top-level keys); the installer did not change the file. Convert it first with $OPENCODE_V1_CONVERTER in the agentic-dev-toolkit repository, or use --skip-superpowers"
+}
+
 opencode_superpowers_configured() {
   local plugin="$SUPERPOWERS_PLUGIN_BASE#$SUPERPOWERS_REF"
 
   if command -v jq >/dev/null 2>&1 && jq empty "$OPENCODE_CONFIG" >/dev/null 2>&1; then
     jq -e --arg plugin "$plugin" \
-      '.plugin | type == "array" and index($plugin) != null' "$OPENCODE_CONFIG" >/dev/null
+      '.plugins | type == "array" and index($plugin) != null' "$OPENCODE_CONFIG" >/dev/null
     return
   fi
 
@@ -377,6 +507,7 @@ opencode_superpowers_configured() {
 preflight_opencode_superpowers() {
   (( SKIP_SUPERPOWERS == 0 )) || return 0
   [[ -s "$OPENCODE_CONFIG" ]] || return 0
+  [[ "$(opencode_config_shape "$OPENCODE_CONFIG")" != v1 ]] || die_opencode_v1_config
   if ! command -v jq >/dev/null 2>&1; then
     (( VERIFY_ONLY == 0 )) || die "jq is required to verify OpenCode Superpowers configuration"
     return 0
@@ -389,6 +520,7 @@ preflight_opencode_superpowers() {
 verify_opencode_superpowers() {
   (( SKIP_SUPERPOWERS == 0 && DRY_RUN == 0 )) || return 0
   [[ -s "$OPENCODE_CONFIG" ]] || return 0
+  [[ "$(opencode_config_shape "$OPENCODE_CONFIG")" != v1 ]] || die_opencode_v1_config
   opencode_superpowers_configured || \
     die "Superpowers $SUPERPOWERS_REF is not configured in $OPENCODE_CONFIG"
 }
@@ -1528,10 +1660,15 @@ configure_opencode_superpowers() {
 
   mkdir -p "$config_dir"
 
-  if [[ ! -s "$OPENCODE_CONFIG" ]]; then
+  local shape
+  shape="$(opencode_config_shape "$OPENCODE_CONFIG")"
+  [[ "$shape" != v1 ]] || die_opencode_v1_config
+
+  if [[ "$shape" == empty ]]; then
     jq -n --arg plugin "$plugin" '{
       "$schema": "https://opencode.ai/config.json",
-      "plugin": [$plugin]
+      "update": "disable",
+      "plugins": [$plugin]
     }' > "$OPENCODE_CONFIG"
     return
   fi
@@ -1552,12 +1689,12 @@ configure_opencode_superpowers() {
 
   if jq --arg plugin "$plugin" --arg base "$SUPERPOWERS_PLUGIN_BASE" '
       .["$schema"] = (.["$schema"] // "https://opencode.ai/config.json") |
-      if .plugin == null then
-        .plugin = [$plugin]
-      elif (.plugin | type) == "array" then
-        .plugin = ([.plugin[] | select((type != "string") or (startswith($base) | not))] + [$plugin])
+      if .plugins == null then
+        .plugins = [$plugin]
+      elif (.plugins | type) == "array" then
+        .plugins = ([.plugins[] | select((type != "string") or (startswith($base) | not))] + [$plugin])
       else
-        error("the existing .plugin value is not an array")
+        error("the existing .plugins value is not an array")
       end
     ' "$OPENCODE_CONFIG" > "$temp_file"; then
     if ! cmp -s "$OPENCODE_CONFIG" "$temp_file"; then

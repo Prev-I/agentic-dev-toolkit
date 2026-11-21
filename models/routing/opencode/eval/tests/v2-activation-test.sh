@@ -205,7 +205,7 @@ cmp -s "$workspace/after.json" "$workspace/after2.json" || fail "second activati
 # The prefix is pinned against the converter so the two cannot drift.
 for emitted in "printf '// Converted from the OpenCode 1.x config %s" "printf '// source sha256: %s" \
   "printf '// converted at: %s" "printf '// OpenCode version: %s" \
-  "printf \"// converted with OpenCode 2's own translation (GET /api/config, document layer info)"; do
+  "printf \"// converted with OpenCode 2's own translation (GET /api/config, document layer info)\\n\""; do
   grep -qF -- "$emitted" "$adapter/convert-v1-config.sh" \
     || fail "convert-v1-config.sh no longer emits a header line activation recognises: $emitted"
 done

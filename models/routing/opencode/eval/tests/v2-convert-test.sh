@@ -66,6 +66,12 @@ cat >"$T/in.jsonc" <<'EOF'
 }
 EOF
 
+# A token unique to this run, carried in the input config, so a leftover sandbox
+# in the global /tmp can be told apart from another process's temp dir.
+isolation_token="isolation-token-$(basename "$T")"
+sed -i "s/\"prompt\": \"Review[.]/& $isolation_token/" "$T/in.jsonc"
+grep -qF "$isolation_token" "$T/in.jsonc" || fail "isolation token not placed in the input"
+
 cat >"$T/canned-info.json" <<'EOF'
 {
   "$schema": "https://opencode.ai/config.json",
@@ -328,11 +334,26 @@ fi
 [[ -z "$(ls -A "$T/tmp")" ]] || fail "sandbox left behind: $(ls -A "$T/tmp")"
 [[ ! -e "$adapter/__pycache__" && ! -e "$fixtures/__pycache__" ]] || fail "__pycache__ written"
 leaked=$(find "$bundle" -newer "$marker" 2>/dev/null || true)
-# Temp files: every converter run (and the server it starts) had TMPDIR inside
-# this test's root, checked empty above, so no other process on the host can
-# affect the result. A hardcoded /tmp in the runtime would bypass TMPDIR.
-if grep -n '/tmp\b' "$adapter/convert-v1-config.sh" "$adapter/v2-run.sh" "$adapter/v2-http.sh" \
-    "$fixtures/fake-api.py" | grep -v '^[^:]*:[0-9]*:[[:space:]]*#' >"$T/hardcoded-tmp.txt"; then
+# Temp files. The converter's own processes honour TMPDIR (set to $T/tmp for every
+# run and checked empty above). The server it starts runs under `env -i` with no
+# TMPDIR, by design, so that is NOT covered by that check: its sandbox is the
+# converter's work dir, which lives wherever the converter's mktemp put it. A
+# fingerprinted scan of the global /tmp covers it without depending on other
+# processes: fail only on a new entry holding this run's sandbox layout or token.
+while IFS= read -r entry; do
+  if [[ -d "$entry/config/opencode" && -d "$entry/work" ]] \
+     || grep -rqF -- "$isolation_token" "$entry" 2>/dev/null; then
+    leaked+="$entry "
+  fi
+done < <(find /tmp -mindepth 1 -maxdepth 1 -name 'tmp.*' -newer "$marker" ! -path "$T" 2>/dev/null)
+# A hardcoded /tmp in the runtime would bypass TMPDIR. Every file must exist,
+# or the grep below would pass without looking.
+hardcode_files=("$adapter/convert-v1-config.sh" "$adapter/v2-run.sh" "$adapter/v2-http.sh" \
+  "$adapter/v2config.py" "$fixtures/fake-api.py")
+for f in "${hardcode_files[@]}"; do
+  [[ -f "$f" ]] || fail "isolation check input missing: $f"
+done
+if grep -n '/tmp\b' "${hardcode_files[@]}" | grep -v '^[^:]*:[0-9]*:[[:space:]]*#' >"$T/hardcoded-tmp.txt"; then
   fail "the converter runtime hardcodes /tmp, bypassing TMPDIR: $(<"$T/hardcoded-tmp.txt")"
 fi
 [[ -z "$leaked" ]] || fail "written outside the test root: $leaked"

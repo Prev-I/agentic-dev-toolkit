@@ -243,6 +243,21 @@ def md_frontmatter(path):
     raise FrontmatterError("unterminated frontmatter")
 
 
+def assistant_uses(entries):
+    """The distinct `agent@provider/model#variant` values of a session's assistant
+    messages (the array V2_PICK_ASSISTANT emits), sorted. Empty when `entries`
+    is not a non-empty list of objects with a model object."""
+    if not isinstance(entries, list):
+        return []
+    uses = set()
+    for entry in entries:
+        if not isinstance(entry, dict) or not isinstance(entry.get("model"), dict):
+            continue
+        model = entry["model"]
+        uses.add(f"{entry.get('agent')}@{model.get('providerID')}/{model.get('id')}#{model.get('variant')}")
+    return sorted(uses)
+
+
 def breakglass_decision(permissions, agent_name="breakglass"):
     """The effective permission entry that decides a subagent call to AGENT_NAME.
 

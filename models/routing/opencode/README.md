@@ -95,6 +95,9 @@ commands run from the repository root. Paths under `~/.config/opencode` assume
 
 5. **Probe Breakglass.** It must resolve as a primary agent with the manifest's
    model, and no other agent may be able to dispatch it. Writes `breakglass.json`.
+   `--call` runs it once, with the same `opencode`/`OPENCODE_BIN` requirement
+   as the verifier. With `--call`, both tools require every assistant turn of
+   the session to have used the expected model and variant.
 
    ```bash
    work=$(mktemp -d)

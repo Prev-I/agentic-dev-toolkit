@@ -100,14 +100,18 @@ v2_run_isolated() {
   return "$rc"
 }
 
-# The one predicate that picks the assistant message a session used: an object
-# with a non-empty model object that is an assistant message. OpenCode 2.3.0
-# (measured 2026-11-21) marks it with `"type": "assistant"` and carries `agent`
-# and `model` at the top level, with no `role` and no `info` wrapper; the older
-# `.info.role == "assistant"` shape is still accepted. Last match wins.
+# The one predicate that selects the assistant messages of a session: objects
+# with a non-empty model object that are assistant messages. OpenCode 2.3.0
+# (measured 2026-11-21) marks them with `"type": "assistant"` and carries
+# `agent` and `model` at the top level, with no `role` and no `info` wrapper,
+# newest first; the older `.info.role == "assistant"` shape is still accepted.
+# It emits ALL of them as one array (nothing when there are none), never a
+# single pick: a session's turns can differ (a fallback, a variant change), and
+# the consumers require every turn to match, so array order cannot matter.
 V2_PICK_ASSISTANT='[(.data // [])[] | select(type == "object")
   | (if (.info | type) == "object" then .info else . end)
-  | select((.type == "assistant" or .role == "assistant") and (.model | type) == "object" and (.model | length) > 0)] | last // empty'
+  | select((.type == "assistant" or .role == "assistant") and (.model | type) == "object" and (.model | length) > 0)]
+  | if length > 0 then . else empty end'
 
 # v2_call_role URL ROLE WORKDIR -> writes WORKDIR/calls/ROLE.json
 v2_call_role() {

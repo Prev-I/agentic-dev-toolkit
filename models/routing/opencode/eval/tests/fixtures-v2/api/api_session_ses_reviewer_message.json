@@ -1,0 +1,22 @@
+{
+  "data": [
+    {
+      "info": {
+        "role": "user"
+      }
+    },
+    {
+      "info": {
+        "role": "assistant",
+        "agent": "reviewer",
+        "model": {
+          "id": "claude-opus-5.5",
+          "providerID": "github-copilot",
+          "variant": "high"
+        },
+        "cost": 0.017
+      },
+      "parts": []
+    }
+  ]
+}

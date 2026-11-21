@@ -1,0 +1,22 @@
+{
+  "data": [
+    {
+      "info": {
+        "role": "user"
+      }
+    },
+    {
+      "info": {
+        "role": "assistant",
+        "agent": "summary",
+        "model": {
+          "id": "gpt-6-luna",
+          "providerID": "github-copilot",
+          "variant": "low"
+        },
+        "cost": 0.017
+      },
+      "parts": []
+    }
+  ]
+}

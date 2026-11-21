@@ -1,0 +1,39 @@
+{
+  "location": {
+    "directory": "/neutral"
+  },
+  "data": {
+    "id": "plan",
+    "name": "Plan",
+    "model": {
+      "id": "claude-opus-5.5",
+      "providerID": "github-copilot",
+      "variant": "xhigh"
+    },
+    "request": {
+      "settings": {},
+      "headers": {},
+      "body": {}
+    },
+    "description": "fixture",
+    "mode": "primary",
+    "hidden": false,
+    "permissions": [
+      {
+        "action": "*",
+        "resource": "*",
+        "effect": "allow"
+      },
+      {
+        "action": "subagent",
+        "resource": "*",
+        "effect": "allow"
+      },
+      {
+        "action": "subagent",
+        "resource": "breakglass",
+        "effect": "deny"
+      }
+    ]
+  }
+}

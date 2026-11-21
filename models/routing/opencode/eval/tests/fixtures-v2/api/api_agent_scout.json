@@ -1,0 +1,39 @@
+{
+  "location": {
+    "directory": "/neutral"
+  },
+  "data": {
+    "id": "scout",
+    "name": "Scout",
+    "model": {
+      "id": "gpt-6-luna",
+      "providerID": "github-copilot",
+      "variant": "low"
+    },
+    "request": {
+      "settings": {},
+      "headers": {},
+      "body": {}
+    },
+    "description": "fixture",
+    "mode": "subagent",
+    "hidden": false,
+    "permissions": [
+      {
+        "action": "*",
+        "resource": "*",
+        "effect": "allow"
+      },
+      {
+        "action": "subagent",
+        "resource": "*",
+        "effect": "allow"
+      },
+      {
+        "action": "subagent",
+        "resource": "breakglass",
+        "effect": "deny"
+      }
+    ]
+  }
+}

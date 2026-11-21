@@ -1,0 +1,130 @@
+{
+  "data": [
+    {
+      "providerID": "github-copilot",
+      "id": "claude-opus-5.5",
+      "variants": [
+        {
+          "id": "low"
+        },
+        {
+          "id": "medium"
+        },
+        {
+          "id": "high"
+        },
+        {
+          "id": "xhigh"
+        },
+        {
+          "id": "max"
+        }
+      ]
+    },
+    {
+      "providerID": "github-copilot",
+      "id": "gpt-6.1-sol",
+      "variants": [
+        {
+          "id": "low"
+        },
+        {
+          "id": "medium"
+        },
+        {
+          "id": "high"
+        },
+        {
+          "id": "xhigh"
+        },
+        {
+          "id": "max"
+        }
+      ]
+    },
+    {
+      "providerID": "github-copilot",
+      "id": "gpt-6-luna",
+      "variants": [
+        {
+          "id": "low"
+        },
+        {
+          "id": "medium"
+        },
+        {
+          "id": "high"
+        },
+        {
+          "id": "xhigh"
+        },
+        {
+          "id": "max"
+        }
+      ]
+    },
+    {
+      "providerID": "github-copilot",
+      "id": "claude-sonnet-5.5",
+      "variants": [
+        {
+          "id": "low"
+        },
+        {
+          "id": "medium"
+        },
+        {
+          "id": "high"
+        },
+        {
+          "id": "xhigh"
+        },
+        {
+          "id": "max"
+        }
+      ]
+    },
+    {
+      "providerID": "openai",
+      "id": "gpt-6-astra",
+      "variants": [
+        {
+          "id": "low"
+        },
+        {
+          "id": "medium"
+        },
+        {
+          "id": "high"
+        },
+        {
+          "id": "xhigh"
+        },
+        {
+          "id": "max"
+        }
+      ]
+    },
+    {
+      "providerID": "openai",
+      "id": "gpt-6.1-sol",
+      "variants": [
+        {
+          "id": "low"
+        },
+        {
+          "id": "medium"
+        },
+        {
+          "id": "high"
+        },
+        {
+          "id": "xhigh"
+        },
+        {
+          "id": "max"
+        }
+      ]
+    }
+  ]
+}

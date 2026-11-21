@@ -1,0 +1,243 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+IFS=$'\n\t'
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+source "$root/tests/test-lib.sh"
+source "$root/runtime/opencode-v2-adapter/verify-effective-routing.sh"
+
+# verify_effective_routing_v2 against fake-api.py serving fixtures-v2/api.
+
+workdir=$(mktemp -d)
+server_pid=''
+stop_server() {
+  [[ -z "$server_pid" ]] || kill "$server_pid" 2>/dev/null || true
+  server_pid=''
+}
+cleanup() {
+  stop_server
+  rm -rf "${workdir:?}"
+}
+trap cleanup EXIT
+
+targets="$root/../v2/manifests/current-routing-targets.json"
+canned="$root/tests/fixtures-v2/api"
+printf 'OPENCODE_PASSWORD=test-only\n' >"$workdir/ok.env"
+mkdir -p "$workdir/neutral" "$workdir/project"
+
+# serve DIR: start the fake on a free port; sets $base, $server_pid.
+serve() {
+  local out="$workdir/server.out"
+  : >"$out"
+  FAKE_API_LOG="$workdir/requests.log" python3 "$root/tests/fixtures-v2/fake-api.py" 0 "$1" >"$out" &
+  server_pid=$!
+  for _ in $(seq 1 100); do
+    [[ -s "$out" ]] && break
+    sleep 0.05
+  done
+  [[ -s "$out" ]] || fail "fake-api.py did not report its port"
+  local port
+  IFS=" " read -r port _ <"$out"
+  base="http://127.0.0.1:$port"
+}
+
+# fresh NAME [keep-lazy]: a private copy of the canned fixtures.
+fresh() {
+  local d="$workdir/fx-$1"
+  rm -rf "${d:?}"
+  cp -r "$canned" "$d"
+  if [[ "${2:-}" != keep-lazy ]]; then
+    find "$d" -name '*.lazy' -delete
+  fi
+  printf '%s' "$d"
+}
+
+# edit FILE JQ-FILTER...: rewrite a fixture in place.
+edit() {
+  local f=$1
+  shift
+  jq "$@" "$f" >"$f.new" && mv "$f.new" "$f"
+}
+
+# run_verify NAME [extra args]: sets $rc and $out ($workdir/NAME/effective-routing.json).
+run_verify() {
+  local name=$1
+  shift
+  rc=0
+  verify_effective_routing_v2 --server "$base" --credentials "$workdir/ok.env" \
+    --targets "$targets" --outdir "$workdir/$name" --neutral-cwd "$workdir/neutral" "$@" \
+    >"$workdir/$name.log" 2>&1 || rc=$?
+  out="$workdir/$name/effective-routing.json"
+}
+
+role_status() { jq -r --arg r "$1" '.roles[$r].status' "$out"; }
+
+roles=$(jq -r '.agents | keys[]' "$targets")
+assert_eq 11 "$(wc -l <<<"$roles")"
+
+# 1. all eleven roles PASS, with every agent fixture marked lazy (Review focus 4).
+fx=$(fresh pass keep-lazy)
+assert_eq 11 "$(find "$fx" -name 'api_agent_*.lazy' | wc -l)"
+serve "$fx"
+run_verify pass
+assert_eq 0 "$rc"
+assert_eq PASS "$(jq -r .overall "$out")"
+assert_eq 2.3.0 "$(jq -r .runtime_version "$out")"
+assert_eq "$base" "$(jq -r .server "$out")"
+for r in $roles; do assert_eq PASS "$(role_status "$r")"; done
+assert_eq 11 "$(jq '.roles | length' "$out")"
+assert_eq deny "$(jq -r '.roles.build.neutral.subagent_breakglass.effect' "$out")"
+assert_eq null "$(jq -c '.roles.breakglass.neutral.subagent_breakglass' "$out")"
+assert_eq high "$(jq -r '.roles.build.neutral.resolved.variant' "$out")"
+stop_server
+# every lazy agent really was requested twice (404 then 200).
+assert_eq 22 "$(grep -c '^GET /api/agent/' "$workdir/requests.log")"
+
+# 2. a wrong variant is a MISMATCH naming the field.
+fx=$(fresh variant)
+edit "$fx/api_agent_build.json" '.data.model.variant = "low"'
+serve "$fx"
+run_verify variant
+assert_eq 1 "$rc"
+assert_eq MISMATCH "$(role_status build)"
+assert_eq MISMATCH "$(jq -r .overall "$out")"
+assert_contains "$(jq -r '.roles.build.neutral.mismatches | join(" ")' "$out")" "variant: expected 'high', got 'low'"
+assert_eq PASS "$(role_status plan)"
+assert_contains "$(<"$workdir/variant.log")" "MISMATCH"
+stop_server
+
+# 3. a variant /api/model does not offer for the model is a MISMATCH.
+fx=$(fresh novariant)
+edit "$fx/api_model.json" '(.data[] | select(.id == "gpt-6.1-sol") | .variants) |= map(select(.id != "high"))'
+serve "$fx"
+run_verify novariant
+assert_eq 1 "$rc"
+assert_eq MISMATCH "$(role_status build)"
+assert_contains "$(jq -r '.roles.build.neutral.mismatches | join(" ")' "$out")" "is not offered"
+assert_eq PASS "$(role_status general)"
+stop_server
+
+# 4. breakglass reachable as a subagent is a MISMATCH, whether re-allowed by name
+# or by a later wildcard.
+fx=$(fresh bgname)
+edit "$fx/api_agent_build.json" '.data.permissions += [{"action":"subagent","resource":"breakglass","effect":"allow"}]'
+serve "$fx"
+run_verify bgname
+assert_eq 1 "$rc"
+assert_eq MISMATCH "$(role_status build)"
+assert_contains "$(jq -r '.roles.build.neutral.mismatches | join(" ")' "$out")" "permissions"
+assert_eq allow "$(jq -r '.roles.build.neutral.subagent_breakglass.effect' "$out")"
+stop_server
+fx=$(fresh bgwild)
+edit "$fx/api_agent_plan.json" '.data.permissions += [{"action":"subagent","resource":"*","effect":"allow"}]'
+serve "$fx"
+run_verify bgwild
+assert_eq MISMATCH "$(role_status plan)"
+assert_eq '*' "$(jq -r '.roles.plan.neutral.subagent_breakglass.resource' "$out")"
+stop_server
+
+# 5. a forbidden model reference and the forbidden effective state are MISMATCHes.
+fx=$(fresh forbidden)
+edit "$fx/api_agent_expert.json" '.data.model = {"id":"gpt-5.6-sol","providerID":"openai","variant":"high"}'
+edit "$fx/api_agent_reviewer.json" '.data.model.id = "claude-opus-4.6"'
+serve "$fx"
+run_verify forbidden
+assert_eq MISMATCH "$(role_status expert)"
+assert_contains "$(jq -r '.roles.expert.neutral.mismatches | join(" ")' "$out")" "forbidden_effective_state"
+assert_contains "$(jq -r '.roles.reviewer.neutral.mismatches | join(" ")' "$out")" "forbidden reference"
+stop_server
+
+# 6. an agent that never resolves is a MISMATCH, not a hang.
+fx=$(fresh gone)
+rm -f "${fx:?}/api_agent_scout.json"
+serve "$fx"
+V2_AGENT_POLL_TIMEOUT=1 run_verify gone
+assert_eq 1 "$rc"
+assert_eq MISMATCH "$(role_status scout)"
+assert_contains "$(jq -r '.roles.scout.neutral.mismatches | join(" ")' "$out")" "did not resolve"
+stop_server
+
+# 7. a project-directory answer that differs is PROJECT_OVERRIDE, exit 0. The fake
+# ignores the query string, so the project answer is rewritten in a wrapper.
+orig_v2_agent_get=$(declare -f v2_agent_get)
+eval "${orig_v2_agent_get/v2_agent_get/real_v2_agent_get}"
+v2_agent_get() {
+  if [[ "$3" == "$workdir/project" && "$2" == build ]]; then
+    real_v2_agent_get "$@" | jq -c '.model.variant = "max"'
+  else
+    real_v2_agent_get "$@"
+  fi
+}
+fx=$(fresh project)
+serve "$fx"
+run_verify project --project-cwd "$workdir/project"
+assert_eq 0 "$rc"
+assert_eq PROJECT_OVERRIDE "$(role_status build)"
+assert_eq PROJECT_OVERRIDE "$(jq -r .overall "$out")"
+assert_eq max "$(jq -r '.roles.build.project.resolved.variant' "$out")"
+assert_eq PASS "$(role_status plan)"
+stop_server
+# the same wrapper with a neutral MISMATCH stays MISMATCH.
+edit "$fx/api_agent_build.json" '.data.model.variant = "low"'
+serve "$fx"
+run_verify projmismatch --project-cwd "$workdir/project"
+assert_eq 1 "$rc"
+assert_eq MISMATCH "$(role_status build)"
+stop_server
+unset -f v2_agent_get
+eval "${orig_v2_agent_get}"
+
+# 8. a password with a backslash exits 2 and makes no request (Review focus 5).
+fx=$(fresh backslash)
+serve "$fx"
+: >"$workdir/requests.log"
+printf 'OPENCODE_PASSWORD=bad\\pw\n' >"$workdir/bs.env"
+rc=0
+verify_effective_routing_v2 --server "$base" --credentials "$workdir/bs.env" --targets "$targets" \
+  --outdir "$workdir/bs" --neutral-cwd "$workdir/neutral" >/dev/null 2>&1 || rc=$?
+assert_eq 2 "$rc"
+assert_eq 0 "$(wc -c <"$workdir/requests.log")"
+[[ ! -e "$workdir/bs/effective-routing.json" ]] || fail "wrote a result for refused credentials"
+# usage errors also exit 2.
+rc=0; verify_effective_routing_v2 --server "$base" >/dev/null 2>&1 || rc=$?
+assert_eq 2 "$rc"
+rc=0; verify_effective_routing_v2 --bogus >/dev/null 2>&1 || rc=$?
+assert_eq 2 "$rc"
+assert_eq 0 "$(wc -c <"$workdir/requests.log")"
+stop_server
+
+# 9. --call: the recorded 2.x run output and the message fixture give called.used.
+fx=$(fresh call)
+serve "$fx"
+export FAKE_OPENCODE_LOG="$workdir/opencode.log"
+: >"$FAKE_OPENCODE_LOG"
+OPENCODE_BIN="$root/tests/fixtures-v2/fake-opencode-run.sh" run_verify call --call
+assert_eq 0 "$rc"
+assert_eq PASS "$(jq -r .overall "$out")"
+assert_eq 'build@github-copilot/gpt-6.1-sol#high' "$(jq -r '.roles.build.called.used' "$out")"
+assert_eq 'expert@openai/gpt-6-astra#xhigh' "$(jq -r '.roles.expert.called.used' "$out")"
+assert_eq true "$(jq -r '.roles.build.called.tool_called' "$out")"
+assert_eq 0.026 "$(jq -r '.roles.build.called.cost' "$out")"
+assert_eq 11 "$(grep -c '^password_set=yes ' "$FAKE_OPENCODE_LOG")"
+if grep -q 'test-only' "$FAKE_OPENCODE_LOG"; then fail "password reached the child's argv"; fi
+grep -q -- '\[--server\] \[http://127.0.0.1:' "$FAKE_OPENCODE_LOG" || fail "no --server in argv"
+grep -q -- '\[--agent\] \[build\] \[--format\] \[json\] \[--archived\] \[--auto\]' "$FAKE_OPENCODE_LOG" \
+  || fail "argv shape: $(head -1 "$FAKE_OPENCODE_LOG")"
+# the child ran in a directory holding probe.txt, removed afterwards.
+probe_dir=$(sed -n 's/.* cwd=\(.*\) probe=probe-.*/\1/p' "$FAKE_OPENCODE_LOG" | head -1)
+[[ -n "$probe_dir" ]] || fail "child did not see probe.txt: $(sed -n 2p "$FAKE_OPENCODE_LOG")"
+[[ ! -e "$probe_dir" ]] || fail "probe directory was not cleaned"
+stop_server
+
+# 10. --call with a different model in the session messages is a MISMATCH.
+edit "$fx/api_session_ses_build_message.json" '(.data[] | select(.info.role == "assistant") | .info.model.id) = "gpt-6-luna"'
+serve "$fx"
+OPENCODE_BIN="$root/tests/fixtures-v2/fake-opencode-run.sh" run_verify callbad --call
+assert_eq 1 "$rc"
+assert_eq MISMATCH "$(role_status build)"
+assert_eq 'build@github-copilot/gpt-6-luna#high' "$(jq -r '.roles.build.called.used' "$out")"
+assert_contains "$(jq -r '.roles.build.called_mismatches | join(" ")' "$out")" "expected build@github-copilot/gpt-6.1-sol#high"
+assert_eq PASS "$(jq -r '.roles.build.neutral.status' "$out")"
+assert_eq PASS "$(role_status plan)"
+stop_server
+
+printf 'PASS: v2-effective-routing-test\n'

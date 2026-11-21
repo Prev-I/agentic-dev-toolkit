@@ -1,0 +1,70 @@
+{
+  "role": "build",
+  "fixture": "models/routing/opencode/eval/fixtures/build-workloads/build-feature",
+  "agent": {
+    "name": "screening-build",
+    "markdown": null,
+    "mode": "primary",
+    "permissions": [
+      {
+        "action": "*",
+        "resource": "*",
+        "effect": "allow"
+      },
+      {
+        "action": "subagent",
+        "resource": "*",
+        "effect": "deny"
+      },
+      {
+        "action": "webfetch",
+        "resource": "*",
+        "effect": "deny"
+      },
+      {
+        "action": "websearch",
+        "resource": "*",
+        "effect": "deny"
+      }
+    ]
+  },
+  "workloads": [
+    {
+      "id": "coding",
+      "base": "{eval}/records/astra-build-followup/base-snapshot",
+      "overlay": [],
+      "prompt": "{eval}/runtime/opencode-v2-adapter/roles/build/coding-prompt.txt"
+    },
+    {
+      "id": "gate",
+      "base": "{eval}/fixtures/build-workloads/build-feature/snapshot",
+      "overlay": [],
+      "prompt": "{eval}/runtime/opencode-v2-adapter/roles/build/gate-prompt.txt"
+    }
+  ],
+  "extract": "none",
+  "capture_patch": true,
+  "timeout_seconds": 480,
+  "normalise": null,
+  "score": {
+    "per": "record",
+    "argv": [
+      "/usr/bin/python3",
+      "-I",
+      "-B",
+      "{eval}/scoring/build-quality-oc2.py",
+      "--record",
+      "{record}",
+      "--repo",
+      "{repo}"
+    ],
+    "stdout": null
+  },
+  "frozen": [
+    "{eval}/records/astra-build-followup/base-snapshot",
+    "{eval}/fixtures/build-workloads/build-feature/snapshot",
+    "{eval}/runtime/opencode-v2-adapter/roles/build/coding-prompt.txt",
+    "{eval}/runtime/opencode-v2-adapter/roles/build/gate-prompt.txt",
+    "{eval}/scoring/build-quality-oc2.py"
+  ]
+}

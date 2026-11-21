@@ -1,0 +1,102 @@
+{
+  "role": "reviewer",
+  "fixture": "models/routing/opencode/eval/fixtures/reviewer-seeded-defects-v2",
+  "agent": {
+    "name": "screening-reviewer",
+    "markdown": "models/routing/opencode/v2/.opencode/agents/reviewer.md",
+    "mode": "primary",
+    "permissions_append": [
+      {
+        "action": "webfetch",
+        "resource": "*",
+        "effect": "deny"
+      },
+      {
+        "action": "websearch",
+        "resource": "*",
+        "effect": "deny"
+      }
+    ]
+  },
+  "workloads": [
+    {
+      "id": "clean",
+      "base": "{fixture}/clean",
+      "overlay": [],
+      "prompt": "{eval}/runtime/opencode-v2-adapter/roles/reviewer/request.txt"
+    },
+    {
+      "id": "R-CONCURRENCY",
+      "base": "{fixture}/clean",
+      "overlay": [
+        "{fixture}/cases/R-CONCURRENCY/counter.sh"
+      ],
+      "prompt": "{eval}/runtime/opencode-v2-adapter/roles/reviewer/request.txt"
+    },
+    {
+      "id": "R-AUTH",
+      "base": "{fixture}/clean",
+      "overlay": [
+        "{fixture}/cases/R-AUTH/authorization.sh"
+      ],
+      "prompt": "{eval}/runtime/opencode-v2-adapter/roles/reviewer/request.txt"
+    },
+    {
+      "id": "R-API",
+      "base": "{fixture}/clean",
+      "overlay": [
+        "{fixture}/cases/R-API/api.sh"
+      ],
+      "prompt": "{eval}/runtime/opencode-v2-adapter/roles/reviewer/request.txt"
+    },
+    {
+      "id": "R-BOUNDARY",
+      "base": "{fixture}/clean",
+      "overlay": [
+        "{fixture}/cases/R-BOUNDARY/pagination.sh"
+      ],
+      "prompt": "{eval}/runtime/opencode-v2-adapter/roles/reviewer/request.txt"
+    },
+    {
+      "id": "R-ERROR",
+      "base": "{fixture}/clean",
+      "overlay": [
+        "{fixture}/cases/R-ERROR/storage.sh"
+      ],
+      "prompt": "{eval}/runtime/opencode-v2-adapter/roles/reviewer/request.txt"
+    }
+  ],
+  "extract": "json",
+  "capture_patch": false,
+  "timeout_seconds": 480,
+  "normalise": {
+    "per": "candidate-run",
+    "argv": [
+      "python3",
+      "-I",
+      "-B",
+      "{eval}/scoring/reviewer-normalise-oc2.py",
+      "{record}",
+      "{fixture}",
+      "{key}",
+      "{rep}"
+    ]
+  },
+  "score": {
+    "per": "candidate-run",
+    "argv": [
+      "python3",
+      "-I",
+      "-B",
+      "{eval}/scoring/reviewer-v2.py",
+      "{fixture}",
+      "{record}/findings-{key}-r{rep}.json"
+    ],
+    "stdout": "scores/{key}-r{rep}.json"
+  },
+  "frozen": [
+    "{fixture}",
+    "{eval}/scoring/reviewer-v2.py",
+    "{eval}/scoring/reviewer-normalise-oc2.py"
+  ]
+}

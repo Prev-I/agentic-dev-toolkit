@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Ported from the V1 file of the same name, for OpenCode 2. Changes: no
 # pricing_regime argument (the field is always opencode_reported), a
-# profile_digest field, and no Copilot-only credit derivation.
+# profile_digest field, no Copilot-only credit derivation, and python
+# runs isolated (-I -B).
 set -Eeuo pipefail
 IFS=$'\n\t'
 
@@ -12,7 +13,7 @@ emit_run_record() {
 }
 
 validate_installed_manifest() {
-  python3 - "$1" <<'PY'
+  python3 -I -B - "$1" <<'PY'
 import json
 import sys
 

@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Ported from the V1 file of the same name, for OpenCode 2. Unchanged.
+# Ported from the V1 file of the same name, for OpenCode 2. Unchanged except that
+# python runs isolated (-I -B).
 set -Eeuo pipefail
 IFS=$'\n\t'
 
 classify_capability_failure() {
-  python3 - "$1" <<'PY'
+  python3 -I -B - "$1" <<'PY'
 import json
 import sys
 

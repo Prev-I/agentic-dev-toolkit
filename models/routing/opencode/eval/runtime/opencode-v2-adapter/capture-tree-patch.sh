@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Ported unchanged from the V1 file of the same name, for OpenCode 2.
+# Ported from the V1 file of the same name, for OpenCode 2. Unchanged except
+# that python runs isolated (-I -B).
 set -Eeuo pipefail
 IFS=$'\n\t'
 
@@ -14,7 +15,7 @@ git diff --no-index --binary --no-renames --src-prefix=a/ --dst-prefix=b/ -- "$b
 status=$?
 set -e
 (( status == 0 || status == 1 )) || exit "$status"
-python3 - "$tmp" "$before" "$after" "$output" <<'PY'
+python3 -I -B - "$tmp" "$before" "$after" "$output" <<'PY'
 import sys
 text = open(sys.argv[1], encoding="utf-8", errors="surrogateescape").read()
 before = sys.argv[2].rstrip("/") + "/"

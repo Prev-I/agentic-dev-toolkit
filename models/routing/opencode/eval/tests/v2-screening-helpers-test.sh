@@ -22,7 +22,8 @@ cleanup() { rm -rf "$workdir"; }
 trap cleanup EXIT
 
 # ledger
-ledger="$workdir/ledger.json"
+mkdir "$workdir/ldir"
+ledger="$workdir/ldir/ledger.json"
 ledger_init "$ledger" '{"candidate_a": 10}'
 ledger_append "$ledger" candidate_a call1 fakep 4.5
 assert_eq 4.5 "$(ledger_spent "$ledger" candidate_a)"
@@ -30,7 +31,18 @@ ledger_admit "$ledger" candidate_a 5 || fail "admit 5 should succeed"
 if ledger_admit "$ledger" candidate_a 6; then fail "admit 6 should fail"; fi
 ledger_init "$ledger" '{"candidate_a": 99}'
 assert_eq 4.5 "$(ledger_spent "$ledger" candidate_a)"
+ledger_admit "$ledger" candidate_a 5.5 || fail "admit 5.5 should succeed at the cap"
+rc=0; ledger_admit "$ledger" candidate_a 6 || rc=$?
+assert_eq 1 "$rc"
+rc=0; ledger_admit "$ledger" nobody 1 || rc=$?
+assert_eq 2 "$rc"
+rc=0; ledger_admit "$ledger" candidate_a abc || rc=$?
+assert_eq 2 "$rc"
+rc=0; ledger_admit "$workdir/missing.json" candidate_a 1 || rc=$?
+assert_eq 2 "$rc"
+assert_eq ledger.json "$(ls -A "$workdir/ldir")"
 assert_eq 2.6 "$(ledger_credits_from_cost 0.026)"
+assert_eq 7.0 "$(ledger_credits_from_cost 0.07)"
 assert_eq null "$(ledger_credits_from_cost null)"
 assert_eq null "$(ledger_credits_from_cost '')"
 

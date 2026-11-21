@@ -1399,9 +1399,23 @@ the unauthenticated `/api/info` is 401 and the authenticated one is 200 JSON
 with a 2.x `version` and the unit's `MainPID` as `pid` (see
 [Verification](#verification)); `GET /api/session` lists as many sessions as the
 backup's `session` table holds, and one old session's `/api/session/<id>/message`
-answers 200; **one call per role your routing declares** succeeds against its
-provider, whatever that provider is; and `opencode service get` shows
-`disabled true` with `remote` unset. Bring the sidecars back last.
+answers 200; and `opencode service get` shows `disabled true` with `remote`
+unset. Then check that each role your routing declares resolves and answers
+against its provider, whatever that provider is. Run this from the root of
+the toolkit checkout:
+
+```bash
+work=$(mktemp -d)
+bash models/routing/opencode/eval/runtime/opencode-v2-adapter/verify-effective-routing.sh \
+  --server http://127.0.0.1:4096 --credentials ~/.config/opencode-runtime/secrets.env \
+  --targets models/routing/opencode/v2/manifests/current-routing-targets.json \
+  --outdir "$work/out" --neutral-cwd "$work" --call
+```
+
+Agents load lazily per directory, so the first lookup can miss. The verifier
+polls (up to 30 s), and so should anything you script by hand; one miss is not
+evidence an agent is absent. `probe-breakglass.sh` in the same directory checks
+the emergency agent the same way. Bring the sidecars back last.
 
 **10. The no-go point.** Once real use begins after this verification, the
 migration is behind you and the backup no longer holds current work: **fix

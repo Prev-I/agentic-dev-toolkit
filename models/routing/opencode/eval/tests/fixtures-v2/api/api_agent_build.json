@@ -1,0 +1,39 @@
+{
+  "location": {
+    "directory": "/neutral"
+  },
+  "data": {
+    "id": "build",
+    "name": "Build",
+    "model": {
+      "id": "gpt-6.1-sol",
+      "providerID": "github-copilot",
+      "variant": "high"
+    },
+    "request": {
+      "settings": {},
+      "headers": {},
+      "body": {}
+    },
+    "description": "fixture",
+    "mode": "primary",
+    "hidden": false,
+    "permissions": [
+      {
+        "action": "*",
+        "resource": "*",
+        "effect": "allow"
+      },
+      {
+        "action": "subagent",
+        "resource": "*",
+        "effect": "allow"
+      },
+      {
+        "action": "subagent",
+        "resource": "breakglass",
+        "effect": "deny"
+      }
+    ]
+  }
+}

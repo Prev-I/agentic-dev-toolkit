@@ -1,0 +1,104 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agents": {
+    "focus": {
+      "mode": "primary",
+      "model": {
+        "model": "m1",
+        "providerID": "gw"
+      },
+      "system": "Focus."
+    },
+    "plan": {
+      "disabled": true
+    },
+    "writer": {
+      "mode": "subagent",
+      "model": {
+        "model": "m1",
+        "providerID": "gw"
+      },
+      "request": {
+        "body": {
+          "temperature": 0.3
+        }
+      },
+      "system": "Write."
+    }
+  },
+  "commands": {
+    "hello": {
+      "description": "Greets",
+      "template": "Say hello"
+    }
+  },
+  "mcp": {
+    "servers": {
+      "off": {
+        "command": [
+          "true"
+        ],
+        "disabled": true,
+        "type": "local"
+      },
+      "on": {
+        "type": "remote",
+        "url": "http://mcp.invalid/mcp"
+      }
+    }
+  },
+  "model": {
+    "model": "m1",
+    "providerID": "gw"
+  },
+  "policies": [
+    {
+      "action": "provider.use",
+      "effect": "deny",
+      "resource": "*"
+    },
+    {
+      "action": "provider.use",
+      "effect": "allow",
+      "resource": "gw"
+    },
+    {
+      "action": "provider.use",
+      "effect": "allow",
+      "resource": "openai"
+    },
+    {
+      "action": "provider.use",
+      "effect": "deny",
+      "resource": "github-copilot"
+    }
+  ],
+  "providers": {
+    "gw": {
+      "models": {
+        "m1": {
+          "limit": {
+            "context": 1000,
+            "output": 100
+          },
+          "name": "M1",
+          "variants": [
+            {
+              "id": "high",
+              "settings": {
+                "reasoningEffort": "high"
+              }
+            }
+          ]
+        }
+      },
+      "name": "Gateway",
+      "package": "aisdk:@ai-sdk/openai-compatible",
+      "settings": {
+        "baseURL": "http://gateway.invalid/v1"
+      }
+    },
+    "openai": {}
+  },
+  "update": "disable"
+}

@@ -1,0 +1,29 @@
+{
+  "location": {
+    "directory": "/neutral"
+  },
+  "data": {
+    "id": "breakglass",
+    "name": "Breakglass",
+    "model": {
+      "id": "gpt-6.1-sol",
+      "providerID": "openai",
+      "variant": "max"
+    },
+    "request": {
+      "settings": {},
+      "headers": {},
+      "body": {}
+    },
+    "description": "fixture",
+    "mode": "primary",
+    "hidden": false,
+    "permissions": [
+      {
+        "action": "*",
+        "resource": "*",
+        "effect": "allow"
+      }
+    ]
+  }
+}

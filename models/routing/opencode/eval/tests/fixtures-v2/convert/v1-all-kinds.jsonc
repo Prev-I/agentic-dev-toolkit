@@ -1,0 +1,33 @@
+// A V1 config with one entry of each kind, converted by the real OpenCode 2.3.0
+// on 2026-11-21; real-2.3.0-info.json is the document layer info it reported.
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "gw/m1",
+  "autoupdate": false,
+  "server": { "port": 4999, "hostname": "127.0.0.1" },
+  "provider": {
+    "gw": {
+      "name": "Gateway",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": { "baseURL": "http://gateway.invalid/v1" },
+      "blacklist": ["m-bad"],
+      "models": {
+        "m1": { "name": "M1", "limit": { "context": 1000, "output": 100 },
+                "variants": { "high": { "reasoningEffort": "high" } } }
+      }
+    },
+    "openai": { "blacklist": ["gpt-old"], "whitelist": ["gpt-new"] }
+  },
+  "agent": {
+    "writer": { "mode": "subagent", "model": "gw/m1", "prompt": "Write.", "temperature": 0.3 },
+    "plan": { "disable": true }
+  },
+  "mode": { "focus": { "model": "gw/m1", "prompt": "Focus." } },
+  "command": { "hello": { "template": "Say hello", "description": "Greets" } },
+  "mcp": {
+    "off": { "type": "local", "command": ["true"], "enabled": false },
+    "on": { "type": "remote", "url": "http://mcp.invalid/mcp" }
+  },
+  "disabled_providers": ["github-copilot"],
+  "enabled_providers": ["gw", "openai"]
+}

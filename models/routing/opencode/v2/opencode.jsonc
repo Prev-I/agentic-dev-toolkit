@@ -1,0 +1,297 @@
+{
+  // OpenCode 2 multi-model routing configuration. Profile: v7-opencode2-2026-11-21.
+  //
+  // THIS FILE IS THE V2 ROUTING AUTHORITY for role -> model/variant/mode and for
+  // the subagent permission rules. .opencode/agents/*.md carry prompts and
+  // non-routing metadata only, never `model` or `permission`.
+  //
+  // The V1 files at the bundle root are frozen history and are not read by 2.x.
+
+  "$schema": "https://opencode.ai/config.json",
+
+  // Not used by activation: activation writes its own single entry, the absolute
+  // path given as --model-routing, and keeps the target's other entries.
+  "instructions": [
+    ".opencode/model-routing.md"
+  ],
+
+  // Baseline model applied when no agent override matches.
+  "model": {"providerID": "github-copilot", "model": "gpt-6.1-sol"},
+
+  "permissions": [
+    // Web search via Exa AI - requires OPENCODE_ENABLE_EXA=true in the environment.
+    {"action": "websearch", "resource": "*", "effect": "allow"},
+
+    // Breakglass is never reachable through ordinary subagent delegation.
+    // This deny rule is the security control; `hidden` is not one. It stays last.
+    {"action": "subagent", "resource": "*", "effect": "allow"},
+    {"action": "subagent", "resource": "breakglass", "effect": "deny"}
+  ],
+
+  "agents": {
+    // Architectural planning and task decomposition.
+    // Variant `xhigh` is user-selected and exposed by the current catalog.
+    "plan": {
+      "mode": "primary",
+      "model": {
+        "providerID": "github-copilot",
+        "model": "claude-opus-5.5",
+        "variant": "xhigh"
+      },
+      "permissions": [
+        {
+          "action": "edit",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "breakglass",
+          "effect": "deny"
+        },
+        {
+          "action": "shell",
+          "resource": "*",
+          "effect": "ask"
+        }
+      ]
+    },
+
+    // Hands-on code generation and modification; the user-selected controller.
+    "build": {
+      "mode": "primary",
+      "model": {
+        "providerID": "github-copilot",
+        "model": "gpt-6.1-sol",
+        "variant": "high"
+      },
+      "permissions": [
+        {
+          "action": "edit",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "breakglass",
+          "effect": "deny"
+        },
+        {
+          "action": "shell",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "shell",
+          "resource": "git push*",
+          "effect": "ask"
+        }
+      ]
+    },
+
+    // Catch-all delegated worker for bounded tasks.
+    "general": {
+      "model": {
+        "providerID": "github-copilot",
+        "model": "gpt-6.1-sol",
+        "variant": "medium"
+      },
+      "permissions": [
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "subagent",
+          "resource": "breakglass",
+          "effect": "deny"
+        }
+      ]
+    },
+
+    // Codebase discovery, search, and context gathering.
+    "explore": {
+      "model": {
+        "providerID": "github-copilot",
+        "model": "gpt-6-luna",
+        "variant": "medium"
+      }
+    },
+
+    // Targeted lookup and fact-finding across repositories.
+    "scout": {
+      "model": {
+        "providerID": "github-copilot",
+        "model": "gpt-6-luna",
+        "variant": "low"
+      }
+    },
+
+    // Independent read-only review. Copilot-hosted, deliberately a
+    // different family from the GPT implementers (Build and General).
+    "reviewer": {
+      "mode": "subagent",
+      "model": {
+        "providerID": "github-copilot",
+        "model": "claude-opus-5.5",
+        "variant": "high"
+      },
+      "permissions": [
+        {
+          "action": "edit",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "skill",
+          "resource": "*",
+          "effect": "allow"
+        },
+        {
+          "action": "shell",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "shell",
+          "resource": "git status*",
+          "effect": "allow"
+        },
+        {
+          "action": "shell",
+          "resource": "git diff*",
+          "effect": "allow"
+        },
+        {
+          "action": "shell",
+          "resource": "git log*",
+          "effect": "allow"
+        },
+        {
+          "action": "shell",
+          "resource": "git show*",
+          "effect": "allow"
+        }
+      ]
+    },
+
+    // Escalation-only adviser on direct OpenAI, for provider, quota,
+    // policy, credential and governance-domain separation from Copilot.
+    // Astra uses the existing OpenAI subscription connection at xhigh.
+    "expert": {
+      "mode": "subagent",
+      "model": {
+        "providerID": "openai",
+        "model": "gpt-6-astra",
+        "variant": "xhigh"
+      },
+      "steps": 6,
+      "hidden": true,
+      "permissions": [
+        {
+          "action": "edit",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "shell",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "webfetch",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "websearch",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "external_directory",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "skill",
+          "resource": "*",
+          "effect": "allow"
+        }
+      ]
+    },
+
+    // Human-selected primary only. Never subagent-routable; the deny rules
+    // above are the control. `hidden` is not a security property.
+    "breakglass": {
+      "mode": "primary",
+      "model": {
+        "providerID": "openai",
+        "model": "gpt-6.1-sol",
+        "variant": "max"
+      },
+      "permissions": [
+        {
+          "action": "edit",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "shell",
+          "resource": "*",
+          "effect": "deny"
+        },
+        {
+          "action": "subagent",
+          "resource": "*",
+          "effect": "deny"
+        }
+      ]
+    },
+
+    "compaction": {
+      "model": {
+        "providerID": "github-copilot",
+        "model": "claude-sonnet-5.5",
+        "variant": "low"
+      }
+    },
+
+    "title": {
+      "model": {
+        "providerID": "github-copilot",
+        "model": "gpt-6-luna",
+        "variant": "low"
+      }
+    },
+
+    "summary": {
+      "model": {
+        "providerID": "github-copilot",
+        "model": "gpt-6-luna",
+        "variant": "low"
+      }
+    }
+  }
+}

@@ -23,6 +23,7 @@ instructions/                   AGENTS.md pattern shipped to other projects
   AGENTS.md                     A TEMPLATE for consumers, not this repo's own
   adapters/{claude-code,codex,opencode}/
 models/routing/opencode/        Model-routing config bundle for OpenCode
+models/routing/opencode/v2/     The OpenCode 2.x bundle (current); the root files are frozen 1.x
 models/routing/claude-code/     Model-routing bundle for Claude Code: agents, policy,
                                 model-pinning hook, alignment check
 repository-policy/              `.repository-policy.yaml` format, schema and validator
@@ -70,7 +71,8 @@ bash tests/opencode-service.sh          # the service scripts suite
 bash tests/headroom-runtime.sh          # the Headroom runtime suite
 bash tests/claude-remote-control.sh     # the Remote Control runbook unit suite
 bash tests/azure-artifacts.sh           # Azure Artifacts configuration suite (requires real mise)
-bash models/routing/opencode/eval/run-tests.sh   # the routing eval suite
+bash models/routing/opencode/eval/run-tests.sh   # the routing eval suite, incl. the OpenCode 2
+                                                 # v2-*-test.sh suites under eval/tests/
 bash models/routing/claude-code/eval/run-tests.sh   # the Claude Code routing suite
 bash -n environments/linux/install.sh
 bash -n headroom-runtime/headroom-runtime.sh
@@ -91,7 +93,11 @@ shellcheck azure-artifacts/configure.sh tests/azure-artifacts.sh \
   models/routing/claude-code/hooks/pin-agent-model.sh \
   models/routing/claude-code/eval/run-tests.sh \
   models/routing/claude-code/eval/check-alignment.sh \
-  models/routing/claude-code/eval/tests/*.sh
+  models/routing/claude-code/eval/tests/*.sh \
+  models/routing/opencode/eval/check-alignment.sh \
+  models/routing/opencode/eval/runtime/opencode-v2-adapter/*.sh \
+  models/routing/opencode/eval/tests/v2-*-test.sh \
+  models/routing/opencode/eval/tests/fixtures-v2/*.sh
 ```
 
 All nine suites are the current required set. The routing evidence documents under
@@ -246,9 +252,20 @@ the target. Never restore a hard-coded `opencode.json` default: it creates a
 second routing authority beside the managed JSONC profile. Non-strict JSONC is
 never rewritten; the installer accepts it only when the exact pinned plugin is
 already present as a standalone generated entry, otherwise it fails closed and
-requires a manual edit or `--skip-superpowers`. Unlike strict JSON, JSONC is not
+requires a manual edit or `--skip-superpowers`. Reading the shape of a
+non-strict JSONC file needs `python3` (strict JSON is read with `jq`); without
+`python3` such a file is treated as unparseable and refused. Unlike strict JSON, JSONC is not
 normalized, so the operator must also remove any stale additional Superpowers
 entries manually.
+
+The installer writes the OpenCode 2.x `plugins` key, not the 1.x `plugin`, and
+creates a fresh config with `"update": "disable"`. It refuses a 1.x-shaped config
+(any of `agent`, `provider`, `permission`, `plugin`, `disabled_providers`,
+`autoupdate`, `server`, or an `mcp` object without `servers`) and an unparseable
+one, leaving the file unchanged: a file mixing both shapes silently loses
+settings upstream. The refusal names
+`models/routing/opencode/eval/runtime/opencode-v2-adapter/convert-v1-config.sh`
+as the converter.
 
 ## Repository policy
 

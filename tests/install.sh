@@ -89,9 +89,12 @@ test_opencode_superpowers_uses_the_selected_config() {
       || fail "fresh Superpowers configuration must create opencode.jsonc"
     [[ ! -e "$XDG_CONFIG_HOME/opencode/opencode.json" ]] \
       || fail "fresh Superpowers configuration must not create opencode.json"
-    jq -e --arg plugin "$plugin" '.plugin == [$plugin]' \
+    jq -e --arg plugin "$plugin" '.plugins == [$plugin]' \
       "$XDG_CONFIG_HOME/opencode/opencode.jsonc" >/dev/null \
       || fail "fresh JSONC config must contain the pinned Superpowers plugin"
+    jq -e --arg plugin "$plugin" '. == {"$schema": "https://opencode.ai/config.json", "update": "disable", "plugins": [$plugin]}' \
+      "$XDG_CONFIG_HOME/opencode/opencode.jsonc" >/dev/null \
+      || fail "fresh config must be the OpenCode 2 shape: update disable, plugins, no plugin"
   )
 
   (
@@ -103,7 +106,7 @@ test_opencode_superpowers_uses_the_selected_config() {
     cat > "$XDG_CONFIG_HOME/opencode/opencode.jsonc" <<EOF
 // generated JSONC fixture
 {
-  "plugin": [
+  "plugins": [
     "$plugin"
   ]
 }
@@ -127,7 +130,7 @@ EOF
     DRY_RUN=0
     mkdir -p "$XDG_CONFIG_HOME/opencode"
     cat > "$XDG_CONFIG_HOME/opencode/opencode.json" <<'EOF'
-{"plugin":["superpowers@git+https://github.com/obra/superpowers.git#old"]}
+{"plugins":["superpowers@git+https://github.com/obra/superpowers.git#old"]}
 EOF
     resolve_opencode_config
     configure_opencode_superpowers >/dev/null
@@ -135,7 +138,7 @@ EOF
       || fail "existing JSON must not create a competing JSONC config"
     [[ -f "$XDG_CONFIG_HOME/opencode/opencode.json.pre-agentic-dev-toolkit" ]] \
       || fail "updating existing JSON must preserve a backup"
-    jq -e --arg plugin "$plugin" '.plugin == [$plugin]' \
+    jq -e --arg plugin "$plugin" '.plugins == [$plugin]' \
       "$XDG_CONFIG_HOME/opencode/opencode.json" >/dev/null \
       || fail "existing JSON must replace an old Superpowers pin"
   )
@@ -164,7 +167,7 @@ EOF
     mkdir -p "$XDG_CONFIG_HOME/opencode"
     cat > "$XDG_CONFIG_HOME/opencode/opencode.jsonc" <<EOF
 {
-  "plugin": [
+  "plugins": [
     // "$plugin"
   ]
 }
@@ -192,7 +195,7 @@ test_opencode_superpowers_preflight_and_verification() {
     cat > "$XDG_CONFIG_HOME/opencode/opencode.jsonc" <<EOF
 // generated JSONC fixture
 {
-  "plugin": [
+  "plugins": [
     "$plugin"
   ]
 }
@@ -218,6 +221,226 @@ EOF
   assert_equal "$status" "1" "preflight must fail for JSONC without the pinned plugin"
   [[ "$output" == *"Could not confirm Superpowers"* ]] \
     || fail "preflight failure must explain the standalone plugin contract: $output"
+}
+
+test_opencode_superpowers_refuses_the_v1_shape() {
+  local root="$TEMP_DIR/opencode-superpowers-v1"
+  local plugin="$SUPERPOWERS_PLUGIN_BASE#$SUPERPOWERS_REF"
+  local output status before
+
+  # Strict V1: configure dies naming the converter and leaves the file alone.
+  mkdir -p "$root/strict"
+  printf '%s\n' "{\"plugin\":[\"$plugin\"]}" > "$root/strict/opencode.json"
+  before="$(sha256sum "$root/strict/opencode.json")"
+  status=0
+  output="$( (
+    OPENCODE_CONFIG="$root/strict/opencode.json"
+    SKIP_SUPERPOWERS=0
+    DRY_RUN=0
+    configure_opencode_superpowers
+  ) 2>&1)" || status=$?
+  assert_equal "$status" "1" "a V1 strict config must make configure die"
+  assert_contains "$output" "convert-v1-config" "the V1 refusal must name the converter"
+  assert_contains "$output" "models/routing/opencode/eval/runtime/opencode-v2-adapter/convert-v1-config.sh" \
+    "the V1 refusal must give the converter path"
+  assert_contains "$output" "$root/strict/opencode.json" "the V1 refusal must name the file"
+  assert_contains "$output" "did not change" "the V1 refusal must say the file is untouched"
+  assert_equal "$(sha256sum "$root/strict/opencode.json")" "$before" "a V1 strict config must stay unchanged"
+  [[ ! -e "$root/strict/opencode.json.pre-agentic-dev-toolkit" ]] \
+    || fail "a refused V1 config must not be backed up"
+
+  # Review focus 1: JSONC with a header comment, a URL string containing //,
+  # a V1 key and the pinned plugin line is V1, whatever the line match says.
+  mkdir -p "$root/jsonc"
+  cat > "$root/jsonc/opencode.jsonc" <<EOF
+// header comment
+{
+  "\$schema": "https://opencode.ai/config.json",
+  "agent": {},
+  "plugins": [
+    "$plugin"
+  ]
+}
+EOF
+  before="$(sha256sum "$root/jsonc/opencode.jsonc")"
+  assert_equal "$(opencode_config_shape "$root/jsonc/opencode.jsonc")" "v1" \
+    "JSONC with a V1 key and a // URL must be shaped v1"
+  status=0
+  output="$( (
+    OPENCODE_CONFIG="$root/jsonc/opencode.jsonc"
+    SKIP_SUPERPOWERS=0
+    DRY_RUN=0
+    configure_opencode_superpowers
+  ) 2>&1)" || status=$?
+  assert_equal "$status" "1" "V1 JSONC with the pinned line must die"
+  assert_contains "$output" "convert-v1-config" "the JSONC V1 refusal must name the converter"
+  assert_equal "$(sha256sum "$root/jsonc/opencode.jsonc")" "$before" "V1 JSONC must stay unchanged"
+
+  # Preflight and verification refuse it as well.
+  status=0
+  output="$( (
+    OPENCODE_CONFIG="$root/strict/opencode.json"
+    SKIP_SUPERPOWERS=0
+    DRY_RUN=0
+    VERIFY_ONLY=0
+    preflight_opencode_superpowers
+  ) 2>&1)" || status=$?
+  assert_equal "$status" "1" "preflight must die on V1"
+  assert_contains "$output" "convert-v1-config" "the preflight V1 refusal must name the converter"
+  status=0
+  output="$( (
+    OPENCODE_CONFIG="$root/jsonc/opencode.jsonc"
+    SKIP_SUPERPOWERS=0
+    DRY_RUN=0
+    verify_opencode_superpowers
+  ) 2>&1)" || status=$?
+  assert_equal "$status" "1" "verify must die on V1"
+  assert_contains "$output" "convert-v1-config" "the verify V1 refusal must name the converter"
+}
+
+test_opencode_config_shape_rule() {
+  local root="$TEMP_DIR/opencode-shape"
+  mkdir -p "$root"
+
+  assert_equal "$(opencode_config_shape "$root/missing.json")" "empty" "a missing file is empty"
+  : > "$root/zero.json"
+  assert_equal "$(opencode_config_shape "$root/zero.json")" "empty" "a zero-byte file is empty"
+  printf '%s' '{"plugins":["x"]}' > "$root/v2.json"
+  assert_equal "$(opencode_config_shape "$root/v2.json")" "v2" "plugins-only JSON is v2"
+  printf '%s' '{"mcp":{"a":{}}}' > "$root/mcp1.json"
+  assert_equal "$(opencode_config_shape "$root/mcp1.json")" "v1" "mcp without servers is v1"
+  printf '%s' '{"mcp":{"servers":{}}}' > "$root/mcp2.json"
+  assert_equal "$(opencode_config_shape "$root/mcp2.json")" "v2" "mcp with servers is v2"
+  printf '%s' '[1]' > "$root/array.json"
+  assert_equal "$(opencode_config_shape "$root/array.json")" "unparseable" "a non-object is unparseable"
+  printf '%s' '{oops' > "$root/bad.jsonc"
+  assert_equal "$(opencode_config_shape "$root/bad.jsonc")" "unparseable" "broken text is unparseable"
+  printf '\xef\xbb\xbf%s' '// c' > "$root/bom.jsonc"
+  printf '\n%s\n' '{"plugins":["x",],}' >> "$root/bom.jsonc"
+  assert_equal "$(opencode_config_shape "$root/bom.jsonc")" "v2" "a BOM and trailing commas are tolerated"
+  printf '%s\n' '{"update":"http://x/*not a comment*/y", /* c */ "plugin":[]}' > "$root/str.jsonc"
+  assert_equal "$(opencode_config_shape "$root/str.jsonc")" "v1" "comment markers inside strings are kept"
+  printf '%s\n' '// c' '{"mcp":{"a":{}}}' > "$root/pymcp.jsonc"
+  assert_equal "$(opencode_config_shape "$root/pymcp.jsonc")" "v1" "the python branch must apply the mcp rule"
+  printf '%s\n' '// c' '{"mcp":{"servers":{}}}' > "$root/pymcp2.jsonc"
+  assert_equal "$(opencode_config_shape "$root/pymcp2.jsonc")" "v2" "the python branch must accept mcp.servers"
+  printf '%s' '{"agent":{}}{}' > "$root/multi.json"
+  assert_equal "$(opencode_config_shape "$root/multi.json")" "unparseable" "a multi-document file is unparseable"
+  printf ' \n' > "$root/blank.json"
+  assert_equal "$(opencode_config_shape "$root/blank.json")" "unparseable" "a whitespace-only file is unparseable"
+  local key
+  for key in agent provider permission plugin disabled_providers autoupdate server; do
+    printf '%s' "{\"$key\":1}" > "$root/key.json"
+    assert_equal "$(opencode_config_shape "$root/key.json")" "v1" "$key is a V1 key"
+  done
+}
+
+test_opencode_superpowers_accepts_v2_jsonc_unchanged() {
+  local root="$TEMP_DIR/opencode-superpowers-v2jsonc"
+  local plugin="$SUPERPOWERS_PLUGIN_BASE#$SUPERPOWERS_REF"
+  local before
+
+  mkdir -p "$root"
+  cat > "$root/opencode.jsonc" <<EOF
+// header comment
+{
+  "update": "disable",
+  "plugins": [
+    "$plugin"
+  ]
+}
+EOF
+  before="$(sha256sum "$root/opencode.jsonc")"
+  (
+    OPENCODE_CONFIG="$root/opencode.jsonc"
+    SKIP_SUPERPOWERS=0
+    DRY_RUN=0
+    # Read indirectly by preflight_opencode_superpowers from the sourced installer.
+    # shellcheck disable=SC2034
+    VERIFY_ONLY=0
+    preflight_opencode_superpowers
+    configure_opencode_superpowers >/dev/null
+    verify_opencode_superpowers
+  )
+  assert_equal "$(sha256sum "$root/opencode.jsonc")" "$before" "V2 JSONC with the pinned line must stay byte-identical"
+}
+
+# PATH is narrowed inside subshells on purpose, to hide python3 from one call.
+# shellcheck disable=SC2030,SC2031
+test_opencode_superpowers_refuses_unparseable_configs() {
+  local root="$TEMP_DIR/opencode-superpowers-unparseable"
+  local plugin="$SUPERPOWERS_PLUGIN_BASE#$SUPERPOWERS_REF"
+  local name output status before
+
+  mkdir -p "$root" "$root/nopy"
+  printf '%s' '[1]' > "$root/array.json"
+  printf '%s' '{"agent":{}}{}' > "$root/multi.json"
+  printf ' \n' > "$root/blank.json"
+  cat > "$root/hand.jsonc" <<EOF
+// mine
+{
+  "agent": {},
+  "plugin": [
+    "$plugin"
+  ]
+}
+EOF
+  for name in array.json multi.json blank.json; do
+    before="$(sha256sum "$root/$name")"
+    status=0
+    output="$( (
+      OPENCODE_CONFIG="$root/$name"
+      SKIP_SUPERPOWERS=0
+      DRY_RUN=0
+      configure_opencode_superpowers
+    ) 2>&1)" || status=$?
+    assert_equal "$status" "1" "$name must make configure die"
+    assert_contains "$output" "could not be parsed" "$name refusal must say it is unparseable"
+    assert_equal "$(sha256sum "$root/$name")" "$before" "$name must stay unchanged"
+    [[ ! -e "$root/$name.pre-agentic-dev-toolkit" ]] || fail "$name must not be backed up"
+    status=0
+    output="$( (
+      OPENCODE_CONFIG="$root/$name"
+      SKIP_SUPERPOWERS=0
+      DRY_RUN=0
+      # Read indirectly by preflight_opencode_superpowers from the sourced installer.
+      # shellcheck disable=SC2034
+      VERIFY_ONLY=0
+      preflight_opencode_superpowers
+    ) 2>&1)" || status=$?
+    assert_equal "$status" "1" "$name must make preflight die"
+    status=0
+    ( OPENCODE_CONFIG="$root/$name"; SKIP_SUPERPOWERS=0; DRY_RUN=0; verify_opencode_superpowers ) \
+      >/dev/null 2>&1 || status=$?
+    assert_equal "$status" "1" "$name must make verify die"
+  done
+
+  # No python3: a non-strict file cannot be shaped, so it is refused even when
+  # the pinned plugin line is present (it could be a V1 file).
+  ln -s "$(command -v jq)" "$root/nopy/jq"
+  ln -s "$(command -v mkdir)" "$root/nopy/mkdir"
+  ln -s "$(command -v awk)" "$root/nopy/awk"
+  before="$(sha256sum "$root/hand.jsonc")"
+  status=0
+  output="$( (
+    export PATH="$root/nopy"
+    OPENCODE_CONFIG="$root/hand.jsonc"
+    SKIP_SUPERPOWERS=0
+    DRY_RUN=0
+    ! command -v python3 >/dev/null || fail "python3 must be hidden for this case"
+    configure_opencode_superpowers
+  ) 2>&1)" || status=$?
+  assert_equal "$status" "1" "non-strict JSONC without python3 must make configure die"
+  assert_contains "$output" "could not be parsed" "the no-python3 refusal must say it is unparseable"
+  assert_equal "$(sha256sum "$root/hand.jsonc")" "$before" "the file must stay unchanged without python3"
+  status=0
+  ( export PATH="$root/nopy"; OPENCODE_CONFIG="$root/hand.jsonc"; SKIP_SUPERPOWERS=0; DRY_RUN=0
+    verify_opencode_superpowers ) >/dev/null 2>&1 || status=$?
+  assert_equal "$status" "1" "verify must die on a non-strict file without python3"
+}
+
+test_installer_script_version_is_0_5_0() {
+  assert_equal "$SCRIPT_VERSION" "0.5.0" "the installer version after the V2 Superpowers writer"
 }
 
 load_installer_functions() {
@@ -1493,6 +1716,7 @@ setup_az_sandbox() {
   # ~/.local/bin -- which on a machine that has already run the installer holds
   # exactly this shim. Left alone, every case in this block would report a
   # shadowing that only the host, not the behaviour, produced.
+  # shellcheck disable=SC2031
   AZ_SANDBOX_ORIGINAL_PATH="$PATH"
   PATH="$HOME/.local/bin:/usr/bin:/bin"
 
@@ -2030,7 +2254,7 @@ test_installer_loads_catalog_beside_a_standalone_copy() {
   fi
 
   assert_equal "$status" "0" "a standalone two-file bundle must find its adjacent catalog"
-  assert_equal "$output" "0.4.0" "the standalone bundle must run the copied installer"
+  assert_equal "$output" "0.5.0" "the standalone bundle must run the copied installer"
 }
 
 test_installer_prefers_explicit_then_repository_catalog() {
@@ -2048,7 +2272,7 @@ test_installer_prefers_explicit_then_repository_catalog() {
     status=$?
   fi
   assert_equal "$status" "0" "an explicit catalog must override an adjacent catalog"
-  assert_equal "$output" "0.4.0" "an explicit valid catalog must let a standalone bundle run"
+  assert_equal "$output" "0.5.0" "an explicit valid catalog must let a standalone bundle run"
 
   cp "$INSTALLER" "$checkout/environments/linux/install.sh"
   cp "$CATALOG_FILE" "$checkout/catalog/software-catalog.env"
@@ -2060,7 +2284,7 @@ test_installer_prefers_explicit_then_repository_catalog() {
     status=$?
   fi
   assert_equal "$status" "0" "a recognized repository catalog must override an adjacent catalog"
-  assert_equal "$output" "0.4.0" "a repository-layout copy must run with its repository catalog"
+  assert_equal "$output" "0.5.0" "a repository-layout copy must run with its repository catalog"
 }
 
 test_source_commit_requires_the_exact_repository_root() {
@@ -2410,7 +2634,7 @@ test_installer_version_flag() {
   status=$?
   set -e
   assert_equal "$status" "0" "--version must exit 0"
-  assert_equal "$output" "0.4.0" "--version must print exactly the version"
+  assert_equal "$output" "0.5.0" "--version must print exactly the version"
   [[ "$output" != *"Unknown option"* ]] \
     || fail "--version must be parsed before the generic unknown-option arm"
 }
@@ -2434,7 +2658,7 @@ test_installer_version_ignores_ambiguous_opencode_config() {
   set -e
 
   assert_equal "$status" "0" "--version must not resolve the OpenCode config"
-  assert_equal "$output" "0.4.0" "--version with dual configs must print exactly the version"
+  assert_equal "$output" "0.5.0" "--version with dual configs must print exactly the version"
 }
 
 test_opencode_config_resolution_honors_skip_and_explicit_override() {
@@ -3177,6 +3401,11 @@ test_every_pin_is_wired_to_its_own_catalog_key
 test_opencode_config_selection
 test_opencode_superpowers_uses_the_selected_config
 test_opencode_superpowers_preflight_and_verification
+test_opencode_superpowers_refuses_the_v1_shape
+test_opencode_config_shape_rule
+test_opencode_superpowers_accepts_v2_jsonc_unchanged
+test_opencode_superpowers_refuses_unparseable_configs
+test_installer_script_version_is_0_5_0
 
 test_lttng_selector_prefers_time64_package_when_available
 test_lttng_selector_falls_back_to_legacy_package

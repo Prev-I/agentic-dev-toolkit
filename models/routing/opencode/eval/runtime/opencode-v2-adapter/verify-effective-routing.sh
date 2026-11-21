@@ -74,7 +74,7 @@ verify_effective_routing_v2() {
   mkdir -p "$outdir"
   rm -f "${outdir:?}/effective-routing.json"
   [[ -f "$targets" ]] || { printf 'verify_effective_routing_v2: no such targets file: %s\n' "$targets" >&2; return 2; }
-  jq -e . "$targets" >/dev/null 2>&1 || {
+  jq -e 'true' "$targets" >/dev/null 2>&1 || {
     printf 'verify_effective_routing_v2: the targets file is not valid JSON: %s\n' "$targets" >&2
     return 2
   }

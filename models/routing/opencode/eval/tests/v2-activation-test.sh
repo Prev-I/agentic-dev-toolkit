@@ -198,10 +198,17 @@ grep -q $'^// profile_id: .*\r$' "$crlf_root/opencode.jsonc" || fail "CRLF fixtu
 activate "$crlf_root" "$workspace/crlf/backups" >/dev/null 2>"$workspace/crlf.err"
 [[ "$(<"$workspace/crlf.err")" != *"comments"* ]] || fail "CRLF generated header reported as user comments: $(<"$workspace/crlf.err")"
 
+python3 "$helper" load "$main_root/opencode.jsonc" >"$workspace/after2.json"
+cmp -s "$workspace/after.json" "$workspace/after2.json" || fail "second activation changed content"
+
 # The header convert-v1-config.sh writes for .jsonc output is not a user comment.
 # The prefix is pinned against the converter so the two cannot drift.
-grep -qF "printf '// Converted from the OpenCode 1.x config %s" "$adapter/convert-v1-config.sh" \
-  || fail "convert-v1-config.sh no longer emits the header prefix activation recognises"
+for emitted in "printf '// Converted from the OpenCode 1.x config %s" "printf '// source sha256: %s" \
+  "printf '// converted at: %s" "printf '// OpenCode version: %s" \
+  "printf \"// converted with OpenCode 2's own translation (GET /api/config, document layer info)"; do
+  grep -qF -- "$emitted" "$adapter/convert-v1-config.sh" \
+    || fail "convert-v1-config.sh no longer emits a header line activation recognises: $emitted"
+done
 conv_body="{\"\$schema\":\"https://opencode.ai/config.json\"}"
 conv_root="$workspace/conv/config"
 mkdir -p "$conv_root"
@@ -218,8 +225,11 @@ mkdir -p "$conv2_root"
 { conv_header; printf '// my own note\n%s\n' "$conv_body"; } >"$conv2_root/opencode.jsonc"
 activate "$conv2_root" "$workspace/conv2/backups" >/dev/null 2>"$workspace/conv2.err"
 assert_contains "$(<"$workspace/conv2.err")" "user comments in $conv2_root/opencode.jsonc were dropped"
-python3 "$helper" load "$main_root/opencode.jsonc" >"$workspace/after2.json"
-cmp -s "$workspace/after.json" "$workspace/after2.json" || fail "second activation changed content"
+conv3_root="$workspace/conv3/config"
+mkdir -p "$conv3_root"
+{ conv_header; printf '// OpenCode version: pinned because of a regression\n%s\n' "$conv_body"; } >"$conv3_root/opencode.jsonc"
+activate "$conv3_root" "$workspace/conv3/backups" >/dev/null 2>"$workspace/conv3.err"
+assert_contains "$(<"$workspace/conv3.err")" "user comments in $conv3_root/opencode.jsonc were dropped"
 
 # --- V1-shaped target is refused and left untouched ------------------------
 v1_root="$workspace/v1/config"

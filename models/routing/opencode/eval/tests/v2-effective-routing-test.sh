@@ -418,6 +418,16 @@ for agents_json in '{}' 'null'; do
   [[ ! -e "$workdir/nocreds/effective-routing.json" ]] || fail "stale file survived an empty agents map"
 done
 
+# a whole-file null or false is valid JSON without an agents object.
+for whole in null false; do
+  printf '%s\n' "$whole" >"$workdir/whole.json"
+  rc=0
+  verify_effective_routing_v2 --server "http://127.0.0.1:1" --credentials "$workdir/ok.env" \
+    --targets "$workdir/whole.json" --outdir "$workdir/nocreds" --neutral-cwd "$workdir/neutral" \
+    >"$workdir/whole.log" 2>&1 || rc=$?
+  assert_eq 2 "$rc"
+  assert_contains "$(<"$workdir/whole.log")" "declares no agents"
+done
 # a targets file that is not JSON gets its own message, still exit 2.
 printf 'not json {\n' >"$workdir/badjson.json"
 printf '{"overall":"PASS"}\n' >"$workdir/nocreds/effective-routing.json"

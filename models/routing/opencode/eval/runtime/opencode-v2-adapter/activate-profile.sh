@@ -220,11 +220,12 @@ def without_generated_header(raw):
     if lines[0].startswith(CONVERTER_MARK_PREFIX):
         # convert-v1-config.sh writes this header for .jsonc output; recognised
         # only when contiguous at the top of the file.
-        index = 1
-        while index < len(lines) and (lines[index] == CONVERTER_LAST_LINE
-                                      or lines[index].startswith(CONVERTER_PREFIXES)):
-            index += 1
-        return "\n".join(lines[index:])
+        # Exactly the five lines the converter emits, in its order.
+        if (len(lines) >= 5
+                and all(lines[i + 1].startswith(CONVERTER_PREFIXES[i]) for i in range(3))
+                and lines[4] == CONVERTER_LAST_LINE):
+            return "\n".join(lines[5:])
+        return raw
     if lines[0] != HEADER_MARK:
         return raw
     index = 1

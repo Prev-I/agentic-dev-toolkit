@@ -24,7 +24,7 @@ source "$root/runtime/opencode-v1-adapter/select-activation-target.sh"
 # Never leave an earlier report behind: the early exits below run before
 # check_alignment_v2 sees --json, so a failed run must not read as ALIGNED.
 args=("$@")
-for ((i = 0; i < ${#args[@]} - 1; i++)); do
+for ((i = 0; i + 1 < ${#args[@]}; i += 2)); do
   [[ "${args[i]}" != --json ]] || rm -f -- "${args[i+1]}"
 done
 

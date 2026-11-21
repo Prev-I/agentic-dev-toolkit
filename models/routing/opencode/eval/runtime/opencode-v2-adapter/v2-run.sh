@@ -7,7 +7,7 @@
 #   v2_call_role URL ROLE WORKDIR         one `opencode run` of ROLE; writes
 #                                         WORKDIR/calls/ROLE{.jsonl,.err,.json,.assistant.json}
 #                                         (the client gets XDG_* dirs under its probe dir)
-#   V2_PICK_ASSISTANT                     the jq predicate that picks the used model
+#   V2_PICK_ASSISTANT                     the jq filter that selects every assistant message
 #
 # v2_run_isolated runs the collector in a subshell that owns its EXIT/INT/TERM
 # traps (the caller's traps are never read or modified) and returns the
@@ -100,12 +100,18 @@ v2_run_isolated() {
   return "$rc"
 }
 
-# The one predicate that picks the assistant message a session used: an object
-# (taken from .info when that is an object) with role assistant and a non-empty
-# model object. Last match wins.
+# The one predicate that selects the assistant messages of a session: objects
+# with a non-empty model object that are assistant messages. OpenCode 2.3.0
+# (measured 2026-11-21) marks them with `"type": "assistant"` and carries
+# `agent` and `model` at the top level, with no `role` and no `info` wrapper,
+# newest first; the older `.info.role == "assistant"` shape is still accepted.
+# It emits ALL of them as one array (nothing when there are none), never a
+# single pick: a session's turns can differ (a fallback, a variant change), and
+# the consumers require every turn to match, so array order cannot matter.
 V2_PICK_ASSISTANT='[(.data // [])[] | select(type == "object")
   | (if (.info | type) == "object" then .info else . end)
-  | select(.role == "assistant" and (.model | type) == "object" and (.model | length) > 0)] | last // empty'
+  | select((.type == "assistant" or .role == "assistant") and (.model | type) == "object" and (.model | length) > 0)]
+  | if length > 0 then . else empty end'
 
 # v2_call_role URL ROLE WORKDIR -> writes WORKDIR/calls/ROLE.json
 v2_call_role() {

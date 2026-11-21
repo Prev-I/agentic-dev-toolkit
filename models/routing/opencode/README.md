@@ -74,7 +74,10 @@ commands run from the repository root. Paths under `~/.config/opencode` assume
    resolves to (provider, model, variant, mode, the `subagent` deny on
    Breakglass, forbidden references) and writes `effective-routing.json`. Add
    `--project-cwd DIR` to see project overrides, and `--call` to run each role
-   once. `--credentials` is a dotenv file holding `OPENCODE_PASSWORD` or
+   once. `--call` starts the `opencode` client, so it must be on `PATH`, or
+   set `OPENCODE_BIN` to it (the vendor installer puts it in
+   `~/.opencode/bin/opencode`, which a non-interactive shell may not have on
+   `PATH`). `--credentials` is a dotenv file holding `OPENCODE_PASSWORD` or
    `OPENCODE_SERVER_PASSWORD`; it reaches curl through stdin, never argv.
    `--server` defaults to `http://127.0.0.1:4096` (the probe below too). Use a
    fresh directory for `--neutral-cwd`, so that no project config above it
@@ -92,6 +95,9 @@ commands run from the repository root. Paths under `~/.config/opencode` assume
 
 5. **Probe Breakglass.** It must resolve as a primary agent with the manifest's
    model, and no other agent may be able to dispatch it. Writes `breakglass.json`.
+   `--call` runs it once, with the same `opencode`/`OPENCODE_BIN` requirement
+   as the verifier. With `--call`, both tools require every assistant turn of
+   the session to have used the expected model and variant.
 
    ```bash
    work=$(mktemp -d)

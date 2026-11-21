@@ -153,6 +153,7 @@ work, targets_path, out_path, call, adapter, list_error = sys.argv[1:7]
 call = call == "1"
 sys.dont_write_bytecode = True
 sys.path.insert(0, adapter)
+import v2config  # noqa: E402
 from v2config import breakglass_decision  # noqa: E402
 
 targets = json.load(open(targets_path))
@@ -214,14 +215,14 @@ if call:
            "session": base.get("session")}
     if base.get("exit_code") not in (0, None):
         problems.append(f"call: opencode run exited {base.get('exit_code')}")
-    if not isinstance(assistant, dict):
+    uses = v2config.assistant_uses(assistant)
+    if not uses:
         problems.append("call: no assistant message with a model could be read back")
     else:
-        model = assistant.get("model") if isinstance(assistant.get("model"), dict) else {}
-        rec["used"] = (f"{assistant.get('agent')}@{model.get('providerID')}/"
-                       f"{model.get('id')}#{model.get('variant')}")
+        # Every assistant turn of the session must match, whatever the order.
+        rec["used"] = ",".join(uses)
         want = f"{name}@{expected['providerID']}/{expected['model']}#{expected['variant']}"
-        if rec["used"] != want:
+        if uses != [want]:
             problems.append(f"call: used {rec['used']}, expected {want}")
     record["called"] = rec
 

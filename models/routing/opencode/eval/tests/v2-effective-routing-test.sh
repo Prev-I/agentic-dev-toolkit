@@ -311,7 +311,7 @@ assert_eq 44 "$(grep -c '^xdg_' "$FAKE_OPENCODE_LOG")"
 stop_server
 
 # 10. --call with a different model in the session messages is a MISMATCH.
-edit "$fx/api_session_ses_build_message.json" '(.data[] | select(.info.role == "assistant") | .info.model.id) = "gpt-6-luna"'
+edit "$fx/api_session_ses_build_message.json" '(.data[] | select(.type == "assistant") | .model.id) = "gpt-6-luna"'
 serve "$fx"
 OPENCODE_BIN="$root/tests/fixtures-v2/fake-opencode-run.sh" run_verify callbad --call
 assert_eq 1 "$rc"
@@ -378,7 +378,7 @@ stop_server
 # a top-level assistant message (no .info) is accepted.
 fx=$(fresh callshape)
 printf '%s' '{"data":[{"info":null},{"info":{"role":"assistant","model":{}}},null]}' >"$fx/api_session_ses_build_message.json"
-jq '.data = [.data[1].info]' "$canned/api_session_ses_plan_message.json" >"$fx/api_session_ses_plan_message.json"
+jq '.data = [.data[] | select(.type == "assistant") | del(.type) + {role: "assistant"}]' "$canned/api_session_ses_plan_message.json" >"$fx/api_session_ses_plan_message.json"
 serve "$fx"
 OPENCODE_BIN="$root/tests/fixtures-v2/fake-opencode-run.sh" run_verify callshape --call
 assert_eq 1 "$rc"
@@ -585,6 +585,41 @@ assert_eq 0 "$rc"
 rc=0
 bash "$root/runtime/opencode-v2-adapter/verify-effective-routing.sh" >"$workdir/direct-none.log" 2>&1 || rc=$?
 assert_eq 2 "$rc"
+stop_server
+
+# 21. the assistant-message predicate on the shape OpenCode 2.3.0 returns
+# (measured 2026-11-21: newest first, `type` instead of `role`, top-level
+# agent/model, idle and agent-switched records), and on the older `.info` shape.
+real='{"data":[{"id":"e1","type":"idle","outcome":"completed","time":{}},
+ {"id":"m2","type":"assistant","agent":"build","model":{"id":"gpt-sol","providerID":"gw","variant":"high"},"cost":0.04,"content":[]},
+ {"id":"m1","type":"user","text":"probe","files":[]},
+ {"id":"e0","type":"agent-switched","agent":"build","previous":null}]}'
+fmt='map("\(.agent) \(.model.providerID)/\(.model.id)#\(.model.variant)") | join(",")'
+assert_eq 'build gw/gpt-sol#high' "$(jq -r "$V2_PICK_ASSISTANT | $fmt" <<<"$real")"
+legacy='{"data":[{"info":{"role":"user"}},{"info":{"role":"assistant","agent":"plan","model":{"id":"m","providerID":"p","variant":"v"}}}]}'
+assert_eq 'plan p/m#v' "$(jq -r "$V2_PICK_ASSISTANT | $fmt" <<<"$legacy")"
+# a top-level `role` (no .info wrapper) is accepted too
+assert_eq 'x p/m#v' "$(jq -r "$V2_PICK_ASSISTANT | $fmt" <<<'{"data":[{"role":"assistant","agent":"x","model":{"id":"m","providerID":"p","variant":"v"}}]}')"
+# idle, agent-switched, and assistant entries with an empty or null model are
+# never selected
+assert_eq '' "$(jq -r "$V2_PICK_ASSISTANT" <<<'{"data":[{"type":"agent-switched","agent":"build","model":{"id":"x"}},{"type":"idle"},{"type":"assistant","agent":"b","model":{}},{"type":"assistant","agent":"b","model":null}]}')"
+# every assistant turn is emitted, in the order the server gave them
+assert_eq 'b p/new#high,b p/old#high' "$(jq -r "$V2_PICK_ASSISTANT | $fmt" <<<'{"data":[{"type":"assistant","agent":"b","model":{"id":"new","providerID":"p","variant":"high"}},{"type":"assistant","agent":"b","model":{"id":"old","providerID":"p","variant":"high"}}]}')"
+
+# 22. --call: two assistant turns that agree pass; turns that disagree are a
+# MISMATCH whichever comes first (newest-first order must not hide the newer).
+fx=$(fresh turns)
+jq '.data |= [(.[] | select(.type == "assistant")), (.[] | select(.type == "assistant"))] + .' \
+  "$canned/api_session_ses_build_message.json" >"$fx/api_session_ses_build_message.json"
+jq '.data |= ([(.[] | select(.type == "assistant") | .model.variant = "low")] + .)' \
+  "$canned/api_session_ses_plan_message.json" >"$fx/api_session_ses_plan_message.json"
+serve "$fx"
+OPENCODE_BIN="$root/tests/fixtures-v2/fake-opencode-run.sh" run_verify turns --call
+assert_eq 1 "$rc"
+assert_eq PASS "$(role_status build)"
+assert_eq MISMATCH "$(role_status plan)"
+assert_contains "$(jq -r '.roles.plan.called_mismatches | join(" ")' "$out")" "#low"
+assert_contains "$(jq -r '.roles.plan.called.used' "$out")" ","
 stop_server
 
 printf 'PASS: v2-effective-routing-test\n'

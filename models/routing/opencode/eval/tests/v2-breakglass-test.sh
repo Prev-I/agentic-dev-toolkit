@@ -262,12 +262,23 @@ stop_server
 
 # 13. --call with a different model used is a FAIL; a failing run too.
 fx=$(fresh callbad)
-edit "$fx/api_session_ses_breakglass_message.json" '(.data[].info | select(.role == "assistant") | .model.id) = "gpt-6-luna"'
+edit "$fx/api_session_ses_breakglass_message.json" '(.data[] | select(.type == "assistant") | .model.id) = "gpt-6-luna"'
 serve "$fx"
 OPENCODE_BIN="$root/tests/fixtures-v2/fake-opencode-run.sh" run_probe callbad --call
 assert_eq 1 "$rc"
 assert_eq FAIL "$(jq -r .status "$out")"
 assert_eq 'breakglass@openai/gpt-6-luna#max' "$(jq -r .called.used "$out")"
+stop_server
+# a session whose newest turn used another variant is a FAIL, although its
+# oldest turn matches (2.3.0 lists messages newest first).
+fx=$(fresh callturns)
+edit "$fx/api_session_ses_breakglass_message.json" '.data |= ([(.[] | select(.type == "assistant") | .model.variant = "low")] + .)'
+serve "$fx"
+OPENCODE_BIN="$root/tests/fixtures-v2/fake-opencode-run.sh" run_probe callturns --call
+assert_eq 1 "$rc"
+assert_eq FAIL "$(jq -r .status "$out")"
+assert_contains "$(jq -r .called.used "$out")" "#low"
+assert_contains "$(jq -r .called.used "$out")" ","
 stop_server
 fx=$(fresh callexit)
 serve "$fx"

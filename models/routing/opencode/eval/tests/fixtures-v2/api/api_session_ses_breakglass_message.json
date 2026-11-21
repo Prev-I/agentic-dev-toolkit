@@ -1,22 +1,43 @@
 {
   "data": [
     {
-      "info": {
-        "role": "user"
+      "id": "evt_idle",
+      "type": "idle",
+      "outcome": "completed",
+      "time": {}
+    },
+    {
+      "id": "msg_a1",
+      "type": "assistant",
+      "agent": "breakglass",
+      "model": {
+        "id": "gpt-6.1-sol",
+        "providerID": "openai",
+        "variant": "max"
+      },
+      "cost": 0.017,
+      "finish": "stop",
+      "time": {
+        "created": 1795188393699
+      },
+      "tokens": {},
+      "content": []
+    },
+    {
+      "id": "msg_u0",
+      "type": "user",
+      "text": "probe",
+      "files": [],
+      "time": {
+        "created": 1795188393600
       }
     },
     {
-      "info": {
-        "role": "assistant",
-        "agent": "breakglass",
-        "model": {
-          "id": "gpt-6.1-sol",
-          "providerID": "openai",
-          "variant": "max"
-        },
-        "cost": 0.017
-      },
-      "parts": []
+      "id": "evt_switch",
+      "type": "agent-switched",
+      "agent": "breakglass",
+      "previous": null,
+      "time": {}
     }
   ]
 }

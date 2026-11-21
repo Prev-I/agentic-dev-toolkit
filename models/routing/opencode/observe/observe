@@ -86,6 +86,53 @@ def session_hash(key, sid):
     return hmac.new(key, sid.encode(), hashlib.sha256).hexdigest()[:16]
 
 
+V1_REQUIRED = {
+    "session": {"id", "parent_id", "directory", "version", "agent", "model", "time_created", "time_updated"},
+    "message": {"id", "session_id", "time_created", "data"},
+    "part": {"message_id", "session_id", "time_created", "data"},
+}
+V2_REQUIRED = {
+    "session_v2": {"id", "parent_id", "directory", "version", "agent", "model", "time_created", "time_updated"},
+    "session_message": {"id", "session_id", "type", "time_created", "data"},
+}
+
+
+def has_schema(db, required):
+    tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    for table, columns in required.items():
+        if table not in tables:
+            return False
+        if not columns <= {row[1] for row in db.execute(f'PRAGMA table_info("{table}")')}:
+            return False
+    return True
+
+
+def detect_schema(db):
+    # A 2.x database keeps its frozen 1.x tables, so v2 must win when both match.
+    if has_schema(db, V2_REQUIRED):
+        return "v2"
+    if has_schema(db, V1_REQUIRED):
+        return "v1"
+    raise ObserveError("unsupported_session_schema")
+
+
+def default_manifest(db_path):
+    root = Path(__file__).resolve().parent.parent
+    v1 = root / "eval/manifests/current-routing-targets.json"
+    v2 = root / "v2/manifests/current-routing-targets.json"
+    try:
+        path = Path(db_path).expanduser().resolve()
+        if not path.is_file():
+            return v1
+        db = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
+        try:
+            return v2 if detect_schema(db) == "v2" else v1
+        finally:
+            db.close()
+    except (ObserveError, sqlite3.Error):
+        return v1  # the reader reports the real error
+
+
 def connect_readonly(path):
     path = path.expanduser().resolve()
     if not path.is_file():
@@ -160,25 +207,42 @@ def read_jsonc(path):
     return json.loads(text)
 
 
+def live_route(live, agent):
+    """(model, variant) the config assigns to a role, for either config shape."""
+    if isinstance(live.get("agents"), dict):
+        model = (live["agents"].get(agent) or {}).get("model")
+        if not isinstance(model, dict):
+            return None, None
+        if not model.get("providerID") or not model.get("model"):
+            return None, None
+        return f"{model['providerID']}/{model['model']}", model.get("variant")
+    entry = live.get("agent", {}).get(agent, {})
+    return entry.get("model"), entry.get("variant")
+
+
 def profile_boundary(manifest, override=None, config=None):
     if override:
         return {"timestamp": iso_ms(utc_ms(override)), "source": "explicit_override"}
     data = json.loads(manifest.read_text(encoding="utf-8"))
+    targets = load_manifest(manifest)
+    reference = data.get("decision_reference", "")
     if config and config.is_file():
         try:
             live = read_jsonc(config)
             aligned = all(
-                live.get("agent", {}).get(agent, {}).get("model") == target["model"]
-                and live.get("agent", {}).get(agent, {}).get("variant") == target.get("variant")
-                for agent, target in data["agents"].items())
-            date = re.search(r"\d{4}-\d{2}-\d{2}", data.get("decision_reference", ""))
+                live_route(live, agent) == (target["model"], target.get("variant"))
+                for agent, target in targets.items())
+            date = re.search(r"\d{4}-\d{2}-\d{2}", reference)
             when = config.stat().st_mtime_ns // 1000000
+            if aligned and not reference:
+                return {"timestamp": iso_ms(when), "source": "aligned_config_mtime"}
             # A later edit must not silently redefine historical activation.
             if aligned and date and iso_ms(when).startswith(date.group()):
                 return {"timestamp": iso_ms(when), "source": "aligned_config_mtime"}
-        except (OSError, ValueError, TypeError):
+        except (OSError, ValueError, TypeError, AttributeError):
             pass
-    reference = data.get("decision_reference", "")
+    if not reference:
+        raise ObserveError("profile_effective_required")
     record = manifest.parent.parent.parent / reference
     if not record.is_file():
         raise ObserveError("profile_alignment_record_missing")
@@ -261,6 +325,14 @@ def relative_path(raw, root):
 
 def load_manifest(path):
     data = json.loads(path.read_text(encoding="utf-8"))
+    fmt = data.get("format")
+    if fmt == "opencode-v2-routing-targets/1":
+        return {
+            role: {"model": f"{row['providerID']}/{row['model']}",
+                   "variant": row.get("variant"), "mode": row.get("mode")}
+            for role, row in data["agents"].items()}
+    if fmt is not None:  # the 1.x manifest carries no format field
+        raise ObserveError("unsupported_manifest_format")
     return data["agents"]
 
 
@@ -346,6 +418,8 @@ def parse_log_files(log_dir, since):
 
 
 def collect(args):
+    if not args.manifest:
+        args.manifest = str(default_manifest(args.db))
     boundary = profile_boundary(Path(args.manifest), args.profile_effective,
                                 Path(args.activation_config).expanduser() if args.activation_config else None)
     args.since = args.since or boundary["timestamp"]
@@ -937,7 +1011,7 @@ def parser():
     report.add_argument("--log-dir", default=str(default_db().parent / "log"))
     report.add_argument("--state-dir", default=str(default_state()))
     report.add_argument("--eval-records", default=str(Path(__file__).resolve().parent.parent / "eval/records"))
-    report.add_argument("--manifest", default=str(Path(__file__).resolve().parent.parent / "eval/manifests/current-routing-targets.json"))
+    report.add_argument("--manifest", default=None)
     report.add_argument("--format", choices=("text", "json"), default="text")
     report.set_defaults(func=report_command)
     review = sub.add_parser("review")

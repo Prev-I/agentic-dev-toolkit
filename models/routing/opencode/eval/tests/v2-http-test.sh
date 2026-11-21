@@ -77,12 +77,47 @@ assert_eq 1 "$rc"
 out=$(v2_agent_get "$base" lazy /w)
 assert_contains "$out" '"id":"lazy"'
 [[ "$(jq -r '.model.providerID' <<<"$out")" == p ]] || fail "agent_get did not print .data"
+assert_eq 2 "$(grep -c '^GET /api/agent/lazy auth=ok ' "$workdir/requests.log")"
 
 # 5. a missing agent is bounded by V2_AGENT_POLL_TIMEOUT.
 start=$SECONDS
 rc=0; V2_AGENT_POLL_TIMEOUT=1 v2_agent_get "$base" ghost /w >/dev/null 2>&1 || rc=$?
 assert_eq 1 "$rc"
 (( SECONDS - start <= 3 )) || fail "agent_get exceeded its bound: $((SECONDS - start))s"
+
+# 5b. DIR is percent-encoded; a space and a # survive intact.
+: >"$workdir/requests.log"
+v2_agent_get "$base" build "/tmp/My Project#x&y" >/dev/null
+grep -qxF 'GET /api/agent/build auth=ok query=directory=%2Ftmp%2FMy%20Project%23x%26y' "$workdir/requests.log" \
+  || fail "directory was not percent-encoded: $(cat "$workdir/requests.log")"
+
+# 5c. a wrong password fails fast with the status, not after the full bound.
+start=$SECONDS
+rc=0; msg=$(V2_PASSWORD=wrong V2_AGENT_POLL_TIMEOUT=30 v2_agent_get "$base" build /w 2>&1) || rc=$?
+assert_eq 1 "$rc"
+assert_contains "$msg" 401
+(( SECONDS - start < 3 )) || fail "401 was retried: $((SECONDS - start))s"
+V2_PASSWORD=wrong
+rc=0; v2_api_get "$base" /api/agent/build >/dev/null 2>"$workdir/err" || rc=$?
+msg=$(<"$workdir/err")
+V2_PASSWORD=test-only
+assert_contains "$msg" "HTTP 401"
+assert_eq 401 "$V2_LAST_STATUS"
+if [[ "$msg" == *wrong* ]]; then fail "password echoed in a message"; fi
+
+# 5d. injection through V2_PASSWORD or the URL is refused at the point of use.
+rc=0; V2_PASSWORD=$'x"\nurl = "http://evil"' v2_api_get "$base" /api/agent/build >/dev/null 2>&1 || rc=$?
+assert_eq 2 "$rc"
+rc=0; V2_PASSWORD=$'x\ny' v2_api_get "$base" /api/agent/build >/dev/null 2>&1 || rc=$?
+assert_eq 2 "$rc"
+rc=0; v2_api_get "$base" $'/api/agent/build\nurl = "http://evil"' >/dev/null 2>&1 || rc=$?
+assert_eq 2 "$rc"
+
+# 5e. dotenv values lose trailing whitespace only.
+printf 'OPENCODE_PASSWORD=a b-pw  \t\n' >"$workdir/ws.env"
+v2_load_credentials "$workdir/ws.env"
+assert_eq 'a b-pw' "$V2_PASSWORD"
+V2_PASSWORD=test-only
 
 # 6. the password never reaches curl's argv.
 real_curl=$(command -v curl)
@@ -99,5 +134,13 @@ PATH="$stubdir:$PATH" v2_api_get "$base" "/api/agent/build" >/dev/null
 assert_file "$workdir/curl-argv"
 if grep -q 'test-only' "$workdir/curl-argv"; then fail "password appeared in curl argv"; fi
 grep -qx -- '-K' "$workdir/curl-argv" || fail "curl was not given -K"
+
+# 7. no server: keeps polling for the 5 s grace, then reports a connection failure.
+dead_port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')
+start=$SECONDS
+rc=0; msg=$(V2_AGENT_POLL_TIMEOUT=30 v2_agent_get "http://127.0.0.1:$dead_port" build /w 2>&1) || rc=$?
+assert_eq 1 "$rc"
+assert_contains "$msg" "connection failure"
+(( SECONDS - start >= 4 && SECONDS - start <= 10 )) || fail "grace out of range: $((SECONDS - start))s"
 
 printf 'PASS: v2-http-test\n'

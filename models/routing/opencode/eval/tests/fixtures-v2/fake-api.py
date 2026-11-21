@@ -10,7 +10,7 @@ answer {"_tag":"AgentNotFoundError"}, as a real server does before agents have
 loaded. A missing fixture answers 404 with a JSON body.
 
 Prints "<port> <pid>" on one line to stdout once listening. If FAKE_API_LOG is
-set, each request appends "METHOD PATH auth=ok|bad" to that file.
+set, each request appends "METHOD PATH auth=ok|bad query=RAW" to that file.
 """
 import base64
 import json
@@ -46,7 +46,8 @@ class Handler(BaseHTTPRequestHandler):
         authed = self.headers.get("Authorization") == EXPECTED
         if LOG:
             with lock, open(LOG, "a") as f:
-                f.write(f"{self.command} {path} auth={'ok' if authed else 'bad'}\n")
+                query = urlsplit(self.path).query
+                f.write(f"{self.command} {path} auth={'ok' if authed else 'bad'} query={query}\n")
         if not authed:
             self._send(401, '{"error":"unauthorized"}',
                        [("WWW-Authenticate", 'Basic realm="opencode"')])

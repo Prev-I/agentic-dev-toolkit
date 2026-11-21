@@ -11,6 +11,8 @@
 set -Eeuo pipefail
 
 V2_PASSWORD=${V2_PASSWORD:-}
+V2_LAST_STATUS=''
+V2_LAST_BODY=''
 
 v2_load_credentials() {
   local file=${1:?v2_load_credentials: FILE required} name line value=''
@@ -22,7 +24,7 @@ v2_load_credentials() {
     line=$(grep -E "^[[:space:]]*(export[[:space:]]+)?${name}=" "$file" | tail -n 1 || true)
     [[ -n "$line" ]] || continue
     value=${line#*=}
-    value=${value%$'\r'}
+    value=${value%"${value##*[![:space:]]}"}
     if [[ "$value" == \"*\" || "$value" == \'*\' ]]; then
       value=${value:1:${#value}-2}
     fi
@@ -39,35 +41,78 @@ v2_load_credentials() {
   V2_PASSWORD=$value
 }
 
-v2_api_get() {
-  local base=${1:?URL_BASE required} path=${2:?PATH required} url out code
+# Internal: one GET. Sets V2_LAST_STATUS (HTTP code, or "curl:<exit>") and
+# V2_LAST_BODY. Returns 0 on 200, 1 on any other outcome, 2 if the password or
+# URL could not be passed to curl safely. Diagnostics go to stderr and never
+# include the password.
+_v2_request() {
+  local base=$1 path=$2 url out rc=0
+  V2_LAST_STATUS='' V2_LAST_BODY=''
   url="$base$path"
-  if [[ "$url" == *\"* || "$url" == *\\* ]]; then
-    printf 'v2_api_get: refusing a URL containing " or \\\n' >&2
+  if [[ -z "$V2_PASSWORD" || "$V2_PASSWORD" == *[$'"\\\r\n']* ]]; then
+    printf 'v2_api_get: V2_PASSWORD is empty or contains a quote, backslash or line break\n' >&2
+    return 2
+  fi
+  if [[ "$url" == *[$'"\\\r\n']* ]]; then
+    printf 'v2_api_get: refusing a URL containing a quote, backslash or line break\n' >&2
+    return 2
+  fi
+  out=$(printf 'user = "opencode:%s"\nsilent\nmax-time = 5\nnoproxy = "127.0.0.1,localhost"\nwrite-out = "\\n%%{http_code}"\nurl = "%s"\n' \
+    "$V2_PASSWORD" "$url" | curl -q -K - 2>/dev/null) || rc=$?
+  if (( rc != 0 )); then
+    V2_LAST_STATUS="curl:$rc"
+    printf 'v2_api_get: curl failed (exit %s) for %s\n' "$rc" "$path" >&2
     return 1
   fi
-  out=$(printf 'user = "opencode:%s"\nsilent\nmax-time = 5\nwrite-out = "\\n%%{http_code}"\nurl = "%s"\n' \
-    "$V2_PASSWORD" "$url" | curl -K - 2>/dev/null) || return 1
-  code=${out##*$'\n'}
-  [[ "$code" == 200 ]] || return 1
-  printf '%s' "${out%$'\n'*}"
+  V2_LAST_STATUS=${out##*$'\n'}
+  V2_LAST_BODY=${out%$'\n'*}
+  if [[ "$V2_LAST_STATUS" != 200 ]]; then
+    printf 'v2_api_get: HTTP %s for %s\n' "$V2_LAST_STATUS" "$path" >&2
+    return 1
+  fi
+}
+
+v2_api_get() {
+  local rc=0
+  _v2_request "${1:?URL_BASE required}" "${2:?PATH required}" || rc=$?
+  (( rc == 0 )) || return "$rc"
+  printf '%s' "$V2_LAST_BODY"
 }
 
 v2_agent_get() {
   local base=${1:?URL_BASE required} role=${2:?ROLE required} dir=${3:?DIR required}
-  local deadline=$(( SECONDS + ${V2_AGENT_POLL_TIMEOUT:-30} )) body data
+  local timeout=${V2_AGENT_POLL_TIMEOUT:-30}
+  local deadline=$(( SECONDS + timeout )) grace=$(( SECONDS + 5 )) rc data encoded
+  encoded=$(jq -rn --arg d "$dir" '$d|@uri')
   while :; do
-    if body=$(v2_api_get "$base" "/api/agent/$role?directory=$dir"); then
-      data=$(jq -c 'select(.data.model != null) | .data' <<<"$body" 2>/dev/null || true)
-      if [[ -n "$data" ]]; then
-        printf '%s\n' "$data"
-        return 0
-      fi
-    fi
+    rc=0
+    _v2_request "$base" "/api/agent/$role?directory=$encoded" 2>/dev/null || rc=$?
+    case $rc in
+      0)
+        data=$(jq -c 'select(.data.model != null) | .data' <<<"$V2_LAST_BODY" 2>/dev/null || true)
+        if [[ -n "$data" ]]; then
+          printf '%s\n' "$data"
+          return 0
+        fi ;;
+      2)
+        printf 'v2_agent_get: V2_PASSWORD or the URL cannot be passed to curl safely\n' >&2
+        return 2 ;;
+    esac
+    case $V2_LAST_STATUS in
+      401|403)
+        printf 'v2_agent_get: server refused the credentials (HTTP %s)\n' "$V2_LAST_STATUS" >&2
+        return 1 ;;
+      curl:6|curl:7)
+        if (( SECONDS >= grace )); then
+          printf 'v2_agent_get: connection failure (%s) to %s; the server is not reachable\n' \
+            "$V2_LAST_STATUS" "$base" >&2
+          return 1
+        fi ;;
+    esac
     (( SECONDS < deadline )) || break
     sleep 0.25
   done
-  printf 'v2_agent_get: agent %s did not resolve for %s within %ss\n' \
-    "$role" "$dir" "${V2_AGENT_POLL_TIMEOUT:-30}" >&2
+  printf 'v2_agent_get: agent %s did not resolve for %s within %ss (last status %s)\n' \
+    "$role" "$dir" "$timeout" "$V2_LAST_STATUS" >&2
   return 1
 }

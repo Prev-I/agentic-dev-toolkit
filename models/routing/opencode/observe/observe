@@ -134,25 +134,155 @@ def default_manifest(db_path):
 
 
 def connect_readonly(path):
+    """Open the database read-only and return (db, schema)."""
     path = path.expanduser().resolve()
     if not path.is_file():
         raise ObserveError("session_database_not_found")
     db = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
-    required = {
-        "session": {"id", "parent_id", "directory", "version", "agent", "model", "time_created", "time_updated"},
-        "message": {"id", "session_id", "time_created", "data"},
-        "part": {"message_id", "session_id", "time_created", "data"},
-    }
-    tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    for table, columns in required.items():
-        if table not in tables:
-            db.close()
-            raise ObserveError("unsupported_session_schema")
-        actual = {row[1] for row in db.execute(f'PRAGMA table_info("{table}")')}
-        if not columns <= actual:
-            db.close()
-            raise ObserveError("unsupported_session_schema")
-    return db
+    try:
+        return db, detect_schema(db)
+    except BaseException:
+        db.close()
+        raise
+
+
+SESSION_KEYS = ("id", "parent", "directory", "version", "agent", "model", "created", "updated")
+SESSION_COLUMNS = "id,parent_id,directory,version,agent,model,time_created,time_updated"
+# Signals a 2.x database has no source for: no `patch` part (snapshot edits) and
+# no `retry` part exist in session_message, so they are reported unavailable.
+V2_UNAVAILABLE_SIGNALS = ["snapshot_edits", "retries"]
+
+
+def read_sessions(db, schema):
+    # A 2.x database keeps its 1.x `session` table frozen at the migration, so
+    # v2 reads session_v2 only, which holds the migrated rows and every new one.
+    table = "session_v2" if schema == "v2" else "session"
+    return {row[0]: dict(zip(SESSION_KEYS, row)) for row in db.execute(f"SELECT {SESSION_COLUMNS} FROM {table}")}
+
+
+def new_message(mid, when, data):
+    return {"id": mid, "time": when, "data": data, "texts": [], "edits": [], "snapshot_edits": [], "skills": [], "tasks": [], "answers": []}
+
+
+def apply_part(message, data):
+    """Fold one 1.x part (or a 2.x content item in 1.x part shape) into a message."""
+    if data.get("type") == "text" and not data.get("synthetic") and not data.get("ignored"):
+        message["texts"].append(str(data.get("text", "")))
+    elif data.get("type") == "patch":
+        for path in data.get("files") or []:
+            if isinstance(path, str):
+                message["snapshot_edits"].append((path, "update"))
+    elif data.get("type") == "agent":
+        message["tasks"].append(data.get("name"))
+    elif data.get("type") == "retry":
+        message["retries"] = message.get("retries", 0) + 1
+    if data.get("type") != "tool":
+        return
+    tool = data.get("tool")
+    state_data = data.get("state") if isinstance(data.get("state"), dict) else {}
+    if state_data.get("status") != "completed":
+        return
+    inp = state_data.get("input") if isinstance(state_data.get("input"), dict) else {}
+    meta = state_data.get("metadata") if isinstance(state_data.get("metadata"), dict) else {}
+    if tool == "skill":
+        message["skills"].append(inp.get("name"))
+    elif tool == "task":
+        message["tasks"].append({"agent": inp.get("subagent_type"), "child": meta.get("sessionId"),
+                                 "packet": packet_present(str(inp.get("prompt", "")))})
+    elif tool == "subagent":  # 2.x only
+        message["tasks"].append({"agent": inp.get("agent"), "child": meta.get("sessionID"),
+                                 "packet": packet_present(str(inp.get("prompt", "")))})
+    elif tool == "question":
+        for group in meta.get("answers") or []:
+            if isinstance(group, list):
+                message["answers"].extend(str(answer) for answer in group)
+    elif tool == "apply_patch":
+        for item in meta.get("files") or []:
+            if isinstance(item, dict):
+                message["edits"].append((item.get("relativePath") or item.get("filePath"), item.get("type")))
+    elif tool in ("edit", "write"):
+        exists = meta.get("exists")
+        message["edits"].append((inp.get("filePath"), "update" if tool == "edit" or exists else "add"))
+
+
+def v2_message_data(kind, data):
+    """1.x-shaped `message.data` for a 2.x row, or None when it carries no message signal.
+
+    1.x field -> 2.x source, for every `message.data` field collect() reads:
+    - role: the row's `type` (`assistant` or `user`). `system` and `synthetic`
+      rows are dropped, mirroring 1.x's synthetic/ignored text filter, and so
+      are `idle`, `agent-switched` and `compaction`.
+    - agent: `data.agent` (assistant only, as collect() reads it).
+    - providerID / modelID / variant: `data.model.{providerID, id, variant}`.
+    - error: none. 1.x carries a structured {name, data: {statusCode, message}}
+      object; 2.x `finish`/`rawFinish` are finish reasons with no status code or
+      error name, so mapping them would invent an error class. 2.x provider
+      errors come from the log's `stream error` lines instead.
+    - parentID: none. 2.x rows carry no parent message link, so the 1.18.32
+      compaction-variant check cannot match on a 2.x read.
+    - mode, path, time: not read by collect(); time comes from the row.
+    """
+    if kind == "user":
+        return {"role": "user"}
+    if kind != "assistant":
+        return None
+    route = data.get("model") if isinstance(data.get("model"), dict) else {}
+    return {"role": "assistant", "agent": data.get("agent"), "providerID": route.get("providerID"),
+            "modelID": route.get("id"), "variant": route.get("variant"),
+            # Kept for the NULL session-model fallback; parse_session_model reads it.
+            "model": route}
+
+
+def read_messages(db, schema, session_ids):
+    """{sid: [message]} for the given sessions, sorted by (time, id)."""
+    messages = defaultdict(list)
+    ids = json.dumps(list(session_ids))
+    if schema == "v2":
+        for mid, sid, kind, when, raw in db.execute("SELECT id,session_id,type,time_created,data FROM session_message WHERE session_id IN (SELECT value FROM json_each(?))", (ids,)):
+            try:
+                data = json.loads(raw)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if not isinstance(data, dict):
+                continue
+            shaped = v2_message_data(kind, data)
+            if shaped is None:
+                continue
+            message = new_message(mid, when, shaped)
+            if kind == "user":
+                apply_part(message, {"type": "text", "text": data.get("text", "")})
+            else:
+                for item in data.get("content") or []:
+                    if not isinstance(item, dict) or item.get("type") not in ("text", "tool"):
+                        continue  # reasoning carries no signal
+                    if item["type"] == "text":
+                        apply_part(message, {"type": "text", "text": item.get("text", "")})
+                    else:
+                        apply_part(message, {"type": "tool", "tool": item.get("name"), "state": item.get("state")})
+            messages[sid].append(message)
+        for sid in messages:
+            messages[sid].sort(key=lambda item: (item["time"], item["id"]))
+        return messages
+    message_root = {}
+    for mid, sid, when, raw in db.execute("SELECT id,session_id,time_created,data FROM message WHERE session_id IN (SELECT value FROM json_each(?))", (ids,)):
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        messages[sid].append(new_message(mid, when, data))
+        message_root[mid] = messages[sid][-1]
+    for sid in messages:
+        messages[sid].sort(key=lambda item: (item["time"], item["id"]))
+    for mid, sid, when, raw in db.execute("SELECT message_id,session_id,time_created,data FROM part WHERE session_id IN (SELECT value FROM json_each(?))", (ids,)):
+        target = message_root.get(mid)
+        if target is None:
+            continue
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        apply_part(target, data)
+    return messages
 
 
 def worktree_root(directory):
@@ -432,13 +562,9 @@ def collect(args):
     if args.previous_config and Path(args.previous_config).expanduser().is_file():
         previous = read_jsonc(Path(args.previous_config).expanduser()).get("agent", {})
     known_dispatchers = dispatcher_sessions(Path(args.eval_records) if args.eval_records else None)
-    db = connect_readonly(Path(args.db))
+    db, schema = connect_readonly(Path(args.db))
     db.execute("BEGIN")
-    sessions = {}
-    for row in db.execute(
-        "SELECT id,parent_id,directory,version,agent,model,time_created,time_updated FROM session",
-    ):
-        sessions[row[0]] = dict(zip(("id", "parent", "directory", "version", "agent", "model", "created", "updated"), row))
+    sessions = read_sessions(db, schema)
 
     def root_id(sid):
         seen = set()
@@ -466,65 +592,16 @@ def collect(args):
         root_info[rid] = {"class": category, "worktree": wt, "hash": session_hash(key, rid), "members": members,
                           "repository": repository_class(root["directory"], wt)}
 
-    messages = defaultdict(list)
-    message_root = {}
-    session_ids = json.dumps(list(sessions))
-    for mid, sid, when, raw in db.execute("SELECT id,session_id,time_created,data FROM message WHERE session_id IN (SELECT value FROM json_each(?))", (session_ids,)):
-        if roots[sid] not in root_info:
-            continue
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError:
-            continue
-        messages[sid].append({"id": mid, "time": when, "data": data, "texts": [], "edits": [], "snapshot_edits": [], "skills": [], "tasks": [], "answers": []})
-        message_root[mid] = (sid, messages[sid][-1])
-
-    for sid in messages:
-        messages[sid].sort(key=lambda item: (item["time"], item["id"]))
-
-    for mid, sid, when, raw in db.execute("SELECT message_id,session_id,time_created,data FROM part WHERE session_id IN (SELECT value FROM json_each(?))", (session_ids,)):
-        target = message_root.get(mid)
-        if target is None:
-            continue
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError:
-            continue
-        message = target[1]
-        if data.get("type") == "text" and not data.get("synthetic") and not data.get("ignored"):
-            message["texts"].append(str(data.get("text", "")))
-        elif data.get("type") == "patch":
-            for path in data.get("files") or []:
-                if isinstance(path, str):
-                    message["snapshot_edits"].append((path, "update"))
-        elif data.get("type") == "agent":
-            message["tasks"].append(data.get("name"))
-        elif data.get("type") == "retry":
-            message["retries"] = message.get("retries", 0) + 1
-        if data.get("type") != "tool":
-            continue
-        tool = data.get("tool")
-        state_data = data.get("state") if isinstance(data.get("state"), dict) else {}
-        if state_data.get("status") != "completed":
-            continue
-        inp = state_data.get("input") if isinstance(state_data.get("input"), dict) else {}
-        meta = state_data.get("metadata") if isinstance(state_data.get("metadata"), dict) else {}
-        if tool == "skill":
-            message["skills"].append(inp.get("name"))
-        elif tool == "task":
-            message["tasks"].append({"agent": inp.get("subagent_type"), "child": meta.get("sessionId"),
-                                     "packet": packet_present(str(inp.get("prompt", "")))})
-        elif tool == "question":
-            for group in meta.get("answers") or []:
-                if isinstance(group, list):
-                    message["answers"].extend(str(answer) for answer in group)
-        elif tool == "apply_patch":
-            for item in meta.get("files") or []:
-                if isinstance(item, dict):
-                    message["edits"].append((item.get("relativePath") or item.get("filePath"), item.get("type")))
-        elif tool in ("edit", "write"):
-            exists = meta.get("exists")
-            message["edits"].append((inp.get("filePath"), "update" if tool == "edit" or exists else "add"))
+    messages = read_messages(db, schema, [sid for sid in sessions if roots[sid] in root_info])
+    message_root = {message["id"]: (sid, message) for sid, rows in messages.items() for message in rows}
+    if schema == "v2":
+        # 2.x sessions store no model (NULL): the route is per assistant message,
+        # so the session's model is its first assistant message's model.
+        for sid, rows in messages.items():
+            if not sessions[sid]["model"]:
+                first = next((m for m in rows if m["data"].get("role") == "assistant" and m["data"].get("model")), None)
+                if first:
+                    sessions[sid]["model"] = first["data"]["model"]
 
     streams, log_errors, log_count, process_starts = parse_log_files(Path(args.log_dir) if args.log_dir else None, since)
     db.close()
@@ -906,6 +983,8 @@ def collect(args):
             "database": True, "log_files": log_count,
             "dispatcher_ids_loaded": len(known_dispatchers),
             "opencode_versions": sorted({s["version"] for s in sessions.values() if s["version"]}),
+            "session_schema": schema,
+            **({"unavailable_signals": list(V2_UNAVAILABLE_SIGNALS)} if schema == "v2" else {}),
         },
         "session_classes": {category: populations[category]["sessions"] for category in POPULATIONS},
         **{name: production[name] for name in ("agents", "signals", "gate_outcomes", "gate_parity_outcomes", "agent_signals", "provider_errors", "provider_retries", "routing_requests", "escalations")},
@@ -991,8 +1070,8 @@ def review_command(args):
 def locate_command(args):
     state = ensure_state(Path(args.state_dir))
     key = key_for(state)
-    db = connect_readonly(Path(args.db))
-    matches = [row[0] for row in db.execute("SELECT id FROM session") if session_hash(key, row[0]) == args.session]
+    db, schema = connect_readonly(Path(args.db))
+    matches = [sid for sid in read_sessions(db, schema) if session_hash(key, sid) == args.session]
     db.close()
     if len(matches) != 1:
         raise ObserveError("session_hash_not_found")

@@ -117,8 +117,8 @@ def main():
         try:
             detect_schema(db)
             raise AssertionError("expected unsupported_session_schema")
-        except ObserveError:
-            pass
+        except ObserveError as error:
+            assert str(error) == "unsupported_session_schema"
         finally:
             db.close()
 

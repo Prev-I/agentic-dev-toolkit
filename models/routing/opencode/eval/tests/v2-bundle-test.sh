@@ -95,6 +95,7 @@ for role, target in v1_manifest["agents"].items():
         row.get("mode")), f"manifest mismatch for {role}"
     assert m["mode"] == target["mode"], f"mode drift for {role}"
 
+assert config.get("$schema") == "https://opencode.ai/config.json", "$schema"
 for key in ("agent", "permission", "plugin", "provider", "server"):
     assert key not in config, key
 assert config["permissions"][-1] == {"action": "subagent", "resource": "breakglass", "effect": "deny"}

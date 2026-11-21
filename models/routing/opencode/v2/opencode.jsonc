@@ -7,6 +7,8 @@
   //
   // The V1 files at the bundle root are frozen history and are not read by 2.x.
 
+  "$schema": "https://opencode.ai/config.json",
+
   // The single instructions entry; the installer rewrites it to an absolute path.
   "instructions": [
     ".opencode/model-routing.md"

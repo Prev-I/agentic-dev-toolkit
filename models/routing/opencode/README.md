@@ -9,6 +9,135 @@ Routing is split deliberately into two layers:
 
 The routing policy is loaded through OpenCode's `instructions` setting; it does not need to be merged into the project's `AGENTS.md`.
 
+> **Which version is this?** The sections up to "OpenCode 1.x (history)" describe
+> OpenCode 2.x, the current target. Everything after that heading describes the
+> frozen 1.x bundle and is kept as history.
+
+## OpenCode 2 (current)
+
+The 2.x bundle lives under `v2/`:
+
+```text
+v2/opencode.jsonc                          routing authority: model, agents, permissions
+v2/.opencode/agents/{reviewer,expert,scout}.md   prompts and non-routing metadata
+v2/.opencode/model-routing.md              the routing policy, loaded through `instructions`
+v2/manifests/current-routing-targets.json  roles, models, variants, forbidden references
+```
+
+The adapter is `eval/runtime/opencode-v2-adapter/`. The workflow, in order. All
+commands run from the repository root; `<...>` values are yours.
+
+1. **Convert once.** Turn an existing 1.x config into the 2.x shape. Upstream
+   offers no non-interactive converter, so this uses OpenCode 2's own
+   translation in a sandbox, backs up the input, and prints a `dropped:` line
+   for everything 2.x cannot carry.
+
+   ```bash
+   bash models/routing/opencode/eval/runtime/opencode-v2-adapter/convert-v1-config.sh \
+     --input ~/.config/opencode/opencode.jsonc --output ~/.config/opencode/opencode.jsonc \
+     --in-place --backup-root ~/.local/state/opencode-routing/backups
+   ```
+
+2. **Activate.** Writes only the routing-owned keys into the global config and
+   refuses a 1.x-shaped file, a symlink, or a directory holding both
+   `opencode.json` and `opencode.jsonc`. `--dry-run` shows the plan. Copy
+   the contents of `v2/.opencode/` (`agents/` and `model-routing.md`) into the
+   config root first, so `model-routing.md` exists at the absolute path you pass.
+   Alignment compares the installed files there.
+
+   ```bash
+   bash models/routing/opencode/eval/runtime/opencode-v2-adapter/activate-profile.sh \
+     --profile models/routing/opencode/v2/opencode.jsonc \
+     --targets models/routing/opencode/v2/manifests/current-routing-targets.json \
+     --config-root ~/.config/opencode --backup-root ~/.local/state/opencode-routing/backups \
+     --model-routing ~/.config/opencode/model-routing.md
+   ```
+
+3. **Check alignment.** Files only: does the installed configuration still match
+   this bundle? Exit `0` aligned or stale (prose only), `1` drift, `2` usage or
+   nothing installed. It reports and never repairs.
+
+   ```bash
+   bash models/routing/opencode/eval/check-alignment.sh
+   ```
+
+4. **Verify against the server.** Asks the running server what each role
+   resolves to (provider, model, variant, mode, the `subagent` deny on
+   Breakglass, forbidden references) and writes `effective-routing.json`. Add
+   `--project-cwd DIR` to see project overrides, and `--call` to run each role
+   once. `--credentials` is a dotenv file holding `OPENCODE_PASSWORD` or
+   `OPENCODE_SERVER_PASSWORD`; it reaches curl through stdin, never argv. This
+   script is a function library, so it is sourced:
+
+   ```bash
+   bash -c 'source models/routing/opencode/eval/runtime/opencode-v2-adapter/verify-effective-routing.sh
+     verify_effective_routing_v2 --server http://127.0.0.1:4096 \
+       --credentials ~/.config/opencode-runtime/secrets.env \
+       --targets models/routing/opencode/v2/manifests/current-routing-targets.json \
+       --outdir /tmp/routing-check --neutral-cwd /tmp'
+   ```
+
+5. **Probe Breakglass.** It must resolve as a primary agent with the manifest's
+   model, and no other agent may be able to dispatch it. Writes `breakglass.json`.
+
+   ```bash
+   bash -c 'source models/routing/opencode/eval/runtime/opencode-v2-adapter/probe-breakglass.sh
+     probe_breakglass_v2 --server http://127.0.0.1:4096 \
+       --credentials ~/.config/opencode-runtime/secrets.env \
+       --targets models/routing/opencode/v2/manifests/current-routing-targets.json \
+       --outdir /tmp/routing-check --cwd /tmp'
+   ```
+
+**Agents load lazily per directory.** The first lookup of an agent can miss, so
+every lookup against a server polls until the agent resolves, bounded at 30 s
+(`V2_AGENT_POLL_TIMEOUT`, default `30`). A one-shot request that misses is not
+evidence the agent is absent.
+
+## V2 profile format
+
+This is the contract a private profile generator targets: produce a file of this
+shape plus a targets manifest, and the tools above work on it unchanged.
+
+- **Routing-owned keys**, the only ones activation writes and alignment compares:
+  top-level `model`; `agents.<role>` for every role the manifest declares (each
+  row replaced whole); the top-level `permissions` entries whose `action` is
+  `subagent`; and exactly one `instructions` entry, the absolute path of the
+  installed `model-routing.md`. Everything else is yours and is never reported.
+- **Targets manifest**, format `opencode-v2-routing-targets/1`: `profile_id`,
+  `default_model`, `agents.<role>` rows of `{providerID, model, variant, mode}`,
+  `breakglass: {agent, deny_as_subagent}`, `forbidden_model_references`, and
+  `forbidden_effective_state`.
+- **The prompt key is `system`.** `prompt` is the 1.x name and is not read.
+- **Permissions are an ordered list** of `{action, resource, effect}`; the last
+  match wins. The 1.x action names change in two places: `bash` becomes `shell`
+  and `task` becomes `subagent`. Every other action keeps its name.
+- **Markdown never carries `model`.** `.opencode/agents/*.md` hold prompts and
+  non-routing metadata; the model is assigned only in `opencode.jsonc`.
+- **No 1.x top-level key** (`agent`, `provider`, `permission`, `plugin`,
+  `disabled_providers`, `autoupdate`, `server`, or an `mcp` object without
+  `servers`) may appear in a file these tools write. A file mixing both shapes
+  silently loses settings upstream.
+
+## Removed in V2
+
+- **`temperature`.** An agent-level value is not sent at all on 2.x. It was also
+  already meaningless for this bundle's models: every routed role runs a
+  reasoning model with an effort set, Anthropic's Fable 5.x models reject
+  `temperature`, and OpenAI reasoning models do not honour it. Effort is the
+  lever for review depth. The converter removes it and reports it as `dropped:`.
+- **A provider's `blacklist` and `whitelist`.** 2.x drops both and has no
+  equivalent, and it does not discover models you did not declare. The rule is:
+  **a model you must not use is a model you do not declare.**
+  `forbidden_model_references` in the manifest stays as a checked guard.
+
+## OpenCode 1.x (history)
+
+The 1.x bundle is frozen: the root `opencode.jsonc` and `.opencode/`, `profiles/`,
+and the adapter at `eval/runtime/opencode-v1-adapter/`. It is kept as the record
+of how routing was built and measured. **Do not run the 1.x adapter against a
+2.x host**: it reads and writes a shape 2.x ignores or mangles. The sections
+below describe that bundle.
+
 ## Model map
 
 | Role | OpenCode agent | Model | Variant |

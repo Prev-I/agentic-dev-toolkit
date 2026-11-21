@@ -1399,8 +1399,11 @@ the unauthenticated `/api/info` is 401 and the authenticated one is 200 JSON
 with a 2.x `version` and the unit's `MainPID` as `pid` (see
 [Verification](#verification)); `GET /api/session` lists as many sessions as the
 backup's `session` table holds, and one old session's `/api/session/<id>/message`
-answers 200; **one call per role your routing declares** succeeds against its
-provider, whatever that provider is; and `opencode service get` shows
+answers 200; each role your routing declares resolves and answers against its
+provider, whatever that provider is, which `verify-effective-routing.sh --call`
+(see `models/routing/opencode/README.md`, "OpenCode 2 (current)") checks in one
+run. Agents load lazily per directory, so the first lookup can miss: the
+verifier polls, and so should anything you script by hand; and `opencode service get` shows
 `disabled true` with `remote` unset. Bring the sidecars back last.
 
 **10. The no-go point.** Once real use begins after this verification, the

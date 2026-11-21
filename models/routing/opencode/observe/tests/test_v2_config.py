@@ -63,6 +63,20 @@ def main():
         except ObserveError as error:
             assert str(error) == "unsupported_manifest_format"
 
+        # 2.x rows must name a non-empty providerID and model, and agents must be an object.
+        for name, body in (
+                ("noprov", {"agents": {"b": {"model": "m"}}}),
+                ("emptymodel", {"agents": {"b": {"providerID": "p", "model": ""}}}),
+                ("nonstr", {"agents": {"b": {"providerID": "p", "model": 5}}}),
+                ("norow", {"agents": {"b": None}}),
+                ("noagents", {})):
+            (base / f"{name}.json").write_text(json.dumps({"format": "opencode-v2-routing-targets/1", **body}))
+            try:
+                load_manifest(base / f"{name}.json")
+                raise AssertionError(f"expected unsupported_manifest_format for {name}")
+            except ObserveError as error:
+                assert str(error) == "unsupported_manifest_format", name
+
         # 2.x config aligned with a manifest lacking decision_reference.
         aligned = {"agents": {r: {"model": {"providerID": "github-copilot", "model": "gpt-6.1-sol", "variant": v}}
                               for r, v in (("build", "high"), ("general", "medium"))}}
@@ -150,6 +164,29 @@ def main():
         assert Path(default_manifest(base / "v2-stale.db")) == V2_MANIFEST.resolve()
         assert Path(default_manifest(base / "missing.db")) == MANIFEST.resolve()
         assert Path(default_manifest(base / "unknown.db")) == MANIFEST.resolve()
+        # A transient sqlite error must not silently pick the v1 manifest.
+        junk = base / "junk.db"
+        junk.write_bytes(b"not a sqlite database" * 100)
+        try:
+            default_manifest(junk)
+            raise AssertionError("expected sqlite3.Error to propagate")
+        except sqlite3.Error:
+            pass
+        # A defaulted manifest whose schema disagrees with the detected one fails closed.
+        collect = module["collect"]
+        real = collect.__globals__["default_manifest_for"]
+        collect.__globals__["default_manifest_for"] = lambda db_path: (MANIFEST, "v1")
+        try:
+            args = module["parser"]().parse_args(["report", "--db", str(base / "v2.db"), "--profile-effective", "1970-01-01T00:00:00Z",
+                                                  "--activation-config", "", "--log-dir", "", "--eval-records", "",
+                                                  "--state-dir", str(base / "mm-state")])
+            try:
+                collect(args)
+                raise AssertionError("expected manifest_schema_mismatch")
+            except ObserveError as error:
+                assert str(error) == "manifest_schema_mismatch"
+        finally:
+            collect.__globals__["default_manifest_for"] = real
         args = module["parser"]().parse_args(["report", "--manifest", "x.json"])
         assert args.manifest == "x.json"
         assert module["parser"]().parse_args(["report"]).manifest is None

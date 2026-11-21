@@ -81,7 +81,7 @@ def main():
         out, key = report(logs, base / "state")
         sid = module["session_hash"](key, "ses_log")
         assert out["coverage"]["stream_source"] == "database" and out["coverage"]["log_files"] == 1
-        assert {"retries", "log_stream_signals", "title_requests"} <= set(out["coverage"]["unavailable_signals"])
+        assert set(out["coverage"]["unavailable_signals"]) == {"snapshot_edits", "log_stream_signals", "title_requests"}
         errors = [f for f in out["review"] if f["signal"] == "provider_error"]
         assert [(f["session"], f["reason"], f["agent"]) for f in errors] == [(sid, "rate_limit", "build")], errors
         # Requests follow the error in the database, yet the signal is unavailable on 2.x.

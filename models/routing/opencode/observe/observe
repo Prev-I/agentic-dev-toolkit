@@ -120,21 +120,33 @@ def detect_schema(db):
     raise ObserveError("unsupported_session_schema")
 
 
-def default_manifest(db_path):
+def default_manifest_for(db_path):
+    """(manifest path, schema it was chosen for). Only ObserveError falls back to v1."""
     root = Path(__file__).resolve().parent.parent
     v1 = root / "eval/manifests/current-routing-targets.json"
     v2 = root / "v2/manifests/current-routing-targets.json"
     try:
         path = Path(db_path).expanduser().resolve()
         if not path.is_file():
-            return v1
+            return v1, "v1"
         db = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
         try:
-            return v2 if detect_schema(db) == "v2" else v1
+            schema = detect_schema(db)
         finally:
             db.close()
-    except (ObserveError, sqlite3.Error):
-        return v1  # the reader reports the real error
+        return (v2 if schema == "v2" else v1), schema
+    except ObserveError:
+        return v1, "v1"  # the reader reports the real error
+    # sqlite3.Error propagates: a guessed manifest must not be used (fail closed).
+
+
+def default_manifest(db_path):
+    return default_manifest_for(db_path)[0]
+
+
+def manifest_format(path):
+    fmt = json.loads(Path(path).read_text(encoding="utf-8")).get("format")
+    return "v1" if fmt is None else fmt
 
 
 def connect_readonly(path):
@@ -152,14 +164,14 @@ def connect_readonly(path):
 
 SESSION_KEYS = ("id", "parent", "directory", "version", "agent", "model", "created", "updated")
 SESSION_COLUMNS = "id,parent_id,directory,version,agent,model,time_created,time_updated"
-# Signals a 2.x database has no source for. `snapshot_edits`, `retries`: no `patch`
-# or `retry` part exists in session_message. `log_stream_signals`: stream-derived
+# Signals a 2.x database has no source for. `snapshot_edits`: no `patch` part
+# exists in session_message. `log_stream_signals`: stream-derived
 # request_model_differs and provider_retries need an independent log stream, which
 # 2.x does not write per session (no `stream` line; `llm runtime selected` has no
 # session.id), and the message loop already counts every assistant message and
 # raises request_route_differs. `title_requests`: automatic title generation is
 # not stored per session on 2.3.0 (measured).
-V2_UNAVAILABLE_SIGNALS = ["snapshot_edits", "retries", "log_stream_signals", "title_requests"]
+V2_UNAVAILABLE_SIGNALS = ["snapshot_edits", "log_stream_signals", "title_requests"]
 
 
 def read_sessions(db, schema):
@@ -173,7 +185,7 @@ def new_message(mid, when, data):
     return {"id": mid, "time": when, "data": data, "texts": [], "edits": [], "snapshot_edits": [], "skills": [], "tasks": [], "answers": []}
 
 
-def apply_part(message, data):
+def apply_part(message, data, schema="v1"):
     """Fold one 1.x part (or a 2.x content item in 1.x part shape) into a message."""
     if data.get("type") == "text" and not data.get("synthetic") and not data.get("ignored"):
         message["texts"].append(str(data.get("text", "")))
@@ -198,7 +210,7 @@ def apply_part(message, data):
     elif tool == "task":
         message["tasks"].append({"agent": inp.get("subagent_type"), "child": meta.get("sessionId"),
                                  "packet": packet_present(str(inp.get("prompt", "")))})
-    elif tool == "subagent":  # 2.x only
+    elif tool == "subagent" and schema == "v2":
         message["tasks"].append({"agent": inp.get("agent"), "child": meta.get("sessionID"),
                                  "packet": packet_present(str(inp.get("prompt", "")))})
     elif tool == "question":
@@ -296,15 +308,15 @@ def read_messages(db, schema, session_ids):
                 continue
             message = new_message(mid, when, shaped)
             if kind == "user":
-                apply_part(message, {"type": "text", "text": data.get("text", "")})
+                apply_part(message, {"type": "text", "text": data.get("text", "")}, schema)
             else:
                 for item in data.get("content") or []:
                     if not isinstance(item, dict) or item.get("type") not in ("text", "tool"):
                         continue  # reasoning carries no signal
                     if item["type"] == "text":
-                        apply_part(message, {"type": "text", "text": item.get("text", "")})
+                        apply_part(message, {"type": "text", "text": item.get("text", "")}, schema)
                     else:
-                        apply_part(message, {"type": "tool", "tool": item.get("name"), "state": item.get("state")})
+                        apply_part(message, {"type": "tool", "tool": item.get("name"), "state": item.get("state")}, schema)
             messages[sid].append(message)
         return messages
     message_root = {}
@@ -325,7 +337,7 @@ def read_messages(db, schema, session_ids):
             data = json.loads(raw)
         except json.JSONDecodeError:
             continue
-        apply_part(target, data)
+        apply_part(target, data, schema)
     return messages
 
 
@@ -501,6 +513,12 @@ def load_manifest(path):
     data = json.loads(path.read_text(encoding="utf-8"))
     fmt = data.get("format")
     if fmt == "opencode-v2-routing-targets/1":
+        agents = data.get("agents")
+        if not isinstance(agents, dict):
+            raise ObserveError("unsupported_manifest_format")
+        for row in agents.values():
+            if not isinstance(row, dict) or any(not isinstance(row.get(k), str) or not row[k] for k in ("providerID", "model")):
+                raise ObserveError("unsupported_manifest_format")
         return {
             role: {"model": f"{row['providerID']}/{row['model']}",
                    "variant": row.get("variant"), "mode": row.get("mode")}
@@ -594,8 +612,10 @@ def parse_log_files(log_dir, since, schema="v1"):
 
 
 def collect(args):
+    defaulted_for = None
     if not args.manifest:
-        args.manifest = str(default_manifest(args.db))
+        manifest_path, defaulted_for = default_manifest_for(args.db)
+        args.manifest = str(manifest_path)
     boundary = profile_boundary(Path(args.manifest), args.profile_effective,
                                 Path(args.activation_config).expanduser() if args.activation_config else None)
     args.since = args.since or boundary["timestamp"]
@@ -609,6 +629,9 @@ def collect(args):
         previous = read_jsonc(Path(args.previous_config).expanduser()).get("agent", {})
     known_dispatchers = dispatcher_sessions(Path(args.eval_records) if args.eval_records else None)
     db, schema = connect_readonly(Path(args.db))
+    if defaulted_for is not None and defaulted_for != schema:
+        db.close()
+        raise ObserveError("manifest_schema_mismatch")
     db.execute("BEGIN")
     sessions = read_sessions(db, schema)
     agents_from_messages = v2_fill_agents(db, sessions) if schema == "v2" else 0
@@ -1025,6 +1048,7 @@ def collect(args):
             "dispatcher_ids_loaded": len(known_dispatchers),
             "opencode_versions": sorted({s["version"] for s in sessions.values() if s["version"]}),
             "session_schema": schema,
+            "manifest_format": manifest_format(args.manifest),
             "stream_source": "database" if schema == "v2" else "log",
             **({"unavailable_signals": list(V2_UNAVAILABLE_SIGNALS),
                 "sessions_agent_from_messages": agents_from_messages} if schema == "v2" else {}),
@@ -1064,7 +1088,13 @@ def report_command(args):
         sys.stdout.write("\n")
         return
     print(f"Sessions: {sum(report['session_classes'].values())}")
-    print("Coverage: database=yes, log_files=%s, dispatcher_ids=%s" % (report["coverage"]["log_files"], report["coverage"]["dispatcher_ids_loaded"]))
+    coverage = report["coverage"]
+    line = "Coverage: database=yes, log_files=%s, dispatcher_ids=%s, schema=%s, stream_source=%s, manifest_format=%s" % (
+        coverage["log_files"], coverage["dispatcher_ids_loaded"], coverage.get("session_schema"),
+        coverage.get("stream_source"), coverage.get("manifest_format"))
+    if coverage.get("unavailable_signals"):
+        line += ", unavailable=" + ",".join(coverage["unavailable_signals"])
+    print(line)
     print("Profile boundary: %s (%s)" % (report["profile_boundary"]["timestamp"], report["profile_boundary"]["source"]))
     for category, population in report["populations"].items():
         print(f"\n{category}: sessions={population['sessions']}")

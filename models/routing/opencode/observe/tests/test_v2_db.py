@@ -187,7 +187,11 @@ def main():
         assert db.read_bytes() == original
         serialized = json.dumps(out) + (state / "latest-report.json").read_text()
         assert CANARY not in serialized
-        report(db, state)  # text format stays private too
+        text_out = report(db, state).stdout  # text format stays private too
+        coverage_line = next(l for l in text_out.splitlines() if l.startswith("Coverage:"))
+        assert ("schema=v2, stream_source=database, manifest_format=opencode-v2-routing-targets/1, "
+                "unavailable=snapshot_edits,log_stream_signals,title_requests") in coverage_line, coverage_line
+        assert "database=yes, log_files=" in coverage_line and "dispatcher_ids=" in coverage_line
         key = (state / "hash.key").read_bytes()
         hashes = {sid: session_hash(key, sid) for sid in (
             "ses_v2_aligned", "ses_v2_mismatch", "ses_v2_gate", "ses_v2_parent", "ses_v2_parent2", "ses_v2_migrated", "ses_stale",
@@ -195,7 +199,11 @@ def main():
 
         # Default manifest follows the schema; only session_v2 rows are read.
         assert out["coverage"]["session_schema"] == "v2"
-        assert out["coverage"]["unavailable_signals"] == ["snapshot_edits", "retries", "log_stream_signals", "title_requests"]
+        assert out["coverage"]["unavailable_signals"] == ["snapshot_edits", "log_stream_signals", "title_requests"]
+        assert out["coverage"]["manifest_format"] == "opencode-v2-routing-targets/1"
+        # An explicit 1.x manifest on a 2.x database still runs and says so.
+        explicit = json.loads(report(db, base / "state-explicit", "--manifest", str(MANIFEST), "--format", "json").stdout)
+        assert explicit["coverage"]["manifest_format"] == "v1" and explicit["coverage"]["session_schema"] == "v2"
         assert out["coverage"]["opencode_versions"] == ["1.18.32", "2.3.0"], out["coverage"]
         assert out["session_classes"] == {"eval_dispatcher": 1, "production": 10, "pre_profile": 0}, out["session_classes"]
         assert out["coverage"]["sessions_agent_from_messages"] == 1
@@ -271,6 +279,27 @@ def main():
         conn.close()
         v1_out = json.loads(report(v1, base / "state-v1", "--manifest", str(MANIFEST), "--format", "json").stdout)
         assert v1_out["coverage"]["session_schema"] == "v1" and "unavailable_signals" not in v1_out["coverage"]
+        assert v1_out["coverage"]["manifest_format"] == "v1"
+        v1_text = report(v1, base / "state-v1t", "--manifest", str(MANIFEST)).stdout
+        v1_line = next(l for l in v1_text.splitlines() if l.startswith("Coverage:"))
+        assert v1_line.startswith("Coverage: database=yes, log_files=0, dispatcher_ids=") and "schema=v1" in v1_line
+        assert "manifest_format=v1" in v1_line and "unavailable=" not in v1_line, v1_line
+
+        # A 1.x read never treats a tool named `subagent` as a delegation.
+        vsub = base / "v1sub.db"
+        conn = sqlite3.connect(vsub)
+        schema(conn)
+        conn.execute("INSERT INTO message VALUES ('m1','s1',1,1,?)", (json.dumps({"role": "assistant", "agent": "build"}),))
+        conn.execute("INSERT INTO part VALUES ('p1','m1','s1',1,1,?)", (json.dumps({
+            "type": "tool", "tool": "subagent",
+            "state": {"status": "completed", "input": {"agent": "reviewer", "prompt": "x"}, "metadata": {"sessionID": "c1"}}}),))
+        conn.commit()
+        ro = sqlite3.connect(vsub.as_uri() + "?mode=ro", uri=True)
+        try:
+            assert module["read_messages"](ro, "v1", ["s1"])["s1"][0]["tasks"] == []
+        finally:
+            ro.close()
+            conn.close()
 
         # Unknown schema fails closed in every command.
         unknown = base / "unknown.db"

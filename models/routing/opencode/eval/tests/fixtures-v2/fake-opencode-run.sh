@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Fake `opencode` for the effective-routing test. Prints recorded 2.x JSONL for
 # `opencode --server URL run --agent ROLE ...`; the session is ses_<ROLE>.
+# FAKE_OPENCODE_NOTOOL=1 omits the tool_use event; FAKE_OPENCODE_EXIT=N exits N.
 # Records argv and the password variable's presence in $FAKE_OPENCODE_LOG.
 set -Eeuo pipefail
 role=''
@@ -16,6 +17,9 @@ if [[ -n "${FAKE_OPENCODE_LOG:-}" ]]; then
 fi
 sid="ses_$role"
 printf '{"type":"step_start","sessionID":"%s","part":{"type":"step-start"}}\n' "$sid"
-printf '{"type":"tool_use","sessionID":"%s","part":{"tool":"read","state":{"status":"completed"}}}\n' "$sid"
+if [[ -z "${FAKE_OPENCODE_NOTOOL:-}" ]]; then
+  printf '{"type":"tool_use","sessionID":"%s","part":{"tool":"read","state":{"status":"completed"}}}\n' "$sid"
+fi
 printf '{"type":"step_finish","sessionID":"%s","part":{"reason":"tool-calls","cost":0.026,"tokens":{"input":1}}}\n' "$sid"
 printf '{"type":"text","sessionID":"%s","part":{"text":"done"}}\n' "$sid"
+exit "${FAKE_OPENCODE_EXIT:-0}"

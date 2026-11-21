@@ -19,14 +19,19 @@ source "$v2_verify_root/v2-http.sh"
 #
 # Per role: providerID, model, variant and (when the manifest names one) mode;
 # the variant is offered by /api/model for that model; unless the role is the
-# breakglass agent, the LAST effective `subagent` permission entry whose
-# resource is `breakglass` or `*` is a deny of `breakglass` (a later
-# `subagent * allow` would re-open it); no forbidden model reference; and not
-# the manifest's forbidden effective state.
+# breakglass agent, the LAST effective permission entry whose action is
+# `subagent` or `*` and whose resource glob-matches `breakglass` is a deny (a
+# later `subagent * allow`, `* * allow` or `break* allow` would re-open it); no
+# forbidden model reference; and not the manifest's forbidden effective state.
 #
-# PROJECT_OVERRIDE needs --project-cwd: the project answer differs from the
-# neutral one, or fails a check the neutral one passed, while the neutral
-# answer PASSes. A neutral MISMATCH stays MISMATCH.
+# With --project-cwd the same role is resolved in the project directory. The
+# project answer is a MISMATCH if it does not resolve or fails any check other
+# than "equals the manifest's fields" (breakglass reachable, forbidden reference
+# or state, variant not offered). It is PROJECT_OVERRIDE only when it differs
+# from the neutral answer on providerID/model/variant/mode and passes every
+# other check; a neutral MISMATCH stays MISMATCH. A server that refuses the
+# credentials (HTTP 401/403) exits 2. A stale effective-routing.json is removed
+# before collecting, so a failed run never leaves an earlier PASS behind.
 #
 # --call additionally runs each role once through `$OPENCODE_BIN` (default
 # `opencode`) with a read probe, and compares the agent, model and variant the
@@ -37,10 +42,28 @@ _vr_usage() {
   printf 'usage: verify_effective_routing_v2 --server URL --credentials FILE --targets FILE --outdir DIR --neutral-cwd DIR [--project-cwd DIR] [--call]\n' >&2
 }
 
+# Temp directories to remove on exit and on INT/TERM.
+_VR_TMPDIRS=()
+_vr_cleanup() {
+  local d
+  for d in "${_VR_TMPDIRS[@]}"; do
+    [[ -z "$d" ]] || rm -rf "${d:?}"
+  done
+  _VR_TMPDIRS=()
+}
+
+# The one predicate that picks the assistant message a session used: an object
+# (taken from .info when that is an object) with role assistant and a non-empty
+# model object. Last match wins.
+_VR_PICK_ASSISTANT='[(.data // [])[] | select(type == "object")
+  | (if (.info | type) == "object" then .info else . end)
+  | select(.role == "assistant" and (.model | type) == "object" and (.model | length) > 0)] | last // empty'
+
 # _vr_call_role URL ROLE WORKDIR -> writes WORKDIR/calls/ROLE.json
 _vr_call_role() {
   local url=$1 role=$2 work=$3 probe token out rc=0 sid='' body='' have=0
   probe=$(mktemp -d)
+  _VR_TMPDIRS+=("$probe")
   token="probe-$RANDOM-$RANDOM-$$"
   printf '%s\n' "$token" >"$probe/probe.txt"
   out="$work/calls/$role.jsonl"
@@ -57,8 +80,8 @@ _vr_call_role() {
   if [[ -n "$sid" ]]; then
     for _ in 1 2 3 4 5 6; do
       if body=$(v2_api_get "$url" "/api/session/$sid/message" 2>/dev/null); then
-        if jq -e '[(.data // [])[] | (.info // .) | select(.role == "assistant" and .model != null)] | length > 0' \
-            <<<"$body" >/dev/null 2>&1; then
+        jq -c "$_VR_PICK_ASSISTANT" <<<"$body" >"$work/calls/$role.assistant.json" 2>/dev/null || true
+        if [[ -s "$work/calls/$role.assistant.json" ]]; then
           have=1
           break
         fi
@@ -66,7 +89,6 @@ _vr_call_role() {
       sleep 0.5
     done
   fi
-  (( have )) && printf '%s' "$body" >"$work/calls/$role.messages.json"
   jq -n --argjson rc "$rc" --arg sid "$sid" --argjson have "$have" \
     --slurpfile ev <(jq -c . "$out" 2>/dev/null || true) \
     '{exit_code: $rc, session: $sid, messages: ($have == 1),
@@ -102,11 +124,29 @@ verify_effective_routing_v2() {
   v2_load_credentials "$creds" || return 2
   server=${server%/}
 
-  local work rc=0
+  # Never leave an earlier result behind: a failed run must not read as a pass.
+  mkdir -p "$outdir"
+  rm -f "${outdir:?}/effective-routing.json"
+
+  local work rc=0 old_exit old_int old_term
+  old_exit=$(trap -p EXIT) old_int=$(trap -p INT) old_term=$(trap -p TERM)
   work=$(mktemp -d)
+  _VR_TMPDIRS+=("$work")
+  trap '_vr_cleanup' EXIT
+  trap '_vr_cleanup; trap - INT; kill -s INT $$' INT
+  trap '_vr_cleanup; trap - TERM; kill -s TERM $$' TERM
   _vr_collect "$server" "$targets" "$outdir" "$neutral" "$project" "$call" "$work" || rc=$?
-  rm -rf "$work"
+  _vr_cleanup
+  trap - EXIT INT TERM
+  [[ -z "$old_exit" ]] || eval "$old_exit"
+  [[ -z "$old_int" ]] || eval "$old_int"
+  [[ -z "$old_term" ]] || eval "$old_term"
   return "$rc"
+}
+
+# True when the last request was refused for its credentials.
+_vr_auth_refused() {
+  [[ "$V2_LAST_STATUS" == 401 || "$V2_LAST_STATUS" == 403 ]]
 }
 
 _vr_collect() {
@@ -114,12 +154,20 @@ _vr_collect() {
   local role breakglass roles
   mkdir -p "$work/neutral" "$work/project" "$work/calls" "$outdir"
 
-  v2_api_get "$server" /api/info >"$work/info.json" || {
-    printf 'verify_effective_routing_v2: cannot read /api/info from %s\n' "$server" >&2
+  v2_api_get "$server" /api/info >"$work/info.json" 2>/dev/null || {
+    if _vr_auth_refused; then
+      printf 'verify_effective_routing_v2: the server refused the credentials (HTTP %s)\n' "$V2_LAST_STATUS" >&2
+      return 2
+    fi
+    printf 'verify_effective_routing_v2: cannot read /api/info from %s (%s)\n' "$server" "$V2_LAST_STATUS" >&2
     return 1
   }
-  v2_api_get "$server" /api/model >"$work/models.json" || {
-    printf 'verify_effective_routing_v2: cannot read /api/model from %s\n' "$server" >&2
+  v2_api_get "$server" /api/model >"$work/models.json" 2>/dev/null || {
+    if _vr_auth_refused; then
+      printf 'verify_effective_routing_v2: the server refused the credentials (HTTP %s)\n' "$V2_LAST_STATUS" >&2
+      return 2
+    fi
+    printf 'verify_effective_routing_v2: cannot read /api/model from %s (%s)\n' "$server" "$V2_LAST_STATUS" >&2
     return 1
   }
 
@@ -128,9 +176,17 @@ _vr_collect() {
   for role in $roles; do
     v2_agent_get "$server" "$role" "$neutral" >"$work/neutral/$role.json" 2>"$work/neutral/$role.err" \
       || rm -f "$work/neutral/$role.json"
+    if _vr_auth_refused; then
+      printf 'verify_effective_routing_v2: the server refused the credentials (HTTP %s)\n' "$V2_LAST_STATUS" >&2
+      return 2
+    fi
     if [[ -n "$project" ]]; then
       v2_agent_get "$server" "$role" "$project" >"$work/project/$role.json" 2>"$work/project/$role.err" \
         || rm -f "$work/project/$role.json"
+      if _vr_auth_refused; then
+        printf 'verify_effective_routing_v2: the server refused the credentials (HTTP %s)\n' "$V2_LAST_STATUS" >&2
+        return 2
+      fi
     fi
     if (( call )); then
       _vr_call_role "$server" "$role" "$work"
@@ -139,7 +195,7 @@ _vr_collect() {
 
   python3 -I - "$work" "$targets" "$outdir/effective-routing.json" "$server" \
     "$breakglass" "$([[ -n "$project" ]] && echo 1 || echo 0)" "$call" <<'PY'
-import json, os, sys
+import fnmatch, json, os, sys
 
 work, targets_path, out_path, server, breakglass, has_project, call = sys.argv[1:8]
 has_project = has_project == "1"
@@ -151,7 +207,13 @@ FIELDS = ("providerID", "model", "variant", "mode")
 
 
 def load(path):
-    return json.load(open(path)) if os.path.isfile(path) else None
+    """Parsed JSON, or None when the file is absent, empty or not JSON."""
+    if not os.path.isfile(path):
+        return None
+    try:
+        return json.load(open(path))
+    except ValueError:
+        return None
 
 
 def read_err(path):
@@ -165,79 +227,80 @@ def resolve(data):
 
 
 def breakglass_decision(data):
+    """The last effective entry that can decide a subagent call to breakglass."""
     deciding = None
     for e in data.get("permissions") or []:
-        if e.get("action") == "subagent" and e.get("resource") in ("breakglass", "*"):
+        if (e.get("action") in ("subagent", "*")
+                and fnmatch.fnmatchcase("breakglass", str(e.get("resource", "")))):
             deciding = e
     return deciding
 
 
 def check(role, data):
+    """field_mismatches: the resolved fields differ from the manifest.
+    other_mismatches: every other check (a project cannot trade these away)."""
     expected = targets["agents"][role]
     got = resolve(data)
-    problems = []
+    fields, other = [], []
     for f in FIELDS:
         if f == "mode" and expected.get(f) is None:
             continue
         if got[f] != expected.get(f):
-            problems.append(f"{f}: expected {expected.get(f)!r}, got {got[f]!r}")
+            fields.append(f"{f}: expected {expected.get(f)!r}, got {got[f]!r}")
     entry = next((m for m in models
                   if m.get("providerID") == got["providerID"] and m.get("id") == got["model"]), None)
     if entry is None:
-        problems.append(f"model: {got['providerID']}/{got['model']} is not listed by /api/model")
+        other.append(f"model: {got['providerID']}/{got['model']} is not listed by /api/model")
     else:
         offered = [v.get("id") if isinstance(v, dict) else v for v in entry.get("variants") or []]
         if got["variant"] not in offered:
-            problems.append(f"variant: {got['variant']!r} is not offered for "
-                            f"{got['providerID']}/{got['model']} (offered: {offered})")
+            other.append(f"variant: {got['variant']!r} is not offered for "
+                         f"{got['providerID']}/{got['model']} (offered: {offered})")
     for ref in targets.get("forbidden_model_references", []):
         if got["model"] and ref in got["model"]:
-            problems.append(f"model: {got['model']!r} contains forbidden reference {ref!r}")
+            other.append(f"model: {got['model']!r} contains forbidden reference {ref!r}")
     forbidden = targets.get("forbidden_effective_state", {}).get(role)
     if isinstance(forbidden, dict) and all(
             got[k] == forbidden.get(k) for k in ("providerID", "model", "variant")):
-        problems.append("forbidden_effective_state: role resolves to the forbidden "
-                        f"{forbidden['providerID']}/{forbidden['model']}#{forbidden['variant']}")
+        other.append("forbidden_effective_state: role resolves to the forbidden "
+                     f"{forbidden['providerID']}/{forbidden['model']}#{forbidden['variant']}")
     record = {"resolved": got}
     if role != breakglass:
         deciding = breakglass_decision(data)
         record["subagent_breakglass"] = deciding
-        if not (deciding and deciding.get("effect") == "deny" and deciding.get("resource") == "breakglass"):
-            problems.append("permissions: the last subagent entry matching breakglass is "
-                            f"{json.dumps(deciding)}, not a deny of breakglass")
-    record["mismatches"] = problems
-    record["status"] = "MISMATCH" if problems else "PASS"
+        if not (deciding and deciding.get("effect") == "deny"):
+            other.append("permissions: the last subagent/* entry matching breakglass is "
+                         f"{json.dumps(deciding)}, not a deny")
+    record["field_mismatches"] = fields
+    record["other_mismatches"] = other
+    record["mismatches"] = fields + other
+    record["status"] = "MISMATCH" if record["mismatches"] else "PASS"
     return record
 
 
 def lookup(kind, role):
     data = load(os.path.join(work, kind, role + ".json"))
     if data is None:
-        err = read_err(os.path.join(work, kind, role + ".err"))
-        return {"resolved": None, "mismatches": [f"agent did not resolve: {err}"],
-                "status": "MISMATCH"}
+        msg = f"agent did not resolve: {read_err(os.path.join(work, kind, role + '.err'))}"
+        return {"resolved": None, "field_mismatches": [], "other_mismatches": [msg],
+                "mismatches": [msg], "status": "MISMATCH"}
     return check(role, data)
 
 
 def called(role):
     base = load(os.path.join(work, "calls", role + ".json")) or {}
-    msgs = load(os.path.join(work, "calls", role + ".messages.json"))
+    assistant = load(os.path.join(work, "calls", role + ".assistant.json"))
     rec = {"used": None, "tool_called": base.get("tool_called", False), "cost": base.get("cost", 0),
            "exit_code": base.get("exit_code"), "session": base.get("session")}
     problems = []
     if base.get("exit_code") not in (0, None):
         problems.append(f"call: opencode run exited {base.get('exit_code')}")
-    if msgs is None:
+    if not isinstance(assistant, dict):
         problems.append("call: no assistant message with a model could be read back")
         return rec, problems
-    used = None
-    for m in msgs.get("data", []):
-        info_ = m.get("info", m)
-        if info_.get("role") == "assistant" and info_.get("model"):
-            model = info_["model"]
-            used = (info_.get("agent"), model.get("providerID"), model.get("id"), model.get("variant"))
-    agent, prov, mid, var = used
-    rec["used"] = f"{agent}@{prov}/{mid}#{var}"
+    model = assistant.get("model") if isinstance(assistant.get("model"), dict) else {}
+    rec["used"] = (f"{assistant.get('agent')}@{model.get('providerID')}/"
+                   f"{model.get('id')}#{model.get('variant')}")
     e = targets["agents"][role]
     want = f"{role}@{e['providerID']}/{e['model']}#{e['variant']}"
     if rec["used"] != want:
@@ -252,11 +315,16 @@ for role in targets["agents"]:
     status = n["status"]
     if has_project:
         p = lookup("project", role)
+        if p["other_mismatches"]:
+            p["status"] = "MISMATCH"
+        elif p["resolved"] != n["resolved"]:
+            p["differs"] = [f for f in FIELDS if (p["resolved"] or {}).get(f) != (n["resolved"] or {}).get(f)]
+            p["status"] = "PROJECT_OVERRIDE"
+        else:
+            p["status"] = "PASS"
         entry["project"] = p
-        if status == "PASS" and p["status"] == "MISMATCH" and p["resolved"] is None:
-            status = "MISMATCH"
-        elif status == "PASS" and (p["resolved"] != n["resolved"] or p["status"] != "PASS"):
-            status = "PROJECT_OVERRIDE"
+        if status == "PASS":
+            status = p["status"]
     if call:
         rec, problems = called(role)
         entry["called"] = rec
@@ -273,7 +341,13 @@ with open(out_path, "w") as f:
     json.dump(doc, f, indent=2)
     f.write("\n")
 for role, r in roles.items():
-    detail = list(r["neutral"]["mismatches"]) + list(r.get("called_mismatches", []))
+    detail = list(r["neutral"]["mismatches"])
+    p = r.get("project")
+    if p and p["status"] == "MISMATCH":
+        detail += ["project: " + m for m in p["mismatches"]]
+    elif p and p["status"] == "PROJECT_OVERRIDE":
+        detail.append("project differs on: " + ", ".join(p["differs"]))
+    detail += r.get("called_mismatches", [])
     print(f"{r['status']:<16} {role}" + (f"  ({'; '.join(detail)})" if detail else ""))
 print(f"overall: {overall}")
 sys.exit(1 if overall == "MISMATCH" else 0)

@@ -160,9 +160,13 @@ stop_server
 # ignores the query string, so the project answer is rewritten in a wrapper.
 orig_v2_agent_get=$(declare -f v2_agent_get)
 eval "${orig_v2_agent_get/v2_agent_get/real_v2_agent_get}"
+project_role=build
+project_filter='.model.variant = "max"'
+# shellcheck disable=SC2329
 v2_agent_get() {
-  if [[ "$3" == "$workdir/project" && "$2" == build ]]; then
-    real_v2_agent_get "$@" | jq -c '.model.variant = "max"'
+  if [[ "$3" == "$workdir/project" && "$2" == "$project_role" ]]; then
+    [[ "$project_filter" != FAIL ]] || return 1
+    real_v2_agent_get "$@" | jq -c "$project_filter"
   else
     real_v2_agent_get "$@"
   fi
@@ -175,6 +179,14 @@ assert_eq PROJECT_OVERRIDE "$(role_status build)"
 assert_eq PROJECT_OVERRIDE "$(jq -r .overall "$out")"
 assert_eq max "$(jq -r '.roles.build.project.resolved.variant' "$out")"
 assert_eq PASS "$(role_status plan)"
+assert_contains "$(<"$workdir/project.log")" "project differs on: variant"
+# both working directories reach the server as the directory= query.
+enc_neutral=$(jq -rn --arg d "$workdir/neutral" '$d|@uri')
+enc_project=$(jq -rn --arg d "$workdir/project" '$d|@uri')
+grep -qxF "GET /api/agent/build auth=ok query=directory=$enc_neutral" "$workdir/requests.log" \
+  || fail "neutral directory not sent"
+grep -qxF "GET /api/agent/build auth=ok query=directory=$enc_project" "$workdir/requests.log" \
+  || fail "project directory not sent"
 stop_server
 # the same wrapper with a neutral MISMATCH stays MISMATCH.
 edit "$fx/api_agent_build.json" '.data.model.variant = "low"'
@@ -182,6 +194,43 @@ serve "$fx"
 run_verify projmismatch --project-cwd "$workdir/project"
 assert_eq 1 "$rc"
 assert_eq MISMATCH "$(role_status build)"
+stop_server
+
+# 7b. a project answer that weakens routing is a MISMATCH naming the reason; only
+# a pure allowed difference is PROJECT_OVERRIDE.
+fx=$(fresh projbad)
+serve "$fx"
+project_role=build
+project_filter='.permissions += [{"action":"subagent","resource":"breakglass","effect":"allow"}]'
+run_verify projbg --project-cwd "$workdir/project"
+assert_eq 1 "$rc"
+assert_eq MISMATCH "$(jq -r .overall "$out")"
+assert_eq MISMATCH "$(role_status build)"
+assert_eq PASS "$(jq -r '.roles.build.neutral.status' "$out")"
+assert_eq allow "$(jq -r '.roles.build.project.subagent_breakglass.effect' "$out")"
+assert_contains "$(jq -r '.roles.build.project.other_mismatches | join(" ")' "$out")" "permissions"
+assert_contains "$(<"$workdir/projbg.log")" "project: permissions"
+project_filter='.model.id = "claude-opus-4.6"'
+run_verify projforbid --project-cwd "$workdir/project"
+assert_eq 1 "$rc"
+assert_eq MISMATCH "$(jq -r .overall "$out")"
+assert_eq MISMATCH "$(role_status build)"
+assert_contains "$(jq -r '.roles.build.project.other_mismatches | join(" ")' "$out")" "forbidden reference"
+project_filter='.model.variant = "nonesuch"'
+run_verify projnovar --project-cwd "$workdir/project"
+assert_eq 1 "$rc"
+assert_contains "$(jq -r '.roles.build.project.other_mismatches | join(" ")' "$out")" "is not offered"
+project_filter='.model.variant = "xhigh"'
+run_verify projok --project-cwd "$workdir/project"
+assert_eq 0 "$rc"
+assert_eq PROJECT_OVERRIDE "$(jq -r .overall "$out")"
+assert_eq variant "$(jq -r '.roles.build.project.differs | join(",")' "$out")"
+project_filter=FAIL
+run_verify projgone --project-cwd "$workdir/project"
+assert_eq 1 "$rc"
+assert_eq MISMATCH "$(jq -r .overall "$out")"
+assert_eq MISMATCH "$(role_status build)"
+assert_contains "$(jq -r '.roles.build.project.other_mismatches | join(" ")' "$out")" "did not resolve"
 stop_server
 unset -f v2_agent_get
 eval "${orig_v2_agent_get}"
@@ -238,6 +287,73 @@ assert_eq 'build@github-copilot/gpt-6-luna#high' "$(jq -r '.roles.build.called.u
 assert_contains "$(jq -r '.roles.build.called_mismatches | join(" ")' "$out")" "expected build@github-copilot/gpt-6.1-sol#high"
 assert_eq PASS "$(jq -r '.roles.build.neutral.status' "$out")"
 assert_eq PASS "$(role_status plan)"
+stop_server
+
+# 11. effective permissions ending in a later wildcard or glob allow reopen breakglass.
+fx=$(fresh bgstar)
+edit "$fx/api_agent_build.json" '.data.permissions += [{"action":"*","resource":"*","effect":"allow"}]'
+edit "$fx/api_agent_plan.json" '.data.permissions += [{"action":"subagent","resource":"break*","effect":"allow"}]'
+serve "$fx"
+run_verify bgstar
+assert_eq 1 "$rc"
+assert_eq MISMATCH "$(jq -r .overall "$out")"
+assert_eq MISMATCH "$(role_status build)"
+assert_eq '*' "$(jq -r '.roles.build.neutral.subagent_breakglass.action' "$out")"
+assert_contains "$(jq -r '.roles.build.neutral.mismatches | join(" ")' "$out")" "permissions"
+assert_eq MISMATCH "$(role_status plan)"
+assert_eq 'break*' "$(jq -r '.roles.plan.neutral.subagent_breakglass.resource' "$out")"
+assert_eq PASS "$(role_status general)"
+stop_server
+
+# 12. a failed run never leaves a stale PASS behind; refused credentials exit 2.
+mkdir -p "$workdir/stale"
+printf '{"overall":"PASS"}\n' >"$workdir/stale/effective-routing.json"
+dead_port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')
+base="http://127.0.0.1:$dead_port"
+run_verify stale
+[[ "$rc" != 0 ]] || fail "an unreachable server exited 0"
+assert_eq 1 "$rc"
+[[ ! -e "$workdir/stale/effective-routing.json" ]] || fail "stale effective-routing.json survived"
+fx=$(fresh auth)
+serve "$fx"
+mkdir -p "$workdir/auth401"
+printf '{"overall":"PASS"}\n' >"$workdir/auth401/effective-routing.json"
+printf 'OPENCODE_PASSWORD=wrong-pw\n' >"$workdir/wrong.env"
+rc=0
+verify_effective_routing_v2 --server "$base" --credentials "$workdir/wrong.env" --targets "$targets" \
+  --outdir "$workdir/auth401" --neutral-cwd "$workdir/neutral" >"$workdir/auth401.log" 2>&1 || rc=$?
+assert_eq 2 "$rc"
+assert_contains "$(<"$workdir/auth401.log")" "refused the credentials"
+[[ ! -e "$workdir/auth401/effective-routing.json" ]] || fail "stale file survived a refused login"
+stop_server
+
+# 13. --call: a probe that never reads is recorded, not failed; a non-zero exit is a MISMATCH.
+fx=$(fresh callvar)
+serve "$fx"
+FAKE_OPENCODE_NOTOOL=1 OPENCODE_BIN="$root/tests/fixtures-v2/fake-opencode-run.sh" run_verify notool --call
+assert_eq 0 "$rc"
+assert_eq PASS "$(jq -r .overall "$out")"
+assert_eq false "$(jq -r '.roles.build.called.tool_called' "$out")"
+FAKE_OPENCODE_EXIT=3 OPENCODE_BIN="$root/tests/fixtures-v2/fake-opencode-run.sh" run_verify callexit --call
+assert_eq 1 "$rc"
+assert_eq MISMATCH "$(jq -r .overall "$out")"
+assert_eq 3 "$(jq -r '.roles.build.called.exit_code' "$out")"
+assert_contains "$(jq -r '.roles.build.called_mismatches | join(" ")' "$out")" "exited 3"
+stop_server
+
+# 14. odd message shapes: nulls and empty models are a MISMATCH, never a traceback;
+# a top-level assistant message (no .info) is accepted.
+fx=$(fresh callshape)
+printf '%s' '{"data":[{"info":null},{"info":{"role":"assistant","model":{}}},null]}' >"$fx/api_session_ses_build_message.json"
+jq '.data = [.data[1].info]' "$canned/api_session_ses_plan_message.json" >"$fx/api_session_ses_plan_message.json"
+serve "$fx"
+OPENCODE_BIN="$root/tests/fixtures-v2/fake-opencode-run.sh" run_verify callshape --call
+assert_eq 1 "$rc"
+assert_eq MISMATCH "$(role_status build)"
+assert_contains "$(jq -r '.roles.build.called_mismatches | join(" ")' "$out")" "no assistant message"
+assert_eq PASS "$(role_status plan)"
+assert_eq 'plan@github-copilot/claude-opus-5.5#xhigh' "$(jq -r '.roles.plan.called.used' "$out")"
+if grep -q Traceback "$workdir/callshape.log"; then fail "python traceback on odd messages"; fi
 stop_server
 
 printf 'PASS: v2-effective-routing-test\n'

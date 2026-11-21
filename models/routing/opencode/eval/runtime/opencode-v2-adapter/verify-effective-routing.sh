@@ -44,7 +44,6 @@ _vr_usage() {
 
 # Temp directories to remove on exit and on INT/TERM.
 _VR_TMPDIRS=()
-_VR_OLD_EXIT='' _VR_OLD_INT='' _VR_OLD_TERM=''
 _vr_cleanup() {
   local d
   for d in "${_VR_TMPDIRS[@]}"; do
@@ -129,46 +128,28 @@ verify_effective_routing_v2() {
   v2_load_credentials "$creds" || return 2
   server=${server%/}
 
-  local work rc=0
-  _VR_OLD_EXIT=$(trap -p EXIT) _VR_OLD_INT=$(trap -p INT) _VR_OLD_TERM=$(trap -p TERM)
-  work=$(mktemp -d)
-  _VR_TMPDIRS+=("$work")
-  trap '_vr_on_exit' EXIT
-  trap '_vr_on_signal INT' INT
-  trap '_vr_on_signal TERM' TERM
-  _vr_collect "$server" "$targets" "$outdir" "$neutral" "$project" "$call" "$work" || rc=$?
-  _vr_cleanup
-  _vr_restore_traps
+  # The collection runs in a subshell that owns its traps, so the caller's
+  # traps are never read or changed, and a fatal error inside it ends only the
+  # subshell, with its status. A watchdog ends the subshell if the caller dies
+  # by a signal it has no handler for (the subshell would otherwise be orphaned
+  # with its temp directories).
+  local rc=0 parent=$BASHPID
+  (
+    inner=$BASHPID
+    watchdog=''
+    trap '_vr_cleanup; [[ -z "$watchdog" ]] || kill "$watchdog" 2>/dev/null || true' EXIT
+    trap '_vr_cleanup; trap - INT; kill -s INT "$BASHPID"' INT
+    trap '_vr_cleanup; trap - TERM; kill -s TERM "$BASHPID"' TERM
+    (
+      while kill -0 "$parent" 2>/dev/null; do sleep 0.5; done
+      kill -s TERM "$inner" 2>/dev/null || true
+    ) >/dev/null 2>&1 </dev/null &
+    watchdog=$!
+    work=$(mktemp -d)
+    _VR_TMPDIRS+=("$work")
+    _vr_collect "$server" "$targets" "$outdir" "$neutral" "$project" "$call" "$work"
+  ) || rc=$?
   return "$rc"
-}
-
-# Put the caller's EXIT/INT/TERM traps back (or the default when it had none).
-_vr_restore_traps() {
-  trap - EXIT INT TERM
-  [[ -z "$_VR_OLD_EXIT" ]] || eval "$_VR_OLD_EXIT"
-  [[ -z "$_VR_OLD_INT" ]] || eval "$_VR_OLD_INT"
-  [[ -z "$_VR_OLD_TERM" ]] || eval "$_VR_OLD_TERM"
-}
-
-# Our EXIT handler: clean up, then let the caller's own EXIT trap run.
-_vr_on_exit() {
-  _vr_cleanup
-  _vr_restore_traps
-  if [[ -n "$_VR_OLD_EXIT" ]]; then
-    # `trap -p` prints: trap -- 'COMMAND' EXIT; run COMMAND now, since a trap
-    # installed from inside an EXIT handler would not fire.
-    eval "set -- $_VR_OLD_EXIT"
-    eval "$3"
-  fi
-}
-
-# Our signal handler: clean up, restore the caller's traps, then re-raise on
-# THIS shell (BASHPID, correct inside a subshell) so the caller's handlers, or
-# the default disposition and the caller's EXIT trap, take over.
-_vr_on_signal() {
-  _vr_cleanup
-  _vr_restore_traps
-  kill -s "$1" "$BASHPID"
 }
 
 # True when the last request was refused for its credentials.

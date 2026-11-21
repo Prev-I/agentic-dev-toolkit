@@ -385,17 +385,47 @@ assert_eq allow "$(jq -r '.roles.build.neutral.subagent_breakglass.effect' "$out
 assert_contains "$(jq -r '.roles.build.neutral.mismatches | join(" ")' "$out")" "not a deny"
 stop_server
 
-# 17. TERM during a run: temp dirs go, the caller's own EXIT trap still runs, the
-# subshell dies of the signal (143) and this shell survives. The agent never
-# resolves, so the run is parked polling when the signal arrives.
+# 17. the collector runs in a subshell: a fatal collector (status 3) reaches the
+# caller's EXIT trap as 3, and the caller's own traps are never touched.
+marker="$workdir/exit-status"
+tmpbase="$workdir/tmpbase"
+mkdir -p "$tmpbase"
+rc=0
+(
+  trap 'echo "$?" >"$marker"' EXIT
+  # shellcheck disable=SC2030,SC2031
+  export TMPDIR="$tmpbase"
+  _vr_collect() { exit 3; }
+  verify_effective_routing_v2 --server "http://127.0.0.1:1" --credentials "$workdir/ok.env" \
+    --targets "$targets" --outdir "$workdir/fatal" --neutral-cwd "$workdir/neutral"
+) >/dev/null 2>&1 || rc=$?
+assert_eq 3 "$rc"
+assert_eq 3 "$(<"$marker")"
+[[ -z "$(ls -A "$tmpbase")" ]] || fail "temp directories left behind: $(ls -A "$tmpbase")"
+
+fx=$(fresh traps)
+serve "$fx"
+trap 'cleanup_extra=1' INT
+trap 'cleanup_extra=2' TERM
+before=$(trap -p)
+run_verify traps
+assert_eq 0 "$rc"
+assert_eq "$before" "$(trap -p)"
+trap - INT TERM
+stop_server
+
+# 18. TERM sent to the caller while the verifier polls a never-resolving agent:
+# the caller's EXIT trap runs, it exits 143, the verifier's temp directories go,
+# and this shell survives.
 fx=$(fresh term)
 rm -f "${fx:?}/api_agent_plan.json"
 serve "$fx"
 marker="$workdir/parent-exit"
-tmpbase="$workdir/tmpbase"
+rm -rf "${tmpbase:?}"
 mkdir -p "$tmpbase"
 (
   trap 'echo parent-exit >"$marker"' EXIT
+  # shellcheck disable=SC2030,SC2031
   export TMPDIR="$tmpbase"
   V2_AGENT_POLL_TIMEOUT=60 verify_effective_routing_v2 --server "$base" --credentials "$workdir/ok.env" \
     --targets "$targets" --outdir "$workdir/term" --neutral-cwd "$workdir/neutral"
@@ -405,13 +435,21 @@ for _ in $(seq 1 100); do
   [[ -n "$(ls -A "$tmpbase" 2>/dev/null)" ]] && break
   sleep 0.05
 done
-[[ -n "$(ls -A "$tmpbase")" ]] || fail "verifier never created its work directory"
-sleep 1
+if [[ -z "$(ls -A "$tmpbase")" ]]; then
+  kill "$sub" 2>/dev/null || true
+  fail "verifier never created its work directory"
+fi
+# the work directory exists only after the verifier's traps are installed.
 kill -TERM "$sub"
 rc=0; wait "$sub" || rc=$?
 assert_eq 143 "$rc"
 assert_file "$marker"
 assert_eq parent-exit "$(<"$marker")"
+# the orphaned collector is ended by its watchdog and cleans up.
+for _ in $(seq 1 100); do
+  [[ -z "$(ls -A "$tmpbase")" ]] && break
+  sleep 0.1
+done
 [[ -z "$(ls -A "$tmpbase")" ]] || fail "temp directories left behind: $(ls -A "$tmpbase")"
 kill -0 $$ || fail "the parent test shell died"
 stop_server

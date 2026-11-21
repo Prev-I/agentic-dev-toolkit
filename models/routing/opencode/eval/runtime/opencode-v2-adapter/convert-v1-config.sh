@@ -78,7 +78,7 @@ _cv_abspath() {
 #   password                              32 random [A-Za-z0-9]
 #   port                                  a free loopback port
 _cv_py() {
-  python3 -B - "$v2_convert_root" "$@" <<'PY'
+  python3 -I -B - "$v2_convert_root" "$@" <<'PY'
 import json
 import os
 import pwd
@@ -350,7 +350,7 @@ _cv_collect() {
   version=$(cat "$work/first/version") || { _cv_err "cannot read the server version"; return 1; }
   dropped=$(_cv_py finalize "$input" "$work/first/info.json" "$work/result.json") || return 1
 
-  if [[ "$(python3 -B "$v2_convert_root/v2config.py" shape "$work/result.json")" != v2 ]]; then
+  if [[ "$(python3 -I -B "$v2_convert_root/v2config.py" shape "$work/result.json")" != v2 ]]; then
     _cv_err "the result is not V2-shaped"
     return 1
   fi
@@ -480,7 +480,7 @@ convert_v1_config() {
   fi
   [[ -x "$bin" && ! -d "$bin" ]] || { _cv_err "not an executable: $bin"; return 2; }
 
-  kind=$(python3 -B "$v2_convert_root/v2config.py" shape "$input" 2>/dev/null || true)
+  kind=$(python3 -I -B "$v2_convert_root/v2config.py" shape "$input" 2>/dev/null || true)
   if [[ "$kind" != v1 ]]; then
     _cv_err "the input is not a V1 config (shape: ${kind:-unreadable}): $input"
     return 2

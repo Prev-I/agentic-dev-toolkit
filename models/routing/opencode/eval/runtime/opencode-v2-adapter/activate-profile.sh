@@ -13,6 +13,10 @@
 # appended last, because the list is ordered and the last match wins); and the
 # single `instructions` entry naming model-routing.md. Everything else is
 # preserved. A V1-shaped target is refused untouched.
+#
+# --model-routing is written normalised (os.path.normpath). check-alignment
+# expects it at <config-root>/model-routing.md, so any other location, or a file
+# that does not exist there, draws a warning on stderr.
 set -Eeuo pipefail
 IFS=$'\n\t'
 v2_activate_root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -109,12 +113,12 @@ _activate_profile_v2_run() {
     return 1
   fi
 
-  profile_shape=$(python3 "$helper" shape "$profile") || profile_shape=invalid
+  profile_shape=$(python3 -I -B "$helper" shape "$profile") || profile_shape=invalid
   [[ "$profile_shape" == v2 ]] || {
     printf 'activate_profile_v2: profile is not a V2 config (%s): %s\n' "$profile_shape" "$profile" >&2
     return 1
   }
-  shape=$(python3 "$helper" shape "$target") || shape=invalid
+  shape=$(python3 -I -B "$helper" shape "$target") || shape=invalid
   case "$shape" in
     v2|empty) ;;
     v1)
@@ -150,15 +154,15 @@ _activate_profile_v2_run() {
   local merge_note
   if ! merge_note=$(PROFILE="$profile" TARGETS="$targets" TARGET="$target" MODEL_ROUTING="$model_routing" \
        FORMAT="$format" STAMP="$stamp" SOURCE_HASH="$source_hash" COMMIT="$commit" \
-       HELPER_DIR="$v2_activate_root" \
-       python3 -B - "$merged" <<'PY'
+       CONFIG_ROOT="$config_root" HELPER_DIR="$v2_activate_root" \
+       python3 -I -B - "$merged" <<'PY'
 import datetime
 import json
 import os
 import sys
 
 sys.path.insert(0, os.environ["HELPER_DIR"])
-import v2config  # noqa: E402  (run with -B: no __pycache__ in the bundle)
+import v2config  # noqa: E402  (run with -I -B: no cwd on sys.path, no __pycache__)
 
 
 def refuse(message):
@@ -257,7 +261,9 @@ if not all(isinstance(e, dict) for e in document.get("permissions", [])):
 
 # Variants: 2.x silently ignores an undeclared variant on a declared provider,
 # so it is an error here. Built-in providers need no declaration and are not
-# checked statically.
+# checked statically; nor is a declared provider that carries no entry for the
+# model (a filter-only block such as `"openai": {}`, which the converter writes
+# for a built-in provider): the verifier checks those against /api/model.
 providers = document.get("providers", {})
 assignments = [("model", profile["model"])] + [
     ("agents.%s" % role, profile["agents"][role].get("model")) for role in roles]
@@ -270,8 +276,10 @@ for where, model in assignments:
     declared_models = providers[provider_id].get("models") if isinstance(providers[provider_id], dict) else None
     entry = declared_models.get(model_id) if isinstance(declared_models, dict) else None
     if not isinstance(entry, dict):
-        refuse("%s assigns %s/%s, but provider %s declares no model %s"
-               % (where, provider_id, model_id, provider_id, model_id))
+        sys.stderr.write("activate_profile_v2: note: %s assigns %s/%s; provider %s declares no entry "
+                         "for that model, so it is not checked here -- verify-effective-routing "
+                         "checks it against /api/model\n" % (where, provider_id, model_id, provider_id))
+        continue
     if variant is None:
         continue
     declared = [v.get("id") for v in entry.get("variants", []) if isinstance(v, dict)]
@@ -290,7 +298,13 @@ document["permissions"] = (
     [e for e in document.get("permissions", []) if e.get("action") != "subagent"]
     + [e for e in profile_permissions if e.get("action") == "subagent"])
 
-routing_md = os.environ["MODEL_ROUTING"]
+routing_md = os.path.normpath(os.environ["MODEL_ROUTING"])
+expected_md = os.path.join(os.path.abspath(os.environ["CONFIG_ROOT"]), "model-routing.md")
+if routing_md != expected_md or not os.path.isfile(routing_md):
+    sys.stderr.write("activate_profile_v2: warning: --model-routing %s %s; check-alignment expects "
+                     "the installed policy at %s\n"
+                     % (routing_md, "is not that path" if routing_md != expected_md else "does not exist",
+                        expected_md))
 instructions = document.get("instructions", [])
 kept, slot = [], None
 for item in instructions:
@@ -302,9 +316,9 @@ for item in instructions:
 kept.insert(len(kept) if slot is None else slot, routing_md)
 document["instructions"] = kept
 
-for key in v2config.V1_KEYS:
-    if key in document:
-        refuse("refusing to write a mixed-shape config (V1 key %s)" % key)
+mixed = v2config.mixed_shape_keys(document)
+if mixed:
+    refuse("refusing to write a mixed-shape config (V1 key %s)" % ", ".join(mixed))
 
 undeclared = sorted(set(agents) - set(roles))
 with open(sys.argv[1], "w", encoding="utf-8") as handle:
@@ -372,7 +386,7 @@ PY
   fi
   if ! BACKUP_DIR="$backup_dir" TARGET="$target" BEFORE="$before_hash" AFTER="$after_hash" \
        COMMIT="$commit" SOURCE_HASH="$source_hash" STAMP="$stamp" TARGETS="$targets" \
-       PROFILE="$profile" FORMAT="$format" python3 - "$backup_dir/manifest.json" <<'PY'
+       PROFILE="$profile" FORMAT="$format" python3 -I -B - "$backup_dir/manifest.json" <<'PY'
 import datetime
 import json
 import os

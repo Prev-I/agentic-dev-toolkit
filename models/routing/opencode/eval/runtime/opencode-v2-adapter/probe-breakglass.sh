@@ -8,8 +8,10 @@ source "$v2_probe_root/v2-run.sh"
 # Breakglass probe (OpenCode 2): the emergency agent must resolve as a primary
 # agent with the manifest's model, and no other agent may be able to dispatch it.
 #
-#   probe_breakglass_v2 --server URL --credentials FILE --targets FILE \
+#   probe_breakglass_v2 [--server URL] --credentials FILE --targets FILE \
 #     --outdir DIR --cwd DIR [--call]
+#
+# --server defaults to http://127.0.0.1:4096.
 #
 # Writes DIR/breakglass.json:
 #   {resolved_primary, model, non_exposure: {<agent>: deny|EXPOSED|UNRESOLVED},
@@ -34,11 +36,11 @@ source "$v2_probe_root/v2-run.sh"
 # child's environment. A stale breakglass.json is removed before collecting.
 
 _pb_usage() {
-  printf 'usage: probe_breakglass_v2 --server URL --credentials FILE --targets FILE --outdir DIR --cwd DIR [--call]\n' >&2
+  printf 'usage: probe_breakglass_v2 [--server URL (default http://127.0.0.1:4096)] --credentials FILE --targets FILE --outdir DIR --cwd DIR [--call]\n' >&2
 }
 
 probe_breakglass_v2() {
-  local server='' creds='' targets='' outdir='' cwd='' call=0
+  local server='http://127.0.0.1:4096' creds='' targets='' outdir='' cwd='' call=0
   while (( $# )); do
     case "$1" in
       --server|--credentials|--targets|--outdir|--cwd)
@@ -144,7 +146,7 @@ _pb_collect() {
     v2_call_role "$server" "$breakglass" "$work"
   fi
 
-  python3 -I - "$work" "$targets" "$outdir/breakglass.json" "$call" "$v2_probe_root" "$list_error" <<'PY'
+  python3 -I -B - "$work" "$targets" "$outdir/breakglass.json" "$call" "$v2_probe_root" "$list_error" <<'PY'
 import json, os, sys
 
 work, targets_path, out_path, call, adapter, list_error = sys.argv[1:7]

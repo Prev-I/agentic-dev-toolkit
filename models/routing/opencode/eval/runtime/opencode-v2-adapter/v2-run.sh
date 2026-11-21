@@ -6,6 +6,7 @@
 #   v2_auth_refused                       true when the last request got 401/403
 #   v2_call_role URL ROLE WORKDIR         one `opencode run` of ROLE; writes
 #                                         WORKDIR/calls/ROLE{.jsonl,.err,.json,.assistant.json}
+#                                         (the client gets XDG_* dirs under its probe dir)
 #   V2_PICK_ASSISTANT                     the jq predicate that picks the used model
 #
 # v2_run_isolated runs the collector in a subshell that owns its EXIT/INT/TERM
@@ -115,8 +116,13 @@ v2_call_role() {
   token="probe-$RANDOM-$RANDOM-$$"
   printf '%s\n' "$token" >"$probe/probe.txt"
   out="$work/calls/$role.jsonl"
+  # The client runs with its own XDG directories under the probe dir, so it
+  # never reads or writes the operator's real config, data, state or cache.
+  mkdir -p "$probe/xdg/config" "$probe/xdg/data" "$probe/xdg/state" "$probe/xdg/cache"
   (
     cd "$probe"
+    XDG_CONFIG_HOME="$probe/xdg/config" XDG_DATA_HOME="$probe/xdg/data" \
+    XDG_STATE_HOME="$probe/xdg/state" XDG_CACHE_HOME="$probe/xdg/cache" \
     OPENCODE_PASSWORD="$V2_PASSWORD" timeout "${V2_CALL_TIMEOUT:-300}" \
       "${OPENCODE_BIN:-opencode}" --server "$url" run --agent "$role" \
       --format json --archived --auto \

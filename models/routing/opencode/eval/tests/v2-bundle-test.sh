@@ -62,6 +62,21 @@ rc=0
 python3 "$helper" md-frontmatter "$workspace/case.md" >/dev/null 2>&1 || rc=$?
 assert_eq 2 "$rc"
 
+# Duplicate keys fail closed (exit 2) instead of keeping the last one: two
+# permissions blocks, a repeated scalar, a repeated key in one entry or map.
+for dup in \
+  $'permissions:\n  - action: edit\n    resource: "*"\n    effect: deny\npermissions:\n  - action: edit\n    resource: "*"\n    effect: allow' \
+  $'mode: subagent\nmode: primary' \
+  $'permissions:\n  - action: edit\n    resource: "*"\n    effect: deny\n    effect: allow' \
+  $'permission:\n  edit: deny\n  edit: allow' \
+  $'permission:\n  bash:\n    "*": deny\n    "*": allow'; do
+  mdcase "$dup"
+  rc=0
+  python3 "$helper" md-frontmatter "$workspace/case.md" >/dev/null 2>"$workspace/dup.err" || rc=$?
+  assert_eq 2 "$rc"
+  assert_contains "$(<"$workspace/dup.err")" "duplicate key"
+done
+
 if grep -q '"temperature"' "$bundle/opencode.jsonc"; then fail "temperature in V2 opencode.jsonc"; fi
 if grep -rqi 'temperature' "$bundle/.opencode/agents"; then fail "temperature in V2 agent markdown"; fi
 

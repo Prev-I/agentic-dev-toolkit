@@ -82,6 +82,16 @@ def load(path):
         return json.loads(strip_jsonc(handle.read()))
 
 
+def mixed_shape_keys(document):
+    """The V1 markers in a parsed config: V1 top-level keys, and `mcp` as an
+    object without `servers`. Empty for a pure V2 document."""
+    found = [key for key in V1_KEYS if key in document]
+    mcp = document.get("mcp")
+    if isinstance(mcp, dict) and "servers" not in mcp:
+        found.append("mcp without servers")
+    return found
+
+
 def shape(path):
     if not os.path.exists(path) or os.path.getsize(path) == 0:
         return "empty"
@@ -93,9 +103,7 @@ def shape(path):
     if not isinstance(document, dict):
         print("invalid")
         return None
-    mcp = document.get("mcp")
-    if any(key in document for key in V1_KEYS) or (
-            isinstance(mcp, dict) and "servers" not in mcp):
+    if mixed_shape_keys(document):
         return "v1"
     return "v2"
 
@@ -160,6 +168,8 @@ def parse_frontmatter(lines):
         if line[0] in " \t":
             raise FrontmatterError("unexpected indent: " + line)
         key, value = split_key(line)
+        if key in result:
+            raise FrontmatterError("duplicate key: " + key)
         index += 1
         if value is not None:
             result[key] = scalar(value)
@@ -190,6 +200,8 @@ def parse_permissions_list(block):
         key, value = split_key(stripped)
         if value is None:
             raise FrontmatterError("nested value in permissions entry")
+        if key in entries[-1]:
+            raise FrontmatterError("duplicate key in permissions entry: " + key)
         entries[-1][key] = scalar(value)
     for entry in entries:
         if set(entry) != {"action", "resource", "effect"}:
@@ -203,6 +215,9 @@ def parse_permission_map(block):
     for line in block:
         indent = len(line) - len(line.lstrip())
         key, value = split_key(line.strip())
+        if (indent == 2 and key in result) or (
+                indent == 4 and current is not None and key in result[current]):
+            raise FrontmatterError("duplicate key: " + key)
         if indent == 2:
             if value is None:
                 result[key] = {}

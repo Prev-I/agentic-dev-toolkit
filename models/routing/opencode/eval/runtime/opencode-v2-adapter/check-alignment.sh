@@ -20,7 +20,11 @@ v2_alignment_root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # top-level `permissions` entries whose action is `subagent`, compared in
 # order because the last match wins; and exactly one `instructions` entry equal
 # to the absolute path of the installed model-routing.md. Everything else is
-# user-owned and never reported.
+# user-owned and never reported, with one exception: the top-level entry that
+# decides a subagent call to the breakglass agent (the last `subagent` or `*`
+# entry whose resource matches it, as the verifier computes it) must be a deny,
+# so a user `* * allow` placed after the subagent rules is DRIFT. With --json,
+# an existing OUT is removed first, so a failed run never leaves an old report.
 #
 # Not ported from the 1.x checker: the STALE_PROCESS warning. On 2.x the oracle
 # for what the runtime actually resolves is the running server's API
@@ -45,6 +49,8 @@ check_alignment_v2() {
       *) printf 'check_alignment_v2: unknown option %s\n' "$1" >&2; return 2 ;;
     esac
   done
+  # Never leave an earlier report behind: a failed run must not read as ALIGNED.
+  [[ -z "$json_out" ]] || rm -f -- "$json_out"
   [[ -n "$profile" && -n "$targets" && -n "$bundle_root" && -n "$live_config" ]] || {
     printf 'usage: check_alignment_v2 --profile FILE --targets FILE --bundle-root DIR --live-config FILE --live-support-root DIR [--json OUT]\n' >&2
     return 2
@@ -60,12 +66,12 @@ check_alignment_v2() {
   fi
 
   local helper="$v2_alignment_root/v2config.py" profile_shape live_shape
-  profile_shape=$(python3 -B "$helper" shape "$profile") || profile_shape=invalid
+  profile_shape=$(python3 -I -B "$helper" shape "$profile") || profile_shape=invalid
   [[ "$profile_shape" == v2 ]] || {
     printf 'check_alignment_v2: profile is not a V2 config (%s): %s\n' "$profile_shape" "$profile" >&2
     return 2
   }
-  live_shape=$(python3 -B "$helper" shape "$live_config") || live_shape=invalid
+  live_shape=$(python3 -I -B "$helper" shape "$live_config") || live_shape=invalid
   if [[ "$live_shape" == invalid ]]; then
     printf 'check_alignment_v2: %s is not parseable JSON/JSONC\n' "$live_config" >&2
     return 1
@@ -74,7 +80,7 @@ check_alignment_v2() {
   PROFILE_PATH="$profile" TARGETS="$targets" BUNDLE_ROOT="$bundle_root" \
     LIVE_CONFIG_PATH="$live_config" LIVE_SUPPORT="$live_support" \
     LIVE_SHAPE="$live_shape" JSON_OUT="$json_out" HELPER_DIR="$v2_alignment_root" \
-    python3 -B <<'PY'
+    python3 -I -B <<'PY'
 import datetime
 import hashlib
 import json
@@ -151,10 +157,22 @@ if live_shape != "v1":
                       "actual": render(subagent_entries(live)),
                       "detail": "top-level subagent rules, in order (the Breakglass containment control)"})
 
+    # The runtime also matches `*` actions, so an extra user entry such as
+    # `* * allow` after the subagent rules re-opens Breakglass even while the
+    # subagent entries match. Decide it exactly as the verifier does.
+    breakglass_agent = (targets.get("breakglass") or {}).get("agent") or "breakglass"
+    deciding = v2config.breakglass_decision(live.get("permissions"), breakglass_agent)
+    if not (isinstance(deciding, dict) and deciding.get("effect") == "deny"):
+        drift.append({"kind": "config", "key": "permissions[breakglass]",
+                      "expected": f"the last subagent/* entry matching {breakglass_agent} is a deny",
+                      "actual": render(deciding),
+                      "detail": "the deciding top-level entry for a subagent call to "
+                                f"{breakglass_agent} is {json.dumps(deciding)}, not a deny"})
+
     # Ownership is decided exactly as activation does: by the raw basename. A
     # variant such as a trailing-slash path has an empty basename, so it is
     # user-owned and ignored. The expected entry is the installed absolute path
-    # verbatim (activation writes it as given); any other owned entry is extra.
+    # (activation writes it normalised); any other owned entry is extra.
     instructions = live.get("instructions")
     entries = instructions if isinstance(instructions, list) else []
     owned = [i for i in entries if isinstance(i, str) and os.path.basename(i) == "model-routing.md"]

@@ -8,8 +8,11 @@ source "$v2_verify_root/v2-run.sh"
 # Effective-routing verifier (OpenCode 2): ask the RUNNING server what each role
 # resolves to. It never runs `opencode debug ...` and never reads the database.
 #
-#   verify_effective_routing_v2 --server URL --credentials FILE --targets FILE \
+#   verify_effective_routing_v2 [--server URL] --credentials FILE --targets FILE \
 #     --outdir DIR --neutral-cwd DIR [--project-cwd DIR] [--call]
+#
+# --server defaults to http://127.0.0.1:4096. The targets manifest must declare
+# a non-empty `agents` map (exit 2 otherwise).
 #
 # Writes DIR/effective-routing.json:
 #   {runtime_version, server, roles: {<role>: {neutral, project, status}}, overall}
@@ -40,11 +43,11 @@ source "$v2_verify_root/v2-run.sh"
 # expected ones. The password goes only into the child's environment.
 
 _vr_usage() {
-  printf 'usage: verify_effective_routing_v2 --server URL --credentials FILE --targets FILE --outdir DIR --neutral-cwd DIR [--project-cwd DIR] [--call]\n' >&2
+  printf 'usage: verify_effective_routing_v2 [--server URL (default http://127.0.0.1:4096)] --credentials FILE --targets FILE --outdir DIR --neutral-cwd DIR [--project-cwd DIR] [--call]\n' >&2
 }
 
 verify_effective_routing_v2() {
-  local server='' creds='' targets='' outdir='' neutral='' project='' call=0
+  local server='http://127.0.0.1:4096' creds='' targets='' outdir='' neutral='' project='' call=0
   while (( $# )); do
     case "$1" in
       --server|--credentials|--targets|--outdir|--neutral-cwd|--project-cwd)
@@ -71,6 +74,10 @@ verify_effective_routing_v2() {
   mkdir -p "$outdir"
   rm -f "${outdir:?}/effective-routing.json"
   [[ -f "$targets" ]] || { printf 'verify_effective_routing_v2: no such targets file: %s\n' "$targets" >&2; return 2; }
+  jq -e '(.agents | type) == "object" and (.agents | length) > 0' "$targets" >/dev/null 2>&1 || {
+    printf 'verify_effective_routing_v2: the targets manifest declares no agents (a non-empty "agents" map is required): %s\n' "$targets" >&2
+    return 2
+  }
   v2_load_credentials "$creds" || return 2
   server=${server%/}
 
@@ -104,6 +111,7 @@ _vr_collect() {
   breakglass=$(jq -r '.breakglass.agent' "$targets")
   roles=$(jq -r '.agents | keys_unsorted[]' "$targets")
   while IFS= read -r role; do
+    [[ -n "$role" ]] || continue
     v2_agent_get "$server" "$role" "$neutral" >"$work/neutral/$role.json" 2>"$work/neutral/$role.err" \
       || rm -f "$work/neutral/$role.json"
     if v2_auth_refused; then
@@ -123,7 +131,7 @@ _vr_collect() {
     fi
   done <<<"$roles"
 
-  python3 -I - "$work" "$targets" "$outdir/effective-routing.json" "$server" \
+  python3 -I -B - "$work" "$targets" "$outdir/effective-routing.json" "$server" \
     "$breakglass" "$([[ -n "$project" ]] && echo 1 || echo 0)" "$call" "$v2_verify_root" <<'PY'
 import json, os, sys
 

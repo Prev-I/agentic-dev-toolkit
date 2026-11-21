@@ -419,7 +419,8 @@ assert_contains "$(<"$workspace/variant.err")" gewiss/gpt-sol
 assert_eq "$var_before" "$(sha256sum "$var_root/opencode.jsonc")"
 assert_eq "opencode.jsonc" "$(ls -A "$var_root")"
 
-# Declared provider, undeclared model: refused too.
+# Declared provider, no entry for the model: not checked statically (the
+# verifier checks it against /api/model); activation proceeds with a note.
 python3 - "$workspace/profile.json" "$workspace/undeclared-model-profile.json" <<'PY'
 import json
 import sys
@@ -427,12 +428,12 @@ document = json.load(open(sys.argv[1]))
 document["agents"]["scout"]["model"] = {"providerID": "gewiss", "model": "not-declared", "variant": "low"}
 json.dump(document, open(sys.argv[2], "w"), indent=2)
 PY
-rc=0
-activate "$var_root" "$workspace/variant/backups" "$workspace/undeclared-model-profile.json" \
-  >/dev/null 2>"$workspace/model.err" || rc=$?
-assert_eq 1 "$rc"
-assert_contains "$(<"$workspace/model.err")" gewiss/not-declared
-assert_eq "$var_before" "$(sha256sum "$var_root/opencode.jsonc")"
+undeclared_root="$workspace/undeclared/config"
+mkdir -p "$undeclared_root"
+cp "$workspace/main-original.jsonc" "$undeclared_root/opencode.jsonc"
+activate "$undeclared_root" "$workspace/undeclared/backups" "$workspace/undeclared-model-profile.json" \
+  >/dev/null 2>"$workspace/model.err" || fail "undeclared model refused: $(<"$workspace/model.err")"
+assert_contains "$(<"$workspace/model.err")" "agents.scout assigns gewiss/not-declared; provider gewiss declares no entry"
 
 # The same xhigh assignment on a provider the target does not declare
 # (built-in) is not checked statically, and passes.
@@ -448,6 +449,89 @@ PY
 activate "$builtin_root" "$workspace/builtin/backups" "$workspace/xhigh-profile.json" >/dev/null
 python3 "$helper" load "$builtin_root/opencode.jsonc" | jq -e '.agents.build.model.variant == "xhigh"' >/dev/null \
   || fail "built-in provider assignment not written"
+
+# A declared provider with no entry for the model (the converter's filter-only
+# block for a built-in provider, e.g. `"openai": {}`) is not checked
+# statically: the bundle profile activates, with one note per such assignment.
+filter_root="$workspace/filter/config"
+mkdir -p "$filter_root"
+printf '{"providers": {"openai": {}, "github-copilot": {"models": {}}}}\n' >"$filter_root/opencode.jsonc"
+activate "$filter_root" "$workspace/filter/backups" >/dev/null 2>"$workspace/filter.err" \
+  || fail "filter-only provider refused: $(<"$workspace/filter.err")"
+assert_contains "$(<"$workspace/filter.err")" "agents.expert assigns openai/gpt-6-astra; provider openai declares no entry"
+assert_contains "$(<"$workspace/filter.err")" "checks it against /api/model"
+python3 "$helper" load "$filter_root/opencode.jsonc" | jq -e '.providers.openai == {} and .agents.expert.model.variant == "xhigh"' >/dev/null \
+  || fail "filter-only provider activation did not write the routing rows"
+# ...but a model entry that exists and lacks the variant is still refused.
+python3 - "$workspace/profile.json" "$workspace/max-profile.json" <<'PY2'
+import json
+import sys
+document = json.load(open(sys.argv[1]))
+document["agents"]["build"]["model"] = {"providerID": "openai", "model": "gpt-6.1-sol", "variant": "max"}
+json.dump(document, open(sys.argv[2], "w"), indent=2)
+PY2
+printf '{"providers": {"openai": {"models": {"gpt-6.1-sol": {"variants": [{"id": "high"}]}}}}}\n' \
+  >"$filter_root/opencode.jsonc"
+filter_before=$(sha256sum "$filter_root/opencode.jsonc")
+rc=0
+activate "$filter_root" "$workspace/filter/backups" "$workspace/max-profile.json" \
+  >/dev/null 2>"$workspace/filter2.err" || rc=$?
+assert_eq 1 "$rc"
+assert_contains "$(<"$workspace/filter2.err")" "variant max is not declared for openai/gpt-6.1-sol"
+assert_eq "$filter_before" "$(sha256sum "$filter_root/opencode.jsonc")"
+
+# --- --model-routing is normalised; a non-canonical location warns ---------
+mr_root="$workspace/mr/config"
+mkdir -p "$mr_root"
+: >"$mr_root/model-routing.md"
+PATH="$shim:$PATH" activate_profile_v2 --profile "$profile" --targets "$targets" \
+  --config-root "$mr_root" --backup-root "$workspace/mr/backups" \
+  --model-routing "$mr_root//./model-routing.md" >/dev/null 2>"$workspace/mr.err"
+[[ "$(<"$workspace/mr.err")" != *warning* ]] || fail "canonical model-routing path warned: $(<"$workspace/mr.err")"
+python3 "$helper" load "$mr_root/opencode.jsonc" | jq -e --arg md "$mr_root/model-routing.md" \
+  '.instructions == [$md]' >/dev/null || fail "--model-routing not normalised"
+# elsewhere (the test default): written, with a warning naming the expected path.
+activate "$mr_root" "$workspace/mr/backups" >/dev/null 2>"$workspace/mr2.err"
+assert_contains "$(<"$workspace/mr2.err")" "warning: --model-routing $routing_md is not that path"
+assert_contains "$(<"$workspace/mr2.err")" "$mr_root/model-routing.md"
+# the expected path, but the file is absent: warns that it does not exist.
+rm "$mr_root/model-routing.md"
+PATH="$shim:$PATH" activate_profile_v2 --profile "$profile" --targets "$targets" \
+  --config-root "$mr_root" --backup-root "$workspace/mr/backups" \
+  --model-routing "$mr_root/model-routing.md" >/dev/null 2>"$workspace/mr3.err"
+assert_contains "$(<"$workspace/mr3.err")" "does not exist"
+
+# --- the final mixed-shape guard covers `mcp` without `servers` -----------
+# An `mcp` object without `servers` is V1 per v2config.shape, so it is refused
+# before the merge; the shared helper also rejects it on the merged document.
+python3 -I -B - "$adapter" <<'PY2'
+import sys
+sys.path.insert(0, sys.argv[1])
+import v2config
+assert v2config.mixed_shape_keys({"mcp": {"x": {}}}) == ["mcp without servers"]
+assert v2config.mixed_shape_keys({"mcp": {"servers": {}}, "plugins": []}) == []
+assert v2config.mixed_shape_keys({"agent": {}, "mcp": {}}) == ["agent", "mcp without servers"]
+PY2
+grep -q 'v2config.mixed_shape_keys(document)' "$adapter/activate-profile.sh" \
+  || fail "activation's final guard does not use the shared shape logic"
+mcp_root="$workspace/mcp/config"
+mkdir -p "$mcp_root"
+printf '{"mcp": {"example": {"type": "remote"}}}\n' >"$mcp_root/opencode.jsonc"
+rc=0
+activate "$mcp_root" "$workspace/mcp/backups" >/dev/null 2>&1 || rc=$?
+assert_eq 1 "$rc"
+
+# --- no import from the current directory (python3 -I) --------------------
+plant="$workspace/plant"
+mkdir -p "$plant"
+printf 'open(%s, "w").write("imported")\n' "'$plant/MARKER'" >"$plant/json.py"
+new_root_plant="$workspace/plant-config"
+mkdir -p "$new_root_plant"
+(cd "$plant" && activate "$main_root" "$workspace/plant-backups" "$profile" --dry-run >/dev/null 2>&1) \
+  || fail "dry run from a planted directory failed"
+(cd "$plant" && activate "$new_root_plant" "$workspace/plant-backups" >/dev/null 2>&1) \
+  || fail "activation from a planted directory failed"
+[[ ! -e "$plant/MARKER" ]] || fail "activation imported json.py from the current directory"
 
 # --- Review focus 2: strict JSON target stays strict JSON -----------------
 json_root="$workspace/json/config"

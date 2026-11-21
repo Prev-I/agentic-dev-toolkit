@@ -24,13 +24,13 @@ trap 'rm -rf "$workdir"' EXIT
 live="$workdir/xdg/opencode"
 cfg="$live/opencode.jsonc"
 
-setup_aligned() {
+setup_aligned() {   # setup_aligned [MODEL_ROUTING_ARG]
   rm -rf "$workdir/xdg" "$workdir/backup"
   mkdir -p "$live/agents"
-  activate_profile_v2 --profile "$profile" --targets "$targets" --config-root "$live" \
-    --backup-root "$workdir/backup" --model-routing "$live/model-routing.md" >/dev/null
   cp "$bundle_dir"/.opencode/agents/*.md "$live/agents/"
   cp "$bundle_dir/.opencode/model-routing.md" "$live/model-routing.md"
+  activate_profile_v2 --profile "$profile" --targets "$targets" --config-root "$live" \
+    --backup-root "$workdir/backup" --model-routing "${1:-$live/model-routing.md}" >/dev/null
 }
 
 run_check() {
@@ -86,6 +86,17 @@ edit_config 'd["permissions"] = [e for e in d["permissions"] if not (e["action"]
 run_check && fail "a removed subagent breakglass deny must be DRIFT"
 grep -q 'subagent' "$workdir/out.txt" || fail "drift must name the subagent rules"
 
+# A later top-level `*` allow re-opens breakglass even though the subagent
+# entries still match: DRIFT naming the deciding entry.
+setup_aligned
+edit_config 'd["permissions"].append({"action": "*", "resource": "*", "effect": "allow"})'
+rc=0; run_check || rc=$?
+[[ $rc == 1 ]] || fail "a trailing * allow must exit 1, got $rc"
+[[ "$(report_status)" == DRIFT ]] || fail "expected DRIFT, got $(report_status)"
+grep -q 'permissions\[breakglass\]' "$workdir/out.txt" || fail "drift must name permissions[breakglass]"
+grep -qF 'the deciding top-level entry for a subagent call to breakglass is {"action": "*", "resource": "*", "effect": "allow"}, not a deny' \
+  "$workdir/out.txt" || { cat "$workdir/out.txt"; fail "drift must name the deciding entry"; }
+
 # The subagent list is order-sensitive: the last match wins.
 setup_aligned
 edit_config 'sub = [e for e in d["permissions"] if e["action"] == "subagent"]; rest = [e for e in d["permissions"] if e["action"] != "subagent"]; d["permissions"] = rest + sub[::-1]'
@@ -109,6 +120,12 @@ grep -q 'expected model-routing.md entry missing' "$workdir/out.txt" || fail "dr
 setup_aligned
 edit_config 'd["instructions"].append("docs/model-routing.md/")'
 run_check || fail "a trailing-slash instruction beside the exact entry is user-owned and must be ignored"
+
+# A non-normalised --model-routing (double slash) is normalised by activation,
+# so the result is ALIGNED.
+setup_aligned "$live//model-routing.md"
+run_check || { cat "$workdir/out.txt"; fail "a double-slash --model-routing must activate ALIGNED"; }
+[[ "$(report_status)" == ALIGNED ]] || fail "expected ALIGNED, got $(report_status)"
 
 # --- agent markdown --------------------------------------------------------
 setup_aligned
@@ -219,14 +236,29 @@ run_check || { cat "$workdir/out.txt"; fail "user-owned changes must not be drif
 [[ "$(report_status)" == ALIGNED ]] || fail "user-owned changes must leave ALIGNED, got $(report_status)"
 
 # --- usage and absence -----------------------------------------------------
+# A failed run (here: no installed config) removes an earlier --json report.
 setup_aligned
+run_check || fail "aligned fixture must pass"
+[[ -f "$workdir/report.json" ]] || fail "no report written"
 rm "$cfg"
-run_check && fail "an absent configuration must fail"
+rc=0; run_check || rc=$?
+[[ $rc == 2 ]] || fail "an absent configuration must exit 2, got $rc"
+[[ ! -e "$workdir/report.json" ]] || fail "a failed run left the earlier ALIGNED report behind"
 set +e; check_alignment_v2 --profile "$profile" --targets "$targets" --bundle-root "$bundle_dir/.opencode" \
   --live-config "$cfg" >/dev/null 2>&1; rc=$?; set -e
 [[ $rc == 2 ]] || fail "an absent configuration must exit 2, got $rc"
 set +e; check_alignment_v2 --bogus >/dev/null 2>&1; rc=$?; set -e
 [[ $rc == 2 ]] || fail "an unknown option must exit 2, got $rc"
+
+# --- no import from the current directory (python3 -I) --------------------
+# A json.py planted in the working directory must never be imported.
+setup_aligned
+plant="$workdir/plant"
+mkdir -p "$plant"
+printf 'open(%s, "w").write("imported")\nfrom importlib import import_module as _i\n' \
+  "'$plant/MARKER'" >"$plant/json.py"
+(cd "$plant" && run_check) || { cat "$workdir/out.txt"; fail "alignment from a planted directory must pass"; }
+[[ ! -e "$plant/MARKER" ]] || fail "check_alignment_v2 imported json.py from the current directory"
 
 # --- never repairs ---------------------------------------------------------
 setup_aligned

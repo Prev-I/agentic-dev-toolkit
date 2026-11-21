@@ -300,6 +300,14 @@ grep -q -- '\[--agent\] \[build\] \[--format\] \[json\] \[--archived\] \[--auto\
 probe_dir=$(sed -n 's/.* cwd=\(.*\) probe=probe-.*/\1/p' "$FAKE_OPENCODE_LOG" | head -1)
 [[ -n "$probe_dir" ]] || fail "child did not see probe.txt: $(sed -n 2p "$FAKE_OPENCODE_LOG")"
 [[ ! -e "$probe_dir" ]] || fail "probe directory was not cleaned"
+# the child got its own XDG directories under the probe dir, never the runner's.
+for kind in config data state cache; do
+  var="XDG_${kind^^}_HOME"
+  seen=$(sed -n "s/^xdg_$kind=//p" "$FAKE_OPENCODE_LOG" | head -1)
+  [[ "$seen" == "$probe_dir"/* ]] || fail "$var not under the probe dir: '$seen'"
+  [[ "$seen" != "${!var:-}" ]] || fail "$var is the runner's own: $seen"
+done
+assert_eq 44 "$(grep -c '^xdg_' "$FAKE_OPENCODE_LOG")"
 stop_server
 
 # 10. --call with a different model in the session messages is a MISMATCH.
@@ -396,6 +404,19 @@ verify_effective_routing_v2 --server "http://127.0.0.1:1" --credentials "$workdi
   --outdir "$workdir/nocreds" --neutral-cwd "$workdir/neutral" >/dev/null 2>&1 || rc=$?
 assert_eq 2 "$rc"
 [[ ! -e "$workdir/nocreds/effective-routing.json" ]] || fail "stale file survived a missing targets file"
+# an empty or missing agents map is refused up front (exit 2, clear message),
+# before any request, and still removes a stale result.
+for agents_json in '{}' 'null'; do
+  jq --argjson a "$agents_json" '.agents = $a' "$targets" >"$workdir/noagents.json"
+  printf '{"overall":"PASS"}\n' >"$workdir/nocreds/effective-routing.json"
+  rc=0
+  verify_effective_routing_v2 --server "http://127.0.0.1:1" --credentials "$workdir/ok.env" \
+    --targets "$workdir/noagents.json" --outdir "$workdir/nocreds" --neutral-cwd "$workdir/neutral" \
+    >"$workdir/noagents.log" 2>&1 || rc=$?
+  assert_eq 2 "$rc"
+  assert_contains "$(<"$workdir/noagents.log")" "declares no agents"
+  [[ ! -e "$workdir/nocreds/effective-routing.json" ]] || fail "stale file survived an empty agents map"
+done
 
 # 16. an unrelated later deny does not count: the last entry that can decide
 # subagent breakglass is still the allow.

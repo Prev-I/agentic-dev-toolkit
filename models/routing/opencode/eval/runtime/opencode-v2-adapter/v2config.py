@@ -4,6 +4,7 @@
 Usage: v2config.py load FILE | shape FILE | md-frontmatter FILE
 Exit codes: 0 success, 1 finding, 2 usage or unparseable input.
 """
+import fnmatch
 import json
 import os
 import re
@@ -225,6 +226,20 @@ def md_frontmatter(path):
         if lines[end].strip() == "---":
             return parse_frontmatter(lines[1:end])
     raise FrontmatterError("unterminated frontmatter")
+
+
+def breakglass_decision(permissions, agent_name="breakglass"):
+    """The effective permission entry that decides a subagent call to AGENT_NAME.
+
+    Among the entries whose action is `subagent` or `*` and whose resource
+    glob-matches the agent name, the LAST one decides; None when none matches.
+    """
+    deciding = None
+    for entry in permissions or []:
+        if (entry.get("action") in ("subagent", "*")
+                and fnmatch.fnmatchcase(agent_name, str(entry.get("resource", "")))):
+            deciding = entry
+    return deciding
 
 
 def usage():

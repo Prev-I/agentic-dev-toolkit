@@ -206,10 +206,12 @@ _vr_collect() {
   done
 
   python3 -I - "$work" "$targets" "$outdir/effective-routing.json" "$server" \
-    "$breakglass" "$([[ -n "$project" ]] && echo 1 || echo 0)" "$call" <<'PY'
-import fnmatch, json, os, sys
+    "$breakglass" "$([[ -n "$project" ]] && echo 1 || echo 0)" "$call" "$v2_verify_root" <<'PY'
+import json, os, sys
 
-work, targets_path, out_path, server, breakglass, has_project, call = sys.argv[1:8]
+work, targets_path, out_path, server, breakglass, has_project, call, adapter = sys.argv[1:9]
+sys.path.insert(0, adapter)
+from v2config import breakglass_decision  # noqa: E402
 has_project = has_project == "1"
 call = call == "1"
 targets = json.load(open(targets_path))
@@ -236,16 +238,6 @@ def resolve(data):
     m = data.get("model") or {}
     return {"providerID": m.get("providerID"), "model": m.get("id"),
             "variant": m.get("variant"), "mode": data.get("mode")}
-
-
-def breakglass_decision(data):
-    """The last effective entry that can decide a subagent call to breakglass."""
-    deciding = None
-    for e in data.get("permissions") or []:
-        if (e.get("action") in ("subagent", "*")
-                and fnmatch.fnmatchcase("breakglass", str(e.get("resource", "")))):
-            deciding = e
-    return deciding
 
 
 def check(role, data):
@@ -278,7 +270,7 @@ def check(role, data):
                      f"{forbidden['providerID']}/{forbidden['model']}#{forbidden['variant']}")
     record = {"resolved": got}
     if role != breakglass:
-        deciding = breakglass_decision(data)
+        deciding = breakglass_decision(data.get("permissions"), breakglass)
         record["subagent_breakglass"] = deciding
         if not (deciding and deciding.get("effect") == "deny"):
             other.append("permissions: the last subagent/* entry matching breakglass is "

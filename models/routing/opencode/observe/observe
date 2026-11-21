@@ -93,7 +93,7 @@ V1_REQUIRED = {
 }
 V2_REQUIRED = {
     "session_v2": {"id", "parent_id", "directory", "version", "agent", "model", "time_created", "time_updated"},
-    "session_message": {"id", "session_id", "type", "time_created", "data"},
+    "session_message": {"id", "session_id", "type", "seq", "time_created", "data"},
 }
 
 
@@ -233,12 +233,35 @@ def v2_message_data(kind, data):
             "model": route}
 
 
+def v2_fill_agents(db, sessions):
+    """Give a 2.x session with a NULL agent its first assistant message's agent.
+
+    Returns how many sessions were filled. A session without any assistant
+    message keeps its NULL agent.
+    """
+    filled = 0
+    for sid, session in sessions.items():
+        if session["agent"]:
+            continue
+        for (raw,) in db.execute("SELECT data FROM session_message WHERE session_id=? AND type='assistant' ORDER BY time_created,seq,id", (sid,)):
+            try:
+                data = json.loads(raw)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if isinstance(data, dict) and data.get("agent"):
+                session["agent"] = data["agent"]
+                filled += 1
+                break
+    return filled
+
+
 def read_messages(db, schema, session_ids):
-    """{sid: [message]} for the given sessions, sorted by (time, id)."""
+    """{sid: [message]} for the given sessions: v1 by (time, id), v2 by (time, seq, id)."""
     messages = defaultdict(list)
     ids = json.dumps(list(session_ids))
     if schema == "v2":
-        for mid, sid, kind, when, raw in db.execute("SELECT id,session_id,type,time_created,data FROM session_message WHERE session_id IN (SELECT value FROM json_each(?))", (ids,)):
+        # Many 2.x messages share a millisecond: seq orders them within one.
+        for mid, sid, kind, when, raw in db.execute("SELECT id,session_id,type,time_created,data FROM session_message WHERE session_id IN (SELECT value FROM json_each(?)) ORDER BY time_created,seq,id", (ids,)):
             try:
                 data = json.loads(raw)
             except (TypeError, json.JSONDecodeError):
@@ -260,8 +283,6 @@ def read_messages(db, schema, session_ids):
                     else:
                         apply_part(message, {"type": "tool", "tool": item.get("name"), "state": item.get("state")})
             messages[sid].append(message)
-        for sid in messages:
-            messages[sid].sort(key=lambda item: (item["time"], item["id"]))
         return messages
     message_root = {}
     for mid, sid, when, raw in db.execute("SELECT id,session_id,time_created,data FROM message WHERE session_id IN (SELECT value FROM json_each(?))", (ids,)):
@@ -565,6 +586,7 @@ def collect(args):
     db, schema = connect_readonly(Path(args.db))
     db.execute("BEGIN")
     sessions = read_sessions(db, schema)
+    agents_from_messages = v2_fill_agents(db, sessions) if schema == "v2" else 0
 
     def root_id(sid):
         seen = set()
@@ -596,10 +618,13 @@ def collect(args):
     message_root = {message["id"]: (sid, message) for sid, rows in messages.items() for message in rows}
     if schema == "v2":
         # 2.x sessions store no model (NULL): the route is per assistant message,
-        # so the session's model is its first assistant message's model.
+        # so the session's model is that of its first assistant message run by
+        # the session's own agent. Another agent's turn (e.g. plan before build)
+        # says nothing about the session agent's route; with none, stay NULL.
         for sid, rows in messages.items():
             if not sessions[sid]["model"]:
-                first = next((m for m in rows if m["data"].get("role") == "assistant" and m["data"].get("model")), None)
+                first = next((m for m in rows if m["data"].get("role") == "assistant" and m["data"].get("model")
+                              and m["data"].get("agent") == sessions[sid]["agent"]), None)
                 if first:
                     sessions[sid]["model"] = first["data"]["model"]
 
@@ -984,7 +1009,8 @@ def collect(args):
             "dispatcher_ids_loaded": len(known_dispatchers),
             "opencode_versions": sorted({s["version"] for s in sessions.values() if s["version"]}),
             "session_schema": schema,
-            **({"unavailable_signals": list(V2_UNAVAILABLE_SIGNALS)} if schema == "v2" else {}),
+            **({"unavailable_signals": list(V2_UNAVAILABLE_SIGNALS),
+                "sessions_agent_from_messages": agents_from_messages} if schema == "v2" else {}),
         },
         "session_classes": {category: populations[category]["sessions"] for category in POPULATIONS},
         **{name: production[name] for name in ("agents", "signals", "gate_outcomes", "gate_parity_outcomes", "agent_signals", "provider_errors", "provider_retries", "routing_requests", "escalations")},

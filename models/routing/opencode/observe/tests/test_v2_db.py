@@ -26,21 +26,22 @@ def add_session(db, sid, root, agent="build", stored_model=None, parent=None, st
                 json.dumps(stored_model) if stored_model else None, start, start + 100, CANARY))
 
 
-def add_row(db, sid, mid, when, kind, data):
+def add_row(db, sid, mid, when, kind, data, seq=None):
+    seq = when * 10 if seq is None else seq
     when = EPOCH + when
     data = {**data, "time": {"created": when}}
     db.execute("INSERT INTO session_message VALUES (?,?,?,?,?,?,?)",
-               (mid, sid, kind, when, when, when, json.dumps(data)))
+               (mid, sid, kind, seq, when, when, json.dumps(data)))
 
 
-def user(db, sid, mid, when, text):
-    add_row(db, sid, mid, when, "user", {"text": text, "files": []})
+def user(db, sid, mid, when, text, seq=None):
+    add_row(db, sid, mid, when, "user", {"text": text, "files": []}, seq)
 
 
-def assistant(db, sid, mid, when, content, agent="build", route=None, finish="stop"):
+def assistant(db, sid, mid, when, content, agent="build", route=None, finish="stop", seq=None):
     add_row(db, sid, mid, when, "assistant", {
         "agent": agent, "model": route or model(), "content": content,
-        "finish": finish, "rawFinish": CANARY, "cost": 0, "tokens": {}})
+        "finish": finish, "rawFinish": CANARY, "cost": 0, "tokens": {}}, seq)
 
 
 def tool(name, inp, meta=None, status="completed"):
@@ -108,18 +109,40 @@ def build(base):
     assistant(db, "ses_v2_gate", "g_a2", 3005, [patch("src/gate.py"),
               patch("src/denied.py") | {"state": {"status": "error", "input": {}, "metadata": {"files": [{"relativePath": "src/denied.py", "type": "update"}]}}}])
 
-    # Delegations: the 1.x-shaped task tool and the 2.x subagent tool.
+    # Delegations: the 1.x-shaped task tool and the 2.x subagent tool. The
+    # children are absent from session_v2, so they are counted only through
+    # the tool calls: removing either branch changes the counts.
     add_session(db, "ses_v2_parent", repo, start=4000)
     user(db, "ses_v2_parent", "p_u", 4001, CANARY)
     assistant(db, "ses_v2_parent", "p_a", 4002, [
         tool("task", {"subagent_type": "reviewer", "prompt": CANARY}, {"sessionId": "ses_v2_review", "model": CANARY}),
         tool("subagent", {"agent": "expert", "prompt": PACKET}, {"sessionID": "ses_v2_expert"})])
-    add_session(db, "ses_v2_review", repo, agent="reviewer", parent="ses_v2_parent", start=4003)
-    assistant(db, "ses_v2_review", "r_a", 4004, [text(CANARY)], agent="reviewer",
-              route=model(model_id="claude-opus-5.5", variant="high"))
-    add_session(db, "ses_v2_expert", repo, agent="expert", parent="ses_v2_parent", start=4005)
-    assistant(db, "ses_v2_expert", "x_a", 4006, [text(CANARY)], agent="expert",
-              route=model("openai", "gpt-6-astra", "xhigh"))
+
+    # Build root whose first assistant turn ran as plan: the root model comes
+    # from build's own message, never from plan's.
+    add_session(db, "ses_v2_switch", repo, start=6000)
+    user(db, "ses_v2_switch", "w_u", 6001, CANARY)
+    assistant(db, "ses_v2_switch", "w_a1", 6002, [text(CANARY)], agent="plan",
+              route=model(model_id="claude-opus-5.5", variant="xhigh"))
+    assistant(db, "ses_v2_switch", "w_a2", 6003, [text(CANARY)])
+    # Only plan ran: build's model stays unknown, so no root comparison.
+    add_session(db, "ses_v2_plan_only", repo, start=6500)
+    assistant(db, "ses_v2_plan_only", "po_a", 6501, [text(CANARY)], agent="plan",
+              route=model(model_id="claude-opus-5.5", variant="xhigh"))
+
+    # NULL agent: taken from the first assistant message; with none, unchanged.
+    add_session(db, "ses_v2_noagent", repo, agent=None, start=7000)
+    user(db, "ses_v2_noagent", "n_u", 7001, CANARY)
+    assistant(db, "ses_v2_noagent", "n_a", 7002, [text(CANARY)], route=model(model_id="gpt-6-luna", variant="low"))
+    add_session(db, "ses_v2_noagent_empty", repo, agent=None, start=7500)
+    user(db, "ses_v2_noagent_empty", "ne_u", 7501, CANARY)
+
+    # Same millisecond: seq, not id, orders the approval before the edit.
+    add_session(db, "ses_v2_seq", repo, start=8000)
+    user(db, "ses_v2_seq", "q_u", 8001, CANARY)
+    assistant(db, "ses_v2_seq", "q_a1", 8002, [tool("skill", {"name": "brainstorming"})])
+    assistant(db, "ses_v2_seq", "q_a", 8003, [patch("src/seq.py")], seq=80032)
+    user(db, "ses_v2_seq", "q_b", 8003, "Approved, proceed " + CANARY, seq=80031)
 
     # A migrated 1.x session, model stored on the row as in 1.x.
     add_session(db, "ses_v2_migrated", repo, stored_model=model(), start=5000, version="1.18.32")
@@ -153,13 +176,16 @@ def main():
         report(db, state)  # text format stays private too
         key = (state / "hash.key").read_bytes()
         hashes = {sid: session_hash(key, sid) for sid in (
-            "ses_v2_aligned", "ses_v2_mismatch", "ses_v2_gate", "ses_v2_parent", "ses_v2_migrated", "ses_stale")}
+            "ses_v2_aligned", "ses_v2_mismatch", "ses_v2_gate", "ses_v2_parent", "ses_v2_migrated", "ses_stale",
+            "ses_v2_switch", "ses_v2_plan_only", "ses_v2_noagent", "ses_v2_noagent_empty", "ses_v2_seq")}
 
         # Default manifest follows the schema; only session_v2 rows are read.
         assert out["coverage"]["session_schema"] == "v2"
         assert out["coverage"]["unavailable_signals"] == ["snapshot_edits", "retries"]
         assert out["coverage"]["opencode_versions"] == ["1.18.32", "2.3.0"], out["coverage"]
-        assert out["session_classes"] == {"eval_dispatcher": 0, "production": 5, "pre_profile": 0}, out["session_classes"]
+        assert out["session_classes"] == {"eval_dispatcher": 1, "production": 9, "pre_profile": 0}, out["session_classes"]
+        assert out["coverage"]["sessions_agent_from_messages"] == 1
+        assert out["populations"]["production"]["agents"] == {"build": 9}, out["populations"]["production"]["agents"]
         assert hashes["ses_stale"] not in serialized
         assert "src/stale-snapshot.py" not in serialized and "tests/conftest.py" not in serialized
         assert out["signals"]["provider_error"] == 0 and out["signals"]["scope"] == 0
@@ -169,20 +195,21 @@ def main():
         assert {(item["session"], item["reason"], item["observed_model"], item.get("variant")) for item in routing} == {
             (hashes["ses_v2_mismatch"], "root_model_differs", "github-copilot/gpt-6-luna", "low"),
             (hashes["ses_v2_mismatch"], "request_route_differs", "github-copilot/gpt-6-luna", "low"),
+            (hashes["ses_v2_noagent"], "root_model_differs", "github-copilot/gpt-6-luna", "low"),
+            (hashes["ses_v2_noagent"], "request_route_differs", "github-copilot/gpt-6-luna", "low"),
         }, routing
         requests = {(r["agent"], r["provider"], r["model"], r["variant"]): r["requests"] for r in out["routing_requests"]}
         assert requests == {
-            ("build", "github-copilot", "gpt-6.1-sol", "high"): 6,
-            ("build", "github-copilot", "gpt-6-luna", "low"): 1,
-            ("reviewer", "github-copilot", "claude-opus-5.5", "high"): 1,
-            ("expert", "openai", "gpt-6-astra", "xhigh"): 1,
+            ("build", "github-copilot", "gpt-6.1-sol", "high"): 9,
+            ("build", "github-copilot", "gpt-6-luna", "low"): 2,
+            ("plan", "github-copilot", "claude-opus-5.5", "xhigh"): 2,
         }, requests
 
         # Gate: user approval counts, system/synthetic text never does; denied edits do not count.
-        assert out["gate_outcomes"] == {"ADHERENT": 1, "NON_ADHERENT": 1}, out["gate_outcomes"]
+        assert out["gate_outcomes"] == {"ADHERENT": 2, "NON_ADHERENT": 1}, out["gate_outcomes"]
         gates = [item for item in out["review"] if item["signal"] == "gate"]
         assert [(g["session"], g["paths"]) for g in gates] == [(hashes["ses_v2_gate"], ["src/gate.py"])], gates
-        assert out["checkpoint"]["build_sessions_with_gate"] == 2
+        assert out["checkpoint"]["build_sessions_with_gate"] == 3
 
         # Delegations: task and subagent produce the same tasks entries.
         assert out["escalations"] == {"expert": 1, "reviewer": 1, "breakglass": 0}, out["escalations"]
@@ -201,7 +228,8 @@ def main():
             assert detect_schema(ro) == "v2"
             sessions = module["read_sessions"](ro, "v2")
             assert "ses_stale" not in sessions and sessions["ses_v2_aligned"]["model"] is None
-            messages = module["read_messages"](ro, "v2", ["ses_v2_aligned", "ses_v2_gate", "ses_v2_parent"])
+            messages = module["read_messages"](ro, "v2", ["ses_v2_aligned", "ses_v2_gate", "ses_v2_parent", "ses_v2_seq"])
+            assert [m["id"] for m in messages["ses_v2_seq"]] == ["q_u", "q_a1", "q_b", "q_a"]
             aligned = messages["ses_v2_aligned"]
             assert [m["data"]["role"] for m in aligned] == ["user", "assistant", "user", "assistant"]
             assert aligned[1]["skills"] == ["brainstorming"] and len(aligned[1]["texts"]) == 1

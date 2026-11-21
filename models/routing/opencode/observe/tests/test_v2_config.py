@@ -122,6 +122,28 @@ def main():
         finally:
             db.close()
 
+        # session_message without seq is not v2 (seq orders same-millisecond rows).
+        noseq = base / "noseq.db"
+        db = sqlite3.connect(noseq)
+        db.executescript(
+            """
+            CREATE TABLE session_v2 (id TEXT, parent_id TEXT, directory TEXT, version TEXT,
+              agent TEXT, model TEXT, time_created INTEGER, time_updated INTEGER);
+            CREATE TABLE session_message (id TEXT, session_id TEXT, type TEXT,
+              time_created INTEGER, data TEXT);
+            """
+        )
+        db.commit()
+        db.close()
+        db = sqlite3.connect(noseq.as_uri() + "?mode=ro", uri=True)
+        try:
+            detect_schema(db)
+            raise AssertionError("expected unsupported_session_schema")
+        except ObserveError as error:
+            assert str(error) == "unsupported_session_schema"
+        finally:
+            db.close()
+
         # Default manifest follows the schema; explicit --manifest wins.
         assert Path(default_manifest(base / "v1.db")) == MANIFEST.resolve()
         assert Path(default_manifest(base / "v2.db")) == V2_MANIFEST.resolve()

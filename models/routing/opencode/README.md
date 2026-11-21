@@ -113,6 +113,107 @@ every lookup against a server polls until the agent resolves, bounded at 30 s
 (`V2_AGENT_POLL_TIMEOUT`, default `30`). A one-shot request that misses is not
 evidence the agent is absent.
 
+## Screening a model on OpenCode 2
+
+`eval/runtime/opencode-v2-adapter/run-screening.sh` compares candidates on one
+role's task, the way the October per-role screenings did. A role is one file in
+`opencode-v2-adapter/roles/` (`reviewer.json`, `build.json`): its workloads,
+prompts, agent, scorer and the paths it freezes. A candidate is
+`KEY=model:PROVIDER/MODEL#VARIANT`, or `KEY=agent:NAME` for an agent of a V2
+profile passed with `--profile`.
+
+**Three phases, and an approval between the first two.** Nothing is spent
+before the operator approves a frozen protocol.
+
+1. **`prepare`** writes the protocol, a catalog snapshot (`GET /api/model` from
+   one sandboxed server, with no model call) and a freeze manifest, then prints
+   the exact `approval.json` to write. It refuses a model the catalog does not
+   list, a variant it does not offer, and a model whose `cost` is `[]`: no
+   budget cap could hold for an unpriced model.
+2. **The operator reads the protocol and writes `approval.json`** into the
+   record, exactly as printed. It names the ceiling and the freeze manifest's
+   digest, so approving one protocol cannot release another.
+3. **`dispatch`** refuses (exit 3) an approval that differs, or a provider
+   fragment, credentials file or profile whose digest is not the one frozen.
+   It verifies the freeze manifest before every call, probes each candidate,
+   then runs every workload for every repetition, alternating the candidate
+   order. Exit `0` when the screening is `COMPLETE`, `1` when `INCOMPLETE`.
+4. **`score`** runs the role's normaliser and scorer and writes a `result.md`
+   skeleton. Adjudication and the conclusion stay with the operator: `result.md`
+   says `Operator: not yet adjudicated`, and the runner never writes
+   `adjudication.json`.
+
+```bash
+adapter=models/routing/opencode/eval/runtime/opencode-v2-adapter
+bash "$adapter/run-screening.sh" prepare --role reviewer --out ~/screenings/v2-reviewer-a-b \
+  --candidate a=model:PROVIDER/MODEL_A#high --candidate b=model:PROVIDER/MODEL_B#high \
+  --runs 3 --budget 400 --providers ~/screening/providers.json --credentials ~/screening/auth.json
+# review protocol.json, then write the printed object to ~/screenings/v2-reviewer-a-b/approval.json
+bash "$adapter/run-screening.sh" dispatch --out ~/screenings/v2-reviewer-a-b \
+  --providers ~/screening/providers.json --credentials ~/screening/auth.json
+bash "$adapter/run-screening.sh" score --out ~/screenings/v2-reviewer-a-b
+```
+
+**What the operator supplies, and why.** Providers and credentials are
+deployment-specific, so the toolkit ships neither:
+
+- a **provider fragment**: a V2 file holding only `providers` and `policies`,
+  merged into each sandbox's config;
+- a **credentials file** in the 1.x `auth.json` format. A fresh 2.x data
+  directory imports it on first start, which is how each sandbox gets its
+  credentials;
+- optionally a **profile** (`--profile FILE --profile-id ID`), for `agent:`
+  candidates. A `model:` candidate runs as the role's own agent with the
+  candidate's model, so it gets the role's permissions rather than the default
+  agent's.
+
+The record holds only the sha256 of each of these files, never their content.
+
+**Isolation.** Every call has its own sandbox under the record's `.work/`:
+scratch `HOME` and `XDG_*` directories, `env -i` with an allowlist, a server on
+a spare loopback port with a throwaway password, and the call made with
+`opencode run --server`. The sandbox, with the credentials copy in it, is
+deleted when the call ends, on success, failure or a signal. `TMPDIR` points
+into `.work/`, which is removed when the runner exits. A record inside a real
+OpenCode directory is refused. Because `HOME` and `XDG_*` alone do not isolate,
+each server's `GET /api/config` layers are checked before the call (with and
+without `?directory=`): every layer must be inside the sandbox, or be the
+account's `~/.opencode` holding no config, agents, commands or plugins. The
+layer list is kept in each `dispatch.json`, with each layer's content reduced to
+a digest.
+
+**The record.** `--out` may be anywhere outside those directories; its name
+must start with `v2-`.
+
+```text
+protocol.json          experiment id, role, candidates, budget, digests, runtime
+catalog-snapshot.json  the catalog's variants and cost for the candidates' providers
+freeze-manifest.json   digests of the role, the adapter, the frozen paths and the two files above
+approval.json          written by the operator
+ledger.json            one account per candidate, with every call's credits
+status.json            {state: COMPLETE|INCOMPLETE, stopped: {key: reason}, halted}
+capability/KEY/        the capability probe: probe.json and dispatch/
+runs/NN-WORKLOAD-rREP-KEY/   dispatch/, and reported.json or extract-error.txt
+                       (reviewer) or work-product.patch (build)
+findings-KEY-rREP.json, scores/KEY-rREP.json   reviewer normalisation and scores
+post-run-diagnostic/   the build scorer's output
+result.md              the skeleton the operator completes
+```
+
+**Stops and budget, the rules that change an operator's run.**
+
+- A failed capability probe, or a run classified `CAPABILITY_REGRESSION`, stops
+  that candidate; the others continue.
+- A `BUDGET_STOP`, a refused admission, or a call whose cost is unknown (it
+  started a step and reported no cost) halts the whole screening: the record is
+  `INCOMPLETE` and `dispatch` exits `1`. Every other failed run is recorded and
+  its candidate continues.
+- `--budget` is split equally into one account per candidate,
+  `candidate_KEY`. Each call is admitted only if the account can still afford
+  `cap / (runs × workloads + 1)` (the `+ 1` is the probe), and a running call is
+  stopped once its own cost reaches what the account has left. Credits are the
+  reported cost × 100, for any provider.
+
 ## V2 profile format
 
 This is the contract a private profile generator targets: produce a file of this

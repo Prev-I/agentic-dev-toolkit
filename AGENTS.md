@@ -24,6 +24,8 @@ instructions/                   AGENTS.md pattern shipped to other projects
   adapters/{claude-code,codex,opencode}/
 models/routing/opencode/        Model-routing config bundle for OpenCode
 models/routing/opencode/v2/     The OpenCode 2.x bundle (current); the root files are frozen 1.x
+models/routing/opencode/eval/runtime/opencode-v2-adapter/run-screening.sh
+                                The per-role screening runner for OpenCode 2 (roles in roles/)
 models/routing/claude-code/     Model-routing bundle for Claude Code: agents, policy,
                                 model-pinning hook, alignment check
 repository-policy/              `.repository-policy.yaml` format, schema and validator

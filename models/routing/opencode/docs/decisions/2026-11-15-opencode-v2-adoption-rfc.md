@@ -250,14 +250,20 @@ edited. It was not measured whether 1.x sent the agent-level temperature.
 
 ## Follow-ups
 
-1. **Closed.** A V2 routing adapter and V2-shaped profiles, including variant-carried
-   temperature for `reviewer` and `expert` and an explicit replacement for the
-   dropped provider `blacklist`. Resolved by [`docs/superpowers/specs/2026-11-21-opencode-v2-routing-alignment-design.md`](../../../../../docs/superpowers/specs/2026-11-21-opencode-v2-routing-alignment-design.md): temperature is removed and
-   `blacklist` is replaced by not declaring the model.
+1. **Closed** by
+   [the V2 routing design](../../../../../docs/superpowers/specs/2026-11-21-opencode-v2-routing-alignment-design.md).
+   A V2 routing adapter and V2-shaped profiles, including
+   variant-carried temperature for `reviewer` and `expert` and an explicit
+   replacement for the dropped provider `blacklist`. Temperature is removed,
+   and `blacklist` is replaced by not declaring the model.
 2. The observe tool on the 2.x database tables.
 3. `opencode-gateway-restart.sh` on 2.x.
 4. A live cutover verification record for the runbook.
-5. **Closed.** The installer's Superpowers config writer is V1-shaped only (it edits
-   `.plugin`). On a V2-shaped config it would mix shapes within one section,
-   which upstream warns silently loses settings (anomalyco/opencode#56816); it
-   needs a V2 path before any config is converted.
+5. **Closed** by
+   [the V2 routing design](../../../../../docs/superpowers/specs/2026-11-21-opencode-v2-routing-alignment-design.md).
+   The installer's Superpowers config writer was V1-shaped
+   only (it edited `.plugin`), so on a V2-shaped config it would have mixed
+   shapes within one section, which upstream warns silently loses settings
+   (anomalyco/opencode#56816). It now writes the 2.x `plugins` key, creates a
+   fresh config with `"update": "disable"`, and refuses a 1.x-shaped or
+   unparseable config, leaving the file unchanged.

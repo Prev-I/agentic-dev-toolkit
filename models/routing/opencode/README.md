@@ -25,7 +25,8 @@ v2/manifests/current-routing-targets.json  roles, models, variants, forbidden re
 ```
 
 The adapter is `eval/runtime/opencode-v2-adapter/`. The workflow, in order. All
-commands run from the repository root; `<...>` values are yours.
+commands run from the repository root. Paths under `~/.config/opencode` assume
+`XDG_CONFIG_HOME` is unset; if it is set, use `$XDG_CONFIG_HOME/opencode` instead.
 
 1. **Convert once.** Turn an existing 1.x config into the 2.x shape. Upstream
    offers no non-interactive converter, so this uses OpenCode 2's own
@@ -40,12 +41,14 @@ commands run from the repository root; `<...>` values are yours.
 
 2. **Activate.** Writes only the routing-owned keys into the global config and
    refuses a 1.x-shaped file, a symlink, or a directory holding both
-   `opencode.json` and `opencode.jsonc`. `--dry-run` shows the plan. Copy
-   the contents of `v2/.opencode/` (`agents/` and `model-routing.md`) into the
-   config root first, so `model-routing.md` exists at the absolute path you pass.
-   Alignment compares the installed files there.
+   `opencode.json` and `opencode.jsonc`. `--dry-run` runs those checks and prints
+   only `dry_run=1`, the `target` and its `before_sha256`; it writes nothing and
+   does not show a diff. Copy the contents of `v2/.opencode/` (`agents/` and
+   `model-routing.md`) into the config root first, so `model-routing.md` exists at
+   the absolute path you pass. Alignment compares the installed files there.
 
    ```bash
+   cp -r models/routing/opencode/v2/.opencode/. ~/.config/opencode/
    bash models/routing/opencode/eval/runtime/opencode-v2-adapter/activate-profile.sh \
      --profile models/routing/opencode/v2/opencode.jsonc \
      --targets models/routing/opencode/v2/manifests/current-routing-targets.json \
@@ -67,25 +70,29 @@ commands run from the repository root; `<...>` values are yours.
    `--project-cwd DIR` to see project overrides, and `--call` to run each role
    once. `--credentials` is a dotenv file holding `OPENCODE_PASSWORD` or
    `OPENCODE_SERVER_PASSWORD`; it reaches curl through stdin, never argv. This
-   script is a function library, so it is sourced:
+   Use a fresh directory for `--neutral-cwd`, so that no project config above it
+   can change what the server resolves, and for `--outdir`, so the result is not
+   mixed with an older run:
 
    ```bash
-   bash -c 'source models/routing/opencode/eval/runtime/opencode-v2-adapter/verify-effective-routing.sh
-     verify_effective_routing_v2 --server http://127.0.0.1:4096 \
-       --credentials ~/.config/opencode-runtime/secrets.env \
-       --targets models/routing/opencode/v2/manifests/current-routing-targets.json \
-       --outdir /tmp/routing-check --neutral-cwd /tmp'
+   work=$(mktemp -d)
+   bash models/routing/opencode/eval/runtime/opencode-v2-adapter/verify-effective-routing.sh \
+     --server http://127.0.0.1:4096 \
+     --credentials ~/.config/opencode-runtime/secrets.env \
+     --targets models/routing/opencode/v2/manifests/current-routing-targets.json \
+     --outdir "$work/out" --neutral-cwd "$work"
    ```
 
 5. **Probe Breakglass.** It must resolve as a primary agent with the manifest's
    model, and no other agent may be able to dispatch it. Writes `breakglass.json`.
 
    ```bash
-   bash -c 'source models/routing/opencode/eval/runtime/opencode-v2-adapter/probe-breakglass.sh
-     probe_breakglass_v2 --server http://127.0.0.1:4096 \
-       --credentials ~/.config/opencode-runtime/secrets.env \
-       --targets models/routing/opencode/v2/manifests/current-routing-targets.json \
-       --outdir /tmp/routing-check --cwd /tmp'
+   work=$(mktemp -d)
+   bash models/routing/opencode/eval/runtime/opencode-v2-adapter/probe-breakglass.sh \
+     --server http://127.0.0.1:4096 \
+     --credentials ~/.config/opencode-runtime/secrets.env \
+     --targets models/routing/opencode/v2/manifests/current-routing-targets.json \
+     --outdir "$work/out" --cwd "$work"
    ```
 
 **Agents load lazily per directory.** The first lookup of an agent can miss, so
@@ -106,13 +113,19 @@ shape plus a targets manifest, and the tools above work on it unchanged.
 - **Targets manifest**, format `opencode-v2-routing-targets/1`: `profile_id`,
   `default_model`, `agents.<role>` rows of `{providerID, model, variant, mode}`,
   `breakglass: {agent, deny_as_subagent}`, `forbidden_model_references`, and
-  `forbidden_effective_state`.
-- **The prompt key is `system`.** `prompt` is the 1.x name and is not read.
+  `forbidden_effective_state`. A role's `mode` of `null` means the mode is not
+  checked, for roles that keep whatever mode the server gives them.
+- **The prompt key is `system`.** `prompt` is the 1.x name: in a 2.x file it is
+  silently dropped, so the agent runs without its prompt. In agent markdown the
+  body becomes `system`.
 - **Permissions are an ordered list** of `{action, resource, effect}`; the last
   match wins. The 1.x action names change in two places: `bash` becomes `shell`
   and `task` becomes `subagent`. Every other action keeps its name.
 - **Markdown never carries `model`.** `.opencode/agents/*.md` hold prompts and
-  non-routing metadata; the model is assigned only in `opencode.jsonc`.
+  non-routing metadata; the model is assigned only in `opencode.jsonc`. The
+  frontmatter does carry the agent's `permissions` (same list shape as above),
+  and alignment treats any frontmatter difference as `DRIFT`; a difference in the
+  body is only `STALE`.
 - **No 1.x top-level key** (`agent`, `provider`, `permission`, `plugin`,
   `disabled_providers`, `autoupdate`, `server`, or an `mcp` object without
   `servers`) may appear in a file these tools write. A file mixing both shapes
@@ -126,9 +139,13 @@ shape plus a targets manifest, and the tools above work on it unchanged.
   `temperature`, and OpenAI reasoning models do not honour it. Effort is the
   lever for review depth. The converter removes it and reports it as `dropped:`.
 - **A provider's `blacklist` and `whitelist`.** 2.x drops both and has no
-  equivalent, and it does not discover models you did not declare. The rule is:
-  **a model you must not use is a model you do not declare.**
-  `forbidden_model_references` in the manifest stays as a checked guard.
+  equivalent. A provider whose models exist only by declaration does not
+  expose a model you did not declare, so for those the rule is: **a model you
+  must not use is a model you do not declare.** It does not extend to a built-in
+  provider, which ships its own model catalog and keeps its models usable
+  whether or not you declare them. `forbidden_model_references` in the manifest
+  guards only the models the routed roles actually resolve to; it does not stop
+  anyone selecting another model by hand.
 
 ## OpenCode 1.x (history)
 
@@ -138,7 +155,7 @@ of how routing was built and measured. **Do not run the 1.x adapter against a
 2.x host**: it reads and writes a shape 2.x ignores or mangles. The sections
 below describe that bundle.
 
-## Model map
+### Model map
 
 | Role | OpenCode agent | Model | Variant |
 |---|---|---|---|
@@ -185,7 +202,7 @@ dispatchers from production sessions, and requires human confirmation before
 applying trigger thresholds. Its README defines the weekly review and privacy
 boundary.
 
-## Agent interaction
+### Agent interaction
 
 This diagram shows the intended policy flow with Build as the controller, not
 measured session traffic or an automatic dispatch schedule. All models are on
@@ -256,7 +273,7 @@ flowchart TB
 - **Automatic snapshot summaries do not invoke Summary.** The configured Summary
   model is available through explicit invocation.
 
-## Routing migration
+### Routing migration
 
 The historical OpenCode V1 multi-model routing restoration was governed by:
 
@@ -294,7 +311,7 @@ configuration and became the historical
 `canonical_quality_reference` — meaning restoration-quality, not a claim
 that every role's model is optimal for its role.
 
-### Phase-3 Build optimization cycle: closed, KEEP_OPUS
+#### Phase-3 Build optimization cycle: closed, KEEP_OPUS
 
 Two hypothesis-driven Build challenger experiments have completed against
 the restored baseline — Opus 5 high vs Sonnet 5 high
@@ -309,7 +326,7 @@ Sol conclusion, preserved budget history, and the observation-driven policy
 now governing future experiments:
 [Phase-3 Build optimization cycle closure](docs/decisions/2026-09-04-phase3-build-optimization-closure.md).
 
-## Restored reference profile
+### Restored reference profile
 
 [`profiles/v1-restored-2026-09.jsonc`](profiles/v1-restored-2026-09.jsonc) is
 the historical canonical restored V1 baseline, not the current selection.
@@ -319,7 +336,7 @@ file for the full amended-gate provenance.
 [`profiles/baseline-2026-08.jsonc`](profiles/baseline-2026-08.jsonc) remains
 the preserved, untouched historical record of the pre-Phase-R profile.
 
-## Capability status (Track A)
+### Capability status (Track A)
 
 The [2026-09-02 capability closure](docs/evidence/2026-09-02-capability-closure.md)
 found that the committed Claude Opus 4.6 targets failed the runtime capability
@@ -354,7 +371,7 @@ The [governance blocker record](docs/evidence/2026-09-02-governance-blockers.md)
 records the resolved local Copilot, OpenAI, and OpenCode V2 RFC ownership
 decisions and distinguishes external organizational controls.
 
-## Phase 0 evaluation harness
+### Phase 0 evaluation harness
 
 Run the dependency-free Phase 0 gate tests from the repository root:
 
@@ -377,55 +394,15 @@ auxiliary provider streams and unknown costs separately from primary dispatch
 accounting. See the [title-provider diagnostic](eval/records/title-provider-check-2026-10/result.md)
 for the configured Build→Expert path and its evidence boundaries.
 
-## Alignment check — is the installed configuration still this bundle?
+### Alignment check (1.x, historical)
 
-Merging this bundle is a copy, not a link: once installed, the user-global
-configuration and this repository drift independently. To compare them:
+The 1.x checker is `eval/runtime/opencode-v1-adapter/check-alignment.sh`. It
+compares an installed 1.x configuration (top-level `permission.task`, agent rows,
+`permission:` frontmatter) with the frozen root bundle, and is not run against a
+2.x host. The command `eval/check-alignment.sh` now checks the 2.x bundle; see
+"OpenCode 2 (current)", step 3.
 
-```bash
-bash models/routing/opencode/eval/check-alignment.sh
-```
-
-No arguments, no model calls, and it changes nothing. Exit codes: `0`
-aligned, `1` drift, `2` usage error or nothing installed. Add
-`--json /path/report.json` for a machine-readable record.
-
-It reports two severities, deliberately kept apart:
-
-| Severity | What it covers | Fails the check |
-|---|---|---|
-| `DRIFT` | Routing-owned configuration keys — the top-level `model`, the top-level `permission.task`, and the declared agent rows *including their permission blocks* — plus the `permission:` frontmatter of each agent markdown this bundle ships | yes |
-| `STALE` | A support file whose prose differs while its permissions still match | no |
-
-Scope of "routing-owned" matches the profile keys copied by
-`activate-profile.sh`; activation also normalizes the legacy relative routing
-policy entry in `instructions` to its absolute user-global support-file path.
-**Everything else in your configuration is yours and is never reported** —
-your own `plugin` list, theme, or a custom agent row the targets manifest
-does not declare. A check that flagged those would cry wolf, and a check
-that cries wolf is one people stop running.
-
-**It never repairs anything.** Drift is sometimes deliberate: the Build
-`git push*` permission legitimately moved from `deny` to `ask` on
-2026-09-04, and a tool that "corrected" that would have been wrong. When it
-reports drift, decide per item, then either re-copy the bundle file or fix
-the repository.
-
-This answers a different question from
-`eval/runtime/opencode-v1-adapter/verify-effective-routing.sh`, which asks
-whether the *runtime* resolves each role as declared. Alignment asks whether
-the *files on disk* still match this repository. Both are useful; neither
-subsumes the other.
-
-**`ALIGNED` is not "fully verified".** The check is bounded by the profile keys
-`activate-profile.sh` writes. The activation script's targeted normalization of
-the legacy `instructions` entry is outside that alignment scope, as is
-`permission.websearch`. A configuration that later dropped its `instructions`
-entry would still report the routing policy perfectly in sync while the runtime
-never loads it. Widening the scope means widening what counts as "yours vs. the
-bundle's", which is a decision, not a bug fix.
-
-## 1. Verify model IDs and variants
+### 1. Verify model IDs and variants
 
 Connect GitHub Copilot and OpenAI in OpenCode, then inspect the models and variants available to your accounts:
 
@@ -461,7 +438,7 @@ openai/gpt-6-astra
 
 Variant availability can depend on the provider/model catalog exposed to your installation. Verify `low`, `medium`, `high`, `xhigh`, and `max` as applicable before merging. If a requested variant is not exposed, use the highest available variant for that model without changing the role mapping.
 
-## 2. Enable web search
+### 2. Enable web search
 
 The bundle enables the `websearch` permission so agents can search the web via Exa AI. The tool requires the `OPENCODE_ENABLE_EXA` environment variable to be set:
 
@@ -473,7 +450,7 @@ Add this to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.) for persistence. 
 
 If you use the [agentic-dev-toolkit installer](../../../environments/linux/install.sh), this variable is set automatically in the managed `~/.bashrc` block.
 
-## 3. Install the custom agents and routing policy
+### 3. Install the custom agents and routing policy
 
 Copy these files from this bundle into the matching target paths.
 
@@ -508,7 +485,7 @@ These are copies. After installing them — and after any later change to
 either side — [the alignment check](#alignment-check--is-the-installed-configuration-still-this-bundle)
 tells you whether they still match this bundle.
 
-## 4. Merge the OpenCode configuration
+### 4. Merge the OpenCode configuration
 
 Merge `opencode.jsonc` into your existing project or global OpenCode configuration. Treat it as a fragment and do not replace unrelated configuration.
 
@@ -540,7 +517,7 @@ It also permits `plan`, `build`, and `general` to invoke subagents via the Task
 tool, with `breakglass` explicitly denied at every one of those `task`
 permission blocks and at the top level.
 
-## 5. Superpowers routing
+### 5. Superpowers routing
 
 `.opencode/model-routing.md` provides the semantic mapping:
 
@@ -552,13 +529,13 @@ high-risk / disputed judgment        -> expert     -> GPT-6 Astra xhigh (direct 
 
 This layer is still an instruction to the controller, not a hard-coded Superpowers dispatcher. The deterministic parts are the agent-to-model mapping. If future observation shows Superpowers repeatedly dispatching review to the wrong subagent, the next escalation is a minimal Superpowers dispatch override rather than adding more prompt rules.
 
-## 6. Why no AGENTS.md fragment
+### 6. Why no AGENTS.md fragment
 
 OpenCode supports project instruction files directly through the `instructions` field in `opencode.json`. Keeping the routing policy in `.opencode/model-routing.md` avoids mixing personal orchestration policy with the repository's general engineering rules in `AGENTS.md`.
 
 Your existing `AGENTS.md`, if any, remains untouched and is still loaded by OpenCode alongside the configured instruction file.
 
-## 7. Smoke tests
+### 7. Smoke tests
 
 After merging the configuration, verify these scenarios:
 
@@ -569,6 +546,6 @@ After merging the configuration, verify these scenarios:
 5. Present an unresolved public API or security decision. Expected escalation: `expert` with a compact decision packet and no implementation by the expert.
 6. Confirm `build` can invoke `general`, `explore`, `scout`, `reviewer`, and `expert` through Task.
 
-## 8. GPT-5.6 quota rule
+### 8. GPT-5.6 quota rule
 
 Do not switch `plan`, `build`, `general`, `explore`, `scout`, `reviewer`, `compaction`, `title`, or `summary` to direct OpenAI for normal work; all nine stay on GitHub Copilot. Keep direct OpenAI isolated behind `expert` and the human-selected `breakglass` agent so ordinary delegation cannot accidentally inherit the scarce, credential-gated provider.

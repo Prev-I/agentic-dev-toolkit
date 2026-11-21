@@ -134,6 +134,7 @@ tracked files must take:
       "mode": "subagent",
       "hidden": true,
       "steps": 0,
+      "system": "prompt text (V1 `prompt`)",
       "model": { "providerID": "<p>", "model": "<m>", "variant": "xhigh" },
       "permissions": [ ]
     }
@@ -165,6 +166,41 @@ Facts measured on 2.3.0 (RFC; phase reports kept by the operator):
   - default 50;
   - `limit` honoured;
   - `cursor.next` passed back as `cursor=`.
+
+Measured on 2.3.0 on 2026-11-21, in sandboxes with only a gateway credential:
+
+- **Native V2 agents work.** These are not a translation artefact:
+  - a new agent declared only as an `agents` row resolves with its model,
+    variant, mode and permissions;
+  - so does a `build` override;
+  - **the row's prompt key is `system`.** V1 `prompt` is translated to it;
+    `prompt` in a V2 file is dropped.
+- **Markdown agents work natively** in `<config>/agents/*.md`:
+  - V2 frontmatter is supported: `model: {providerID, model, variant}` and a
+    `permissions:` list of `{action, resource, effect}`;
+  - a markdown-only agent resolves, and a config row plus markdown merge;
+  - the markdown body becomes `system`;
+  - V1 frontmatter is still translated.
+- **A top-level `permissions` entry applies to every agent's effective
+  permissions.** `subagent <name> deny` appears on each agent, built-ins
+  included.
+- **Agents load lazily, per location.** The first request for a directory
+  starts loading and returns `AgentNotFoundError`. About 1 s later, every agent
+  resolves. A server left idle has loaded nothing. Any check against a freshly
+  started server must poll `GET /api/agent/<id>?directory=<dir>` until the agent
+  resolves, with a bound, before judging.
+- **`GET /api/model`** lists every model with its `variants`, built-in providers
+  included (`openai/gpt-6.2-astra`: `low`–`max`). `GET /api/provider/<id>`
+  does not list models.
+- **A sandbox is not fully isolated by `HOME` and `XDG_*`.**
+  - The server also loads the real user's `~/.opencode` as a config directory
+    layer: it is resolved from the account, not from `$HOME`.
+  - It also loads the config of the working directory it starts in.
+
+  `GET /api/config` lists every layer.
+- A client run as `opencode --server <url> run …` with sandboxed `XDG_*` wrote
+  nothing outside the sandbox. A one-call tool-using probe cost 0.0008 and was
+  served by the intended agent, model and variant.
 
 ## Approaches considered (for applying routing)
 
@@ -222,15 +258,11 @@ both.
 
 **Agent markdown, V2.** *(Builder-check call)*
 
-- All three agent files and `model-routing.md` get V2 copies under `v2/.opencode/`,
-  with no V1-shaped frontmatter.
-- *Measure first:* the frontmatter grammar 2.3.0 accepts natively for a markdown
-  agent, in particular whether permissions can be written as a V2 list.
-  - If they can, the copies use it.
-  - If they cannot, permissions live only in the agent's row in
-    `v2/opencode.jsonc`. The markdown then carries only what 2.x reads natively
-    (description, mode, prompt body).
-- In either case there is no V1-shaped block anywhere in the V2 bundle.
+- All three agent files and `model-routing.md` get V2 copies under `v2/.opencode/`.
+  Their frontmatter is V2-native, as measured: `description`, `mode`, and a
+  `permissions:` list. There is no V1-shaped block anywhere in the V2 bundle.
+- The markdown never carries `model`. Model and variant stay routing-owned in
+  `v2/opencode.jsonc`'s `agents` rows, so routing has one place.
 - The V2 alignment check compares the installed markdown with these copies, as V1
   did: frontmatter differences are `DRIFT`, prose differences are `STALE`.
 
@@ -293,10 +325,9 @@ Built-in providers need no declaration. *Measured* on a 2.3.0 host:
 declared no `openai` provider.
 
 Activation therefore does not validate built-in providers' variants statically.
-The verifier does it against the server, through `GET /api/provider/<id>`. The
-builder confirms that this endpoint lists a built-in model's variants. If it does
-not, `--call` mode, which reads back the variant actually used, is the check.
-Built-in provider entries never become routing-owned.
+The verifier does it against the server, through `GET /api/model`, which lists
+every model's variants (measured). Built-in provider entries never become
+routing-owned.
 
 **`convert-v1-config` (new).** A one-time conversion of a V1 config file to V2,
 following the RFC's translation table.
@@ -305,12 +336,17 @@ following the RFC's translation table.
   always takes a backup.
 - It drops `temperature`, `blacklist` and `server`, and reports each dropped
   key.
-- **Oracle:** given a running 2.x server, or a sandboxed one it starts, the
-  conversion is accepted only if the server's `GET /api/config` translation of
-  the original V1 file equals the converted file, modulo the documented drops.
+- **How it converts:** it uses 2.x's own translation rather than reimplementing
+  the table. It starts a sandboxed 2.3.0 server whose only config is the V1 file
+  (isolated as Part 2 describes, with no credentials needed), polls
+  `GET /api/config`, and takes the `document` layer's `info` as the V2 result.
+  It then removes `agents.*.request.body.temperature`, and `request` if that
+  leaves it empty.
+- **Check:** the result must have no V1 key, and must reload in a second
+  sandboxed server with an identical `GET /api/config` `info`.
 
-*Builder first:* check upstream's `migrate-v1` guide for an official converter.
-If one exists, wrap it and keep the oracle, rather than reimplementing.
+*Builder first:* check upstream's `migrate-v1` guide for an official converter
+command. If one exists, prefer it and keep the reload check.
 
 **`check-alignment.sh` (V2).** A file-level drift check of an installed V2
 config against a V2 profile. It reports `ALIGNED`, `DRIFT`, `STALE` or `ABSENT`
@@ -327,7 +363,9 @@ like V1, and never repairs. It compares exactly the routing-owned keys above.
   - a V2 targets manifest;
   - a neutral directory and, optionally, a project directory.
 - **Calls:** `GET /api/agent/<role>?directory=<dir>` for each role, from each
-  directory.
+  directory. The first request per directory is retried until the agent
+  resolves, bounded at 30 s, because agents load lazily per location. A role
+  still missing after the bound is a `MISMATCH`.
 - **Checks:**
   - `providerID`, `model`, `variant` and `mode`;
   - that the effective `permissions` deny `subagent` on `breakglass` for every
@@ -471,6 +509,16 @@ copied into each record directory with one runner in `opencode-v2-adapter/`.
 The runner refuses to start if any sandbox path resolves inside the invoking
 user's real config or data directories.
 
+**Config layers are checked**, because `HOME` and `XDG_*` alone do not isolate.
+This was measured: the real `~/.opencode` and the working directory's config
+are also loaded. The runner therefore:
+
+- starts the server with its working directory inside the sandbox;
+- reads `GET /api/config` before any dispatch, and refuses unless every layer
+  is inside the sandbox, or is the account's `~/.opencode` holding none of
+  `opencode.json`, `opencode.jsonc`, `agents/`, `agent/`, `command/`, `plugins/`;
+- records the layer list in the run record.
+
 The sandbox config is **built in full**, never overlaid on the user's:
 
 - the V2 profile under test, or a minimal config naming only the candidate model;
@@ -538,9 +586,6 @@ Each part is its own pull request.
 
 - Exact file names inside `opencode-v2-adapter/`, and how to share helpers
   between the operational tools and the runners.
-- Whether `GET /api/provider/<id>` lists built-in models' variants (measure
-  first).
-- The 2.x markdown-agent frontmatter grammar (measure first).
 - How credentials enter the sandbox (measure first).
 - The 2.x schema for `observe`, and the log format (measure first).
 - Whether an upstream V1→V2 converter exists to wrap.

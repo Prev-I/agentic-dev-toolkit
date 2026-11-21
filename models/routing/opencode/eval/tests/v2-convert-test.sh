@@ -328,7 +328,13 @@ fi
 [[ -z "$(ls -A "$T/tmp")" ]] || fail "sandbox left behind: $(ls -A "$T/tmp")"
 [[ ! -e "$adapter/__pycache__" && ! -e "$fixtures/__pycache__" ]] || fail "__pycache__ written"
 leaked=$(find "$bundle" -newer "$marker" 2>/dev/null || true)
-leaked+=$(find /tmp -mindepth 1 -maxdepth 1 -name 'tmp.*' -newer "$marker" ! -path "$T" 2>/dev/null || true)
+# Temp files: every converter run (and the server it starts) had TMPDIR inside
+# this test's root, checked empty above, so no other process on the host can
+# affect the result. A hardcoded /tmp in the runtime would bypass TMPDIR.
+if grep -n '/tmp\b' "$adapter/convert-v1-config.sh" "$adapter/v2-run.sh" "$adapter/v2-http.sh" \
+    "$fixtures/fake-api.py" | grep -v '^[^:]*:[0-9]*:[[:space:]]*#' >"$T/hardcoded-tmp.txt"; then
+  fail "the converter runtime hardcodes /tmp, bypassing TMPDIR: $(<"$T/hardcoded-tmp.txt")"
+fi
 [[ -z "$leaked" ]] || fail "written outside the test root: $leaked"
 
 printf 'v2-convert-test: PASS\n'

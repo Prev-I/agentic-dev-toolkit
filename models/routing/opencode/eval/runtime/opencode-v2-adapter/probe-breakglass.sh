@@ -2,8 +2,8 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 v2_probe_root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-# shellcheck source=./verify-effective-routing.sh
-source "$v2_probe_root/verify-effective-routing.sh"
+# shellcheck source=./v2-run.sh
+source "$v2_probe_root/v2-run.sh"
 
 # Breakglass probe (OpenCode 2): the emergency agent must resolve as a primary
 # agent with the manifest's model, and no other agent may be able to dispatch it.
@@ -15,6 +15,9 @@ source "$v2_probe_root/verify-effective-routing.sh"
 #   {resolved_primary, model, non_exposure: {<agent>: deny|EXPOSED|UNRESOLVED},
 #    called?, status}
 # Exit 0 on PASS, 1 on FAIL, 2 on usage or credentials (incl. HTTP 401/403).
+# UNRESOLVED (an agent that cannot be read) is a FAIL, never a skip. So is an
+# agent list that could not be read at all: the probe could not enumerate the
+# agents, so it cannot claim breakglass is unreachable.
 #
 # "Every other agent" is every agent the server lists for --cwd
 # (GET /api/agent?directory=...) plus every manifest role, so built-in and user
@@ -62,46 +65,31 @@ probe_breakglass_v2() {
   v2_load_credentials "$creds" || return 2
   server=${server%/}
 
-  # Same isolation as the effective-routing verifier: the collection runs in a
-  # subshell that owns its traps, with a watchdog bounded to that subshell.
-  local rc=0 parent=$BASHPID
-  (
-    inner=$BASHPID
-    watchdog=''
-    trap '_vr_cleanup; [[ -z "$watchdog" ]] || kill "$watchdog" 2>/dev/null || true' EXIT
-    trap '_vr_cleanup; trap - INT; kill -s INT "$BASHPID"' INT
-    trap '_vr_cleanup; trap - TERM; kill -s TERM "$BASHPID"' TERM
-    # shellcheck disable=SC2016  # expanded by the watchdog's own shell
-    "${BASH:-bash}" -c '
-      while kill -0 "$1" 2>/dev/null && kill -0 "$2" 2>/dev/null; do sleep 0.5; done
-      if kill -0 "$2" 2>/dev/null; then kill -s TERM "$2" 2>/dev/null; fi
-      exit 0' _pb_watchdog "$parent" "$inner" >/dev/null 2>&1 </dev/null &
-    watchdog=$!
-    work=$(mktemp -d)
-    _VR_TMPDIRS+=("$work")
-    _pb_collect "$server" "$targets" "$outdir" "$cwd" "$call" "$work"
-  ) || rc=$?
-  return "$rc"
+  v2_run_isolated _pb_collect "$server" "$targets" "$outdir" "$cwd" "$call"
 }
 
 _pb_refused() {
   printf 'probe_breakglass_v2: the server refused the credentials (HTTP %s)\n' "$V2_LAST_STATUS" >&2
 }
 
-# _pb_list_agents URL CWD MANIFEST_ROLES -> prints agent ids, one per line.
+# _pb_list_agents URL CWD MANIFEST_ROLES OUTFILE -> agent ids to OUTFILE, one per
+# line (called directly, not in $(...), so V2_LAST_STATUS stays visible).
 # Polls until the list holds every manifest role, bounded by
-# V2_AGENT_POLL_TIMEOUT; the last list read is used even if still short.
+# V2_AGENT_POLL_TIMEOUT; the last list read is used even if still short. Returns
+# 1 (empty OUTFILE) when no read ever returned a `.data` array, 2 when the
+# server refused the credentials. The last status is left in V2_LAST_STATUS.
 _pb_list_agents() {
-  local base=$1 dir=$2 roles=$3 encoded deadline ids='' rc
+  local base=$1 dir=$2 roles=$3 out=$4 encoded deadline ids='' rc have=0 want
   encoded=$(jq -rn --arg d "$dir" '$d|@uri')
+  want=$(jq -Rn '[inputs]' <<<"$roles")
   deadline=$(( SECONDS + ${V2_AGENT_POLL_TIMEOUT:-30} ))
   while :; do
     rc=0
     v2_api_get "$base" "/api/agent?directory=$encoded" >/dev/null 2>&1 || rc=$?
-    if (( rc == 0 )); then
-      ids=$(jq -r '(.data // [])[] | select(type == "object") | .id // empty' <<<"$V2_LAST_BODY" 2>/dev/null || true)
-      if [[ -n "$ids" ]] && jq -e --argjson want "$(jq -Rn '[inputs]' <<<"$roles")" \
-        '. as $have | $want | all(. as $r | $have | index($r) != null)' \
+    if (( rc == 0 )) && jq -e '(.data | type) == "array"' <<<"$V2_LAST_BODY" >/dev/null 2>&1; then
+      have=1
+      ids=$(jq -r '.data[] | select(type == "object") | .id // empty | strings' <<<"$V2_LAST_BODY" 2>/dev/null || true)
+      if jq -e --argjson want "$want" '. as $have | $want | all(. as $r | $have | index($r) != null)' \
         <<<"$(jq -Rn '[inputs]' <<<"$ids")" >/dev/null 2>&1; then
         break
       fi
@@ -112,27 +100,33 @@ _pb_list_agents() {
     (( SECONDS < deadline )) || break
     sleep 0.25
   done
-  [[ -z "$ids" ]] || printf '%s\n' "$ids"
+  (( have )) || return 1
+  [[ -z "$ids" ]] || printf '%s\n' "$ids" >"$out"
 }
 
 _pb_collect() {
-  local server=$1 targets=$2 outdir=$3 cwd=$4 call=$5 work=$6
-  local breakglass roles listed names name i=0 rc
+  local work=$1 server=$2 targets=$3 outdir=$4 cwd=$5 call=$6
+  local breakglass roles listed names name i=0 rc list_error=''
   mkdir -p "$work/agents" "$work/calls" "$outdir"
   breakglass=$(jq -r '.breakglass.agent' "$targets")
   roles=$(jq -r '.agents | keys_unsorted[]' "$targets")
 
   rc=0
-  listed=$(_pb_list_agents "$server" "$cwd" "$roles") || rc=$?
-  if (( rc == 2 )) || _vr_auth_refused; then
+  : >"$work/listed.txt"
+  _pb_list_agents "$server" "$cwd" "$roles" "$work/listed.txt" || rc=$?
+  listed=$(<"$work/listed.txt")
+  if (( rc == 2 )) || v2_auth_refused; then
     _pb_refused
     return 2
+  fi
+  if (( rc != 0 )); then
+    list_error="agent list for $cwd could not be read (last status ${V2_LAST_STATUS:-none})"
   fi
   # Every listed agent plus every manifest role, once each, breakglass included.
   names=$(printf '%s\n%s\n' "$roles" "$listed" | awk 'NF && !seen[$0]++')
 
   : >"$work/names.tsv"
-  for name in $names; do
+  while IFS= read -r name; do
     i=$((i + 1))
     printf '%s\t%s\n' "$i" "$name" >>"$work/names.tsv"
     if [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]]; then
@@ -141,20 +135,21 @@ _pb_collect() {
     else
       printf 'agent name %s cannot be looked up safely\n' "$name" >"$work/agents/$i.err"
     fi
-    if _vr_auth_refused; then
+    if v2_auth_refused; then
       _pb_refused
       return 2
     fi
-  done
+  done <<<"$names"
   if (( call )); then
-    _vr_call_role "$server" "$breakglass" "$work"
+    v2_call_role "$server" "$breakglass" "$work"
   fi
 
-  python3 -I - "$work" "$targets" "$outdir/breakglass.json" "$call" "$v2_probe_root" <<'PY'
+  python3 -I - "$work" "$targets" "$outdir/breakglass.json" "$call" "$v2_probe_root" "$list_error" <<'PY'
 import json, os, sys
 
-work, targets_path, out_path, call, adapter = sys.argv[1:6]
+work, targets_path, out_path, call, adapter, list_error = sys.argv[1:7]
 call = call == "1"
+sys.dont_write_bytecode = True
 sys.path.insert(0, adapter)
 from v2config import breakglass_decision  # noqa: E402
 
@@ -172,7 +167,7 @@ def load(path):
         return None
 
 
-problems = []
+problems = [list_error] if list_error else []
 agents = []
 for line in open(os.path.join(work, "names.tsv")).read().splitlines():
     idx, agent = line.split("\t", 1)

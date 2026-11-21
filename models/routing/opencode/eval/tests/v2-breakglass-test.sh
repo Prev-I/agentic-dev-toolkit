@@ -99,6 +99,7 @@ assert_eq 1 "$rc"
 assert_eq FAIL "$(jq -r .status "$out")"
 assert_eq false "$(jq -r .resolved_primary "$out")"
 assert_contains "$(<"$workdir/sub.log")" "FAIL"
+assert_contains "$(<"$workdir/sub.log")" "mode is 'subagent', expected 'primary'"
 stop_server
 
 # 3. breakglass on the wrong model: FAIL.
@@ -109,6 +110,7 @@ run_probe wrongmodel
 assert_eq 1 "$rc"
 assert_eq FAIL "$(jq -r .status "$out")"
 assert_eq false "$(jq -r .resolved_primary "$out")"
+assert_contains "$(<"$workdir/wrongmodel.log")" "model is openai/gpt-6.1-sol#low, expected openai/gpt-6.1-sol#max"
 stop_server
 
 # 4. each other agent whose last matching entry allows breakglass: FAIL, naming it.
@@ -169,7 +171,40 @@ serve "$fx"
 run_probe unresolved
 assert_eq 1 "$rc"
 assert_eq UNRESOLVED "$(jq -r .non_exposure.ghost "$out")"
+assert_contains "$(<"$workdir/unresolved.log")" "ghost: did not resolve"
 stop_server
+
+# 8b. a malformed permissions entry or field never crashes the probe: the
+# result is still written, and the agent is not treated as safe.
+fx=$(fresh malformed)
+edit "$fx/api_agent_title.json" '.data.permissions = ["junk", 3, null]'
+edit "$fx/api_agent_summary.json" '.data.permissions = "none"'
+serve "$fx"
+run_probe malformed
+assert_eq 1 "$rc"
+assert_eq FAIL "$(jq -r .status "$out")"
+assert_eq EXPOSED "$(jq -r .non_exposure.title "$out")"
+assert_eq EXPOSED "$(jq -r .non_exposure.summary "$out")"
+stop_server
+
+# 8c. an agent list that cannot be read is a FAIL (not a pass on manifest
+# roles alone), with breakglass.json written.
+for variant in missing notarray; do
+  fx=$(fresh "list-$variant")
+  if [[ "$variant" == missing ]]; then
+    rm -f "$fx/api_agent.json"
+  else
+    printf '{"data":{"id":"build"}}\n' >"$fx/api_agent.json"
+  fi
+  jq '.data.id = "custom" | .data.permissions += [{"action":"subagent","resource":"breakglass","effect":"allow"}]' \
+    "$fx/api_agent_build.json" >"$fx/api_agent_custom.json"
+  serve "$fx"
+  run_probe "list-$variant"
+  assert_eq 1 "$rc"
+  assert_eq FAIL "$(jq -r .status "$out")"
+  assert_contains "$(<"$workdir/list-$variant.log")" "agent list for $workdir/cwd could not be read"
+  stop_server
+done
 
 # 9. a list that lacks manifest roles is polled for until the bound, and those
 # roles are still checked by name.
@@ -239,14 +274,23 @@ assert_eq 1 "$rc"
 assert_eq 3 "$(jq -r .called.exit_code "$out")"
 stop_server
 
-# 14. the caller's traps are not touched.
-trap 'echo caller-trap' USR1
-before=$(trap -p USR1)
+# 14. the caller's EXIT, INT and TERM traps are not touched.
+saved_exit=$(trap -p EXIT)
+trap 'stop_server; rm -rf "${workdir:?}"' EXIT
+trap 'echo caller-int' INT
+trap 'echo caller-term' TERM
+before=$(trap -p EXIT INT TERM)
 fx=$(fresh trap)
 serve "$fx"
 run_probe trap
 assert_eq 0 "$rc"
-assert_eq "$before" "$(trap -p USR1)"
-trap - USR1
+assert_eq "$before" "$(trap -p EXIT INT TERM)"
+trap - INT TERM
+eval "${saved_exit:-trap - EXIT}"
+stop_server
+
+# 15. no bytecode is written next to the scripts.
+[[ -z "$(find "$root/runtime/opencode-v2-adapter" -name __pycache__)" ]] \
+  || fail "a __pycache__ appeared in the adapter directory"
 
 printf 'PASS: v2-breakglass-test\n'

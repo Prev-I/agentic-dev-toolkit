@@ -2,8 +2,8 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 v2_verify_root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-# shellcheck source=./v2-http.sh
-source "$v2_verify_root/v2-http.sh"
+# shellcheck source=./v2-run.sh
+source "$v2_verify_root/v2-run.sh"
 
 # Effective-routing verifier (OpenCode 2): ask the RUNNING server what each role
 # resolves to. It never runs `opencode debug ...` and never reads the database.
@@ -19,8 +19,9 @@ source "$v2_verify_root/v2-http.sh"
 #
 # Per role: providerID, model, variant and (when the manifest names one) mode;
 # the variant is offered by /api/model for that model; unless the role is the
-# breakglass agent, the LAST effective permission entry whose action is
-# `subagent` or `*` and whose resource glob-matches `breakglass` is a deny (a
+# breakglass agent (the manifest's `breakglass.agent`), the LAST effective
+# permission entry whose action is `subagent` or `*` and whose resource
+# glob-matches that agent's name is a deny (a
 # later `subagent * allow`, `* * allow` or `break* allow` would re-open it); no
 # forbidden model reference; and not the manifest's forbidden effective state.
 #
@@ -40,61 +41,6 @@ source "$v2_verify_root/v2-http.sh"
 
 _vr_usage() {
   printf 'usage: verify_effective_routing_v2 --server URL --credentials FILE --targets FILE --outdir DIR --neutral-cwd DIR [--project-cwd DIR] [--call]\n' >&2
-}
-
-# Temp directories to remove on exit and on INT/TERM.
-_VR_TMPDIRS=()
-_vr_cleanup() {
-  local d
-  for d in "${_VR_TMPDIRS[@]}"; do
-    [[ -z "$d" ]] || rm -rf "${d:?}"
-  done
-  _VR_TMPDIRS=()
-}
-
-# The one predicate that picks the assistant message a session used: an object
-# (taken from .info when that is an object) with role assistant and a non-empty
-# model object. Last match wins.
-_VR_PICK_ASSISTANT='[(.data // [])[] | select(type == "object")
-  | (if (.info | type) == "object" then .info else . end)
-  | select(.role == "assistant" and (.model | type) == "object" and (.model | length) > 0)] | last // empty'
-
-# _vr_call_role URL ROLE WORKDIR -> writes WORKDIR/calls/ROLE.json
-_vr_call_role() {
-  local url=$1 role=$2 work=$3 probe token out rc=0 sid='' body='' have=0
-  probe=$(mktemp -d)
-  _VR_TMPDIRS+=("$probe")
-  token="probe-$RANDOM-$RANDOM-$$"
-  printf '%s\n' "$token" >"$probe/probe.txt"
-  out="$work/calls/$role.jsonl"
-  (
-    cd "$probe"
-    OPENCODE_PASSWORD="$V2_PASSWORD" timeout "${V2_CALL_TIMEOUT:-300}" \
-      "${OPENCODE_BIN:-opencode}" --server "$url" run --agent "$role" \
-      --format json --archived --auto \
-      "Read the file probe.txt in the working directory and reply with its exact contents." \
-      </dev/null >"$out" 2>"$work/calls/$role.err"
-  ) || rc=$?
-  rm -rf "$probe"
-  sid=$(jq -rs 'map(select(.sessionID != null) | .sessionID) | first // empty' "$out" 2>/dev/null || true)
-  if [[ -n "$sid" ]]; then
-    for _ in 1 2 3 4 5 6; do
-      if body=$(v2_api_get "$url" "/api/session/$sid/message" 2>/dev/null); then
-        jq -c "$_VR_PICK_ASSISTANT" <<<"$body" >"$work/calls/$role.assistant.json" 2>/dev/null || true
-        if [[ -s "$work/calls/$role.assistant.json" ]]; then
-          have=1
-          break
-        fi
-      fi
-      sleep 0.5
-    done
-  fi
-  jq -n --argjson rc "$rc" --arg sid "$sid" --argjson have "$have" \
-    --slurpfile ev <(jq -c . "$out" 2>/dev/null || true) \
-    '{exit_code: $rc, session: $sid, messages: ($have == 1),
-      tool_called: ([$ev[] | select(.type == "tool_use" and .part.tool == "read")] | length > 0),
-      cost: ([$ev[] | select(.type == "step_finish") | .part.cost // 0] | add // 0)}' \
-    >"$work/calls/$role.json"
 }
 
 verify_effective_routing_v2() {
@@ -128,46 +74,18 @@ verify_effective_routing_v2() {
   v2_load_credentials "$creds" || return 2
   server=${server%/}
 
-  # The collection runs in a subshell that owns its traps, so the caller's
-  # traps are never read or changed, and a fatal error inside it ends only the
-  # subshell, with its status. A watchdog ends the subshell if the caller dies
-  # by a signal it has no handler for (the subshell would otherwise be orphaned
-  # with its temp directories). The watchdog also stops as soon as the subshell
-  # is gone, so it cannot outlive the run even when the EXIT trap never kills
-  # it (SIGKILL, a signal before its PID is recorded), and it signals only a
-  # live subshell. Its command line carries `_vr_watchdog PARENT INNER`.
-  local rc=0 parent=$BASHPID
-  (
-    inner=$BASHPID
-    watchdog=''
-    trap '_vr_cleanup; [[ -z "$watchdog" ]] || kill "$watchdog" 2>/dev/null || true' EXIT
-    trap '_vr_cleanup; trap - INT; kill -s INT "$BASHPID"' INT
-    trap '_vr_cleanup; trap - TERM; kill -s TERM "$BASHPID"' TERM
-    # shellcheck disable=SC2016  # expanded by the watchdog's own shell
-    "${BASH:-bash}" -c '
-      while kill -0 "$1" 2>/dev/null && kill -0 "$2" 2>/dev/null; do sleep 0.5; done
-      if kill -0 "$2" 2>/dev/null; then kill -s TERM "$2" 2>/dev/null; fi
-      exit 0' _vr_watchdog "$parent" "$inner" >/dev/null 2>&1 </dev/null &
-    watchdog=$!
-    work=$(mktemp -d)
-    _VR_TMPDIRS+=("$work")
-    _vr_collect "$server" "$targets" "$outdir" "$neutral" "$project" "$call" "$work"
-  ) || rc=$?
-  return "$rc"
-}
-
-# True when the last request was refused for its credentials.
-_vr_auth_refused() {
-  [[ "$V2_LAST_STATUS" == 401 || "$V2_LAST_STATUS" == 403 ]]
+  # The collection runs isolated (see v2-run.sh): the caller's traps are never
+  # read or changed and the temp directories are removed on every exit path.
+  v2_run_isolated _vr_collect "$server" "$targets" "$outdir" "$neutral" "$project" "$call"
 }
 
 _vr_collect() {
-  local server=$1 targets=$2 outdir=$3 neutral=$4 project=$5 call=$6 work=$7
+  local work=$1 server=$2 targets=$3 outdir=$4 neutral=$5 project=$6 call=$7
   local role breakglass roles
   mkdir -p "$work/neutral" "$work/project" "$work/calls" "$outdir"
 
   v2_api_get "$server" /api/info >"$work/info.json" 2>/dev/null || {
-    if _vr_auth_refused; then
+    if v2_auth_refused; then
       printf 'verify_effective_routing_v2: the server refused the credentials (HTTP %s)\n' "$V2_LAST_STATUS" >&2
       return 2
     fi
@@ -175,7 +93,7 @@ _vr_collect() {
     return 1
   }
   v2_api_get "$server" /api/model >"$work/models.json" 2>/dev/null || {
-    if _vr_auth_refused; then
+    if v2_auth_refused; then
       printf 'verify_effective_routing_v2: the server refused the credentials (HTTP %s)\n' "$V2_LAST_STATUS" >&2
       return 2
     fi
@@ -185,31 +103,32 @@ _vr_collect() {
 
   breakglass=$(jq -r '.breakglass.agent' "$targets")
   roles=$(jq -r '.agents | keys_unsorted[]' "$targets")
-  for role in $roles; do
+  while IFS= read -r role; do
     v2_agent_get "$server" "$role" "$neutral" >"$work/neutral/$role.json" 2>"$work/neutral/$role.err" \
       || rm -f "$work/neutral/$role.json"
-    if _vr_auth_refused; then
+    if v2_auth_refused; then
       printf 'verify_effective_routing_v2: the server refused the credentials (HTTP %s)\n' "$V2_LAST_STATUS" >&2
       return 2
     fi
     if [[ -n "$project" ]]; then
       v2_agent_get "$server" "$role" "$project" >"$work/project/$role.json" 2>"$work/project/$role.err" \
         || rm -f "$work/project/$role.json"
-      if _vr_auth_refused; then
+      if v2_auth_refused; then
         printf 'verify_effective_routing_v2: the server refused the credentials (HTTP %s)\n' "$V2_LAST_STATUS" >&2
         return 2
       fi
     fi
     if (( call )); then
-      _vr_call_role "$server" "$role" "$work"
+      v2_call_role "$server" "$role" "$work"
     fi
-  done
+  done <<<"$roles"
 
   python3 -I - "$work" "$targets" "$outdir/effective-routing.json" "$server" \
     "$breakglass" "$([[ -n "$project" ]] && echo 1 || echo 0)" "$call" "$v2_verify_root" <<'PY'
 import json, os, sys
 
 work, targets_path, out_path, server, breakglass, has_project, call, adapter = sys.argv[1:9]
+sys.dont_write_bytecode = True
 sys.path.insert(0, adapter)
 from v2config import breakglass_decision  # noqa: E402
 has_project = has_project == "1"

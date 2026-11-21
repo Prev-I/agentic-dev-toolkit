@@ -235,7 +235,11 @@ def breakglass_decision(permissions, agent_name="breakglass"):
     glob-matches the agent name, the LAST one decides; None when none matches.
     """
     deciding = None
-    for entry in permissions or []:
+    if not isinstance(permissions, list):
+        return None
+    for entry in permissions:
+        if not isinstance(entry, dict):
+            continue
         if (entry.get("action") in ("subagent", "*")
                 and fnmatch.fnmatchcase(agent_name, str(entry.get("resource", "")))):
             deciding = entry

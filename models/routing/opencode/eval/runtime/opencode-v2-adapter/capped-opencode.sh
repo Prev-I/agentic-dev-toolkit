@@ -9,7 +9,9 @@
 # the session's model call running), prints the stream, prints
 # `EVAL_BUDGET_STOP: completed-step cost reached N credits` to stderr and exits
 # 143. On TERM or INT it stops both groups too, prints the stream and exits
-# 143. `--version` is passed straight to BIN. The EVAL_* variables are removed
+# 143. `--version` is passed straight to BIN. The client's stream is buffered
+# in EVAL_STREAM_FILE when set (dispatch_fixture puts it inside the sandbox),
+# else in a mktemp file; it is removed on exit. The EVAL_* variables are removed
 # from the client's environment. Processes are stopped only by recorded pid.
 set -Eeuo pipefail
 IFS=$'\n\t'
@@ -24,7 +26,12 @@ fi
 
 if [[ "${1:-}" == --version ]]; then exec "$bin" "$@"; fi
 
-stream=$(mktemp)
+if [[ -n "${EVAL_STREAM_FILE:-}" ]]; then
+  stream=$EVAL_STREAM_FILE
+  : >"$stream"
+else
+  stream=$(mktemp)
+fi
 pid=''
 signalled=false
 
@@ -57,7 +64,7 @@ on_signal() {
 }
 trap on_signal TERM INT
 
-setsid env -u EVAL_REAL_OPENCODE -u EVAL_CALL_STOP_CREDITS -u EVAL_SERVER_PID "$bin" "$@" >"$stream" 2>&1 &
+setsid env -u EVAL_REAL_OPENCODE -u EVAL_CALL_STOP_CREDITS -u EVAL_SERVER_PID -u EVAL_STREAM_FILE "$bin" "$@" >"$stream" 2>&1 &
 pid=$!
 stopped=false
 while kill -0 "$pid" 2>/dev/null && [[ "$signalled" == false ]]; do

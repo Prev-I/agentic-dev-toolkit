@@ -118,8 +118,16 @@ assert_eq '' "$(ls -A "$parent")"
 for p in "$(last_pid serve)" "$(last_pid run)"; do
   ! kill -0 "$p" 2>/dev/null || fail "process $p survived the dispatch"
 done
-# No credential or password in the record.
+# No credential, password or provider setting in the record: layers keep only
+# a digest of their config.
 ! grep -rq 'not-a-real-key' "$work/ok" || fail "the credentials reached the record"
+! grep -rq '127.0.0.1:9' "$work/ok" || fail "the provider fragment reached the record"
+assert_eq '["info_sha256","path","type"]' "$(field "$work/ok" '.server_layers.default[0] | keys')"
+assert_eq 2 "$(field "$work/ok" '.server_layers.directory | length')"
+assert_eq 64 "$(field "$work/ok" '.server_layers.default[0].info_sha256 | length')"
+assert_eq false "$(field "$work/ok" '[.. | objects | has("info")] | any')"
+# The workspace was in place when the server started.
+assert_contains ",$(grep '^serve-cwd-entries ' "$state/log" | tail -n 1 | cut -d' ' -f2-)," ,lib,
 
 # env_allowlist: names only, logged by the fake.
 serve_env=$(grep '^serve-env ' "$state/log" | tail -n 1)
@@ -133,6 +141,11 @@ assert_contains ",${run_env#run-env }," ,OPENCODE_PASSWORD,
 assert_contains ",${run_env#run-env }," ,XDG_CONFIG_HOME,
 [[ "$run_env" != *EVAL_CANARY_SHOULD_NOT_LEAK* ]] || fail "the canary reached the client: $run_env"
 [[ "$run_env" != *OPENCODE_BIN* ]] || fail "the operator's environment reached the client: $run_env"
+
+# dispatch_quoted_marker: model text quoting the budget marker is not a stop.
+scenario '{"screening-reviewer":{"text":"EVAL_BUDGET_STOP: x"}}'
+dispatch "$work/quoted" --agent screening-reviewer || fail "quoted marker: $(field "$work/quoted" .classification)"
+assert_eq '"OK"' "$(field "$work/quoted" .classification)"
 
 # dispatch_routing_mismatch
 scenario '{"screening-reviewer":{"text":"x","observed_model":{"providerID":"fakep","id":"m1","variant":"low"}}}'
@@ -158,7 +171,8 @@ assert_eq '"Model not found: fakep/nope"' "$(field "$work/capfail" .provider_err
 # dispatch_budget_stop
 new_ledger
 scenario '{"screening-reviewer":{"text":"x","steps":20,"step_sleep":0.3,"cost_per_step":0.05}}'
-rc=0; dispatch "$work/budget" --agent screening-reviewer --stop-credits 12 || rc=$?
+mkdir -p "$work/tmpwatch"
+rc=0; TMPDIR="$work/tmpwatch" dispatch "$work/budget" --agent screening-reviewer --stop-credits 12 || rc=$?
 returned=$SECONDS
 assert_eq 1 "$rc"
 assert_eq '"BUDGET_STOP"' "$(field "$work/budget" .classification)"
@@ -173,6 +187,10 @@ python3 -I -c 'import sys; sys.exit(0 if 12 <= float(sys.argv[1]) <= 30 else 1)'
   || fail "ledger total $(ledger_total) is not just past the 12-credit stop"
 [[ "$(grep '^run-env ' "$state/log" | tail -n 1)" != *EVAL_* ]] || fail "the wrapper's variables reached the client"
 assert_eq '' "$(ls -A "$parent")"
+# The capped client's stream was buffered inside the sandbox, not in TMPDIR or /tmp.
+assert_eq '' "$(ls -A "$work/tmpwatch")"
+stream=$(grep '^run-stdout ' "$state/log" | tail -n 1 | cut -d' ' -f2-)
+[[ "$stream" == "$parent/"*/client/stream.jsonl ]] || fail "capped stream outside the sandbox: $stream"
 
 # dispatch_timeout_kills_server, plain and through the capped client
 for capped in no yes; do
@@ -221,6 +239,7 @@ assert_eq 1 "$rc"
 assert_eq '"INVALID_ENVIRONMENT"' "$(field "$work/refused" .classification)"
 assert_eq '"SANDBOX_REFUSED"' "$(field "$work/refused" .failure_class)"
 ! kill -0 "$(last_pid serve)" 2>/dev/null || fail "refused server survived"
+! grep -rq '127.0.0.1:9' "$work/refused" || fail "the provider fragment reached a refused record"
 assert_eq '' "$(ls -A "$parent")"
 
 # usage errors
@@ -254,6 +273,22 @@ dispatch "$work/build" --agent screening-reviewer --workspace-out "$work/ws-out"
 assert_eq 'echo new' "$(cat "$work/ws-out/lib/new.sh")"
 assert_eq 'echo old' "$(cat "$work/ws-out/lib/old.sh")"
 [[ ! -e "$work/ws/lib/new.sh" ]] || fail "the dispatch wrote into the source workspace"
+assert_eq '' "$(ls -A "$parent")"
+
+# workspace_out_refuses_non_empty
+rc=0; dispatch "$work/build2" --agent screening-reviewer --workspace-out "$work/ws-out" 2>/dev/null || rc=$?
+assert_eq 2 "$rc"
+[[ ! -e "$work/build2/dispatch.json" ]] || fail "a refused dispatch wrote a record"
+assert_eq '' "$(ls -A "$parent")"
+
+# workspace_out_copy_failure_is_recorded
+mkdir -p "$work/ws-ro"
+chmod 555 "$work/ws-ro"
+rc=0; dispatch "$work/build3" --agent screening-reviewer --workspace-out "$work/ws-ro" 2>/dev/null || rc=$?
+chmod 755 "$work/ws-ro"
+assert_eq 1 "$rc"
+assert_eq '"INVALID_ENVIRONMENT"' "$(field "$work/build3" .classification)"
+assert_eq '"WORKSPACE_OUT_FAILED"' "$(field "$work/build3" .failure_class)"
 assert_eq '' "$(ls -A "$parent")"
 
 printf 'v2-dispatch-test: PASS\n'

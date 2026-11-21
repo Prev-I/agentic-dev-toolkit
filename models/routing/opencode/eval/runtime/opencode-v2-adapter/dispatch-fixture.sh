@@ -18,7 +18,10 @@
 # populated with --config, --credentials and --opencode-dir, served, and
 # destroyed on every exit path, including TERM and INT. --workspace's contents
 # are copied into SANDBOX/work, the call's cwd; with --workspace-out,
-# SANDBOX/work is copied there before the sandbox goes.
+# SANDBOX/work is copied there before the sandbox goes. --workspace-out must be
+# absent or empty (2 otherwise); a failed copy is INVALID_ENVIRONMENT/
+# WORKSPACE_OUT_FAILED. server_layers records each layer of both GET
+# /api/config answers as {path, type, info_sha256}, never the config itself.
 #
 # The client is `timeout --preserve-status S [capped-opencode.sh] OPENCODE_BIN
 # --server URL run (--agent A | --model P/M#V) --format json --archived --auto
@@ -26,7 +29,8 @@
 # also stops the server on a budget stop or a signal. The client's environment
 # holds only PATH=/usr/bin:/bin, the sandbox's HOME, its own XDG_* under
 # SANDBOX/client and OPENCODE_PASSWORD (plus the capped wrapper's EVAL_*, which
-# the wrapper removes before the client starts); the password is never in an
+# the wrapper removes before the client starts, and its stream file,
+# SANDBOX/client/stream.jsonl); the password is never in an
 # argv. For --agent, GET /api/agent/A is polled first (agents load lazily), and
 # when --expect is absent the expected `A@P/M#V` is the agent's resolved model.
 # For --model without --expect, any agent passes the routing check, but the
@@ -142,10 +146,17 @@ _dispatch_main() {
 
   mkdir -p "$outdir"
   outdir=$(cd "$outdir" && pwd -P)
-  [[ -z "$workspace_out" ]] || workspace_out=$(realpath -m -- "$workspace_out")
+  if [[ -n "$workspace_out" ]]; then
+    workspace_out=$(realpath -m -- "$workspace_out")
+    if [[ -e "$workspace_out" && ! -d "$workspace_out" ]] \
+        || { [[ -d "$workspace_out" ]] && [[ -n "$(ls -A -- "$workspace_out")" ]]; }; then
+      _df_err "--workspace-out must be absent or an empty directory: $workspace_out"
+      return 2
+    fi
+  fi
   local raw="$outdir/raw.jsonl" setup_err="$outdir/setup.err"
   local prompt commit target status='' start end version=unknown url='' agent_data=''
-  local setup_failure='' classification failure_class copy_failed=false sb
+  local setup_failure='' classification failure_class sb
   prompt=$(<"$prompt_file")
   commit=$(git rev-parse HEAD 2>/dev/null || printf unknown)
   [[ -n "$routing_profile_id" ]] || routing_profile_id=direct-model-evaluation
@@ -164,10 +175,12 @@ _dispatch_main() {
     setup_failure=SANDBOX_REFUSED
   else
     _df_sandbox=$sb
+    # The workspace is in place before the server starts, so the recorded
+    # directory-layer answer describes the tree the call runs in.
     if ! v2_sandbox_populate "$sb" "$config" "$creds" ${ocdir:+"$ocdir"} 2>>"$setup_err" \
-        || ! v2_sandbox_serve "$sb" 2>>"$setup_err" \
         || { [[ -n "$fixture_workspace" ]] && ! cp -a -- "$fixture_workspace/." "$sb/work/" 2>>"$setup_err"; } \
-        || ! mkdir -p "$sb/client/config" "$sb/client/data" "$sb/client/state" "$sb/client/cache" 2>>"$setup_err"; then
+        || ! mkdir -p "$sb/client/config" "$sb/client/data" "$sb/client/state" "$sb/client/cache" 2>>"$setup_err" \
+        || ! v2_sandbox_serve "$sb" 2>>"$setup_err"; then
       setup_failure=SANDBOX_REFUSED
     fi
   fi
@@ -210,7 +223,8 @@ print("%s@%s/%s#%s" % (sys.argv[1], m.get("providerID"), m.get("id"), m.get("var
         OPENCODE_PASSWORD="$V2_PASSWORD"
       if [[ -n "$stop_credits" ]]; then
         EVAL_SERVER_PID=$(<"$sb/pid") || exit 1
-        export EVAL_REAL_OPENCODE="$bin" EVAL_CALL_STOP_CREDITS="$stop_credits" EVAL_SERVER_PID
+        export EVAL_REAL_OPENCODE="$bin" EVAL_CALL_STOP_CREDITS="$stop_credits" EVAL_SERVER_PID \
+          EVAL_STREAM_FILE="$sb/client/stream.jsonl"
       fi
       exec "${cmd[@]}"
     ) </dev/null >"$raw" 2>&1 &
@@ -315,14 +329,42 @@ PY
 )
 
   # 6. The workspace, for the build role's patch; 7. the sandbox goes.
+  local out_failed=false
   if [[ -n "$workspace_out" && -z "$setup_failure" ]]; then
     if ! mkdir -p "$workspace_out" || ! cp -a -- "$sb/work/." "$workspace_out/"; then
       _df_err "cannot copy the workspace to $workspace_out"
-      copy_failed=true
+      out_failed=true
     fi
   fi
+  if [[ -n "$_df_sandbox" && -f "$_df_sandbox/layers.json" ]]; then
+    # Each layer's `info` is the effective config, provider settings included,
+    # so the record keeps only its sha256 (canonical JSON; null for null).
+    python3 -I -B - "$_df_sandbox/layers.json" "$outdir/.layers.json" <<'PY' || rm -f "$outdir/.layers.json"
+import hashlib
+import json
+import sys
+
+source, out = sys.argv[1:]
+answers = json.load(open(source, encoding="utf-8"))
+
+def digest(info):
+    if info is None:
+        return None
+    canonical = json.dumps(info, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+def layers(answer):
+    if not isinstance(answer, list):
+        return None
+    return [{"path": layer.get("path"), "type": layer.get("type"),
+             "info_sha256": digest(layer.get("info"))}
+            for layer in answer if isinstance(layer, dict)]
+
+with open(out, "w", encoding="utf-8") as handle:
+    json.dump({which: layers(answers.get(which)) for which in ("default", "directory")}, handle)
+PY
+  fi
   if [[ -n "$_df_sandbox" ]]; then
-    cp -- "$_df_sandbox/layers.json" "$outdir/.layers.json" 2>/dev/null || true
     v2_sandbox_destroy "$_df_sandbox" || true
     _df_sandbox=''
   fi
@@ -347,7 +389,9 @@ PY
     failure_class=$(classify_capability_failure "$outdir/.parsed.json")
     # timeout --preserve-status forwards the stopped command's own status
     # (128 + signal), so 143 and 137 are timeouts too.
-    if grep -q 'EVAL_BUDGET_STOP:' "$raw"; then
+    # Anchored: the wrapper prints the marker on a line of its own, and a JSON
+    # event quoting it (model text) must not count.
+    if grep -q '^EVAL_BUDGET_STOP:' "$raw"; then
       classification=BUDGET_STOP
     elif (( status == 124 || status == 143 || status == 137 )); then
       classification=TIMEOUT
@@ -364,6 +408,10 @@ PY
     else
       classification=OK
     fi
+  fi
+  if [[ "$out_failed" == true ]]; then
+    classification=INVALID_ENVIRONMENT
+    failure_class=WORKSPACE_OUT_FAILED
   fi
 
   LABEL="$label" TARGET="$target" ATTEMPT="$attempt" ROUTING_PROFILE_ID="$routing_profile_id" \
@@ -424,7 +472,6 @@ with open(sys.argv[1], "w", encoding="utf-8") as handle:
 PY
   rm -f "$outdir/.parsed.json" "$outdir/.layers.json"
   [[ -s "$setup_err" ]] || rm -f "$setup_err"
-  [[ "$copy_failed" == false ]] || return 1
   [[ "$classification" == OK ]]
 }
 

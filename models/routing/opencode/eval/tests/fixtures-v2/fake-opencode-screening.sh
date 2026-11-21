@@ -16,10 +16,12 @@
 #   FAKE_SCREEN_STATE/log          receives, per serve:
 #                                    "serve pid=<pid> cwd=<cwd> home=<home>"
 #                                    "serve-env <sorted exported NAMES, comma-separated>"
+#                                    "serve-cwd-entries <its cwd's entries, comma-separated>"
 #                                  and per run:
 #                                    "run pid=<pid> cwd=<cwd> xdg_config=<XDG_CONFIG_HOME>"
 #                                    "run-argv [arg] [arg] ..."
 #                                    "run-env <sorted exported NAMES>"
+#                                    "run-stdout <the file its stdout is>"
 #                                  Names only: values (the password) are never logged.
 #   FAKE_SCREEN_STATE/models.json  served as GET /api/model, when present
 #   FAKE_SCREEN_STATE/mode         `leak` adds a layer /etc/opencode-outside
@@ -57,7 +59,10 @@ serve() {
   done
   [[ ! -f "$state/mode" ]] || mode=$(<"$state/mode")
   printf 'serve pid=%s cwd=%s home=%s\n' "$$" "$PWD" "$HOME" >>"$state/log"
-  printf 'serve-env %s\n' "$(env_names)" >>"$state/log"
+  {
+    printf 'serve-env %s\n' "$(env_names)"
+    printf 'serve-cwd-entries %s\n' "$(find . -mindepth 1 -maxdepth 1 -printf '%f\n' | sort | paste -sd, -)"
+  } >>"$state/log"
 
   local fixtures="${XDG_CACHE_HOME:?}/fake-api"
   mkdir -p "$fixtures"
@@ -100,10 +105,13 @@ PY
 run() {
   local agent='' model='' key n sid fixtures i steps cost sleep_s text code message
   local observed write_path write_content
+  local stdout_file
+  stdout_file=$(readlink "/proc/$$/fd/1" || true)
   {
     printf 'run pid=%s cwd=%s xdg_config=%s\n' "$$" "$PWD" "${XDG_CONFIG_HOME:-}"
     printf 'run-argv'; printf ' [%s]' "$@"; printf '\n'
     printf 'run-env %s\n' "$(env_names)"
+    printf 'run-stdout %s\n' "$stdout_file"
   } >>"$state/log"
   [[ "${1:-}" == --server && "${3:-}" == run ]] \
     || { printf 'fake-opencode-screening: expected --server URL run ...\n' >&2; exit 2; }

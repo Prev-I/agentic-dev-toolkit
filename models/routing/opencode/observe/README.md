@@ -217,8 +217,8 @@ The report discloses `coverage.session_schema`.
 - Assistant messages carry `agent` and `model` in `data`. Their `content` items
   are `text`, `tool` (the tool name is `name`) and `reasoning`, which is ignored.
 - Delegations come from the `task` tool (`subagent_type`) and the new `subagent`
-  tool (`agent`). `apply_patch`, `edit`, `write` (`edit` and `write` not
-  observed on 2.3.0), `question` and `skill` map as on 1.x.
+  tool (`agent`). `apply_patch`, `edit`, `write`, `question` and `skill` map as
+  on 1.x (`edit`, `write` and `question` not observed on 2.3.0).
 - `user` messages are user text; `system` and `synthetic` messages are not
   counted as user text.
 - Session attribution: a NULL session `agent` comes from the session's first
@@ -227,7 +227,9 @@ The report discloses `coverage.session_schema`.
   are filled first. Then a NULL session `model` (as on sessions created on 2.x)
   comes from the first assistant message of the session's own agent; with no
   assistant message from that agent, or no session agent (no assistant message
-  carries one), the model stays NULL.
+  carries one), the model stays NULL. On 2.x `root_model_differs` is derived
+  from the session agent's first assistant message, so it always co-occurs with
+  that message's `request_route_differs`.
 
 ### Source coverage
 
@@ -235,9 +237,9 @@ On 2.x the database is the only request source: `coverage.stream_source` is
 `database`, and requests come from the assistant messages. These signals have no
 2.x source and are listed in `coverage.unavailable_signals`:
 
-- `snapshot_edits` and `retries`: no `patch` or `retry` part is stored;
+- `snapshot_edits`: no `patch` part is stored;
 - `log_stream_signals`: the stream-derived `request_model_differs` and
-  `provider_retries`. The 2.x log has no per-session `stream` line, and the
+  `provider_retries` (the retry loss lives here). The 2.x log has no per-session `stream` line, and the
   database already yields the route difference for every assistant message, so a
   second derivation would only double-count;
 - `title_requests`: automatic title generation is not stored per session on
@@ -263,7 +265,12 @@ Both targets formats are accepted: the 1.x one and
 (`agents.<role>` with `providerID`, `model`, `variant`, `mode`, and
 `default_model`). The default `--manifest` follows the detected schema:
 `eval/manifests/current-routing-targets.json` for `v1`,
-`v2/manifests/current-routing-targets.json` for `v2`. That 2.x manifest has no
+`v2/manifests/current-routing-targets.json` for `v2`. A sqlite error while
+choosing the default fails the run instead of guessing, and a defaulted manifest
+whose schema differs from the detected one raises `manifest_schema_mismatch`;
+`coverage.manifest_format` (`v1` or `opencode-v2-routing-targets/1`) names the
+manifest used. A 2.x manifest row without a non-empty string `providerID` and
+`model` raises `unsupported_manifest_format`. That 2.x manifest has no
 `decision_reference`, so the boundary is the aligned config's mtime
 (`aligned_config_mtime`) or, when the config is not aligned,
 `profile_effective_required`: pass `--profile-effective`.

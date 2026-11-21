@@ -30,21 +30,22 @@ checkpoint progress and the pending review list; dispatcher findings are
 informational and never inherit human review decisions.
 
 The default `--since` uses the mtime of the local active configuration when all
-manifest agent models/variants match the live config and, if the manifest carries a
-`decision_reference`, that mtime falls on the alignment record date.
+manifest agent models/variants match the live config and, if the manifest
+carries a `decision_reference`, that mtime falls on the alignment record date.
 `profile_boundary.source` is then `aligned_config_mtime`. This is evidence of
 configuration writing, not proof of a running session's reload. Without a
 `decision_reference` (the toolkit's OpenCode 2 manifest has none), an aligned
 config's mtime is the boundary, and it moves on any later edit of the aligned
-config. If the config is not aligned, cannot be read, or (with a `decision_reference`)
-is aligned but its mtime falls on a different day than the reference's date: with a `decision_reference`
-the alignment record date is a day-precision proxy (UTC midnight), disclosed as
+config. If the config is not aligned, cannot be read, or (with a
+`decision_reference`) is aligned but its mtime falls on a different day than the
+reference's date: with a `decision_reference` the alignment record date is a
+day-precision proxy (UTC midnight), disclosed as
 `alignment_record_date`; without one the report stops with
 `profile_effective_required` and `--profile-effective` must be supplied.
 `--activation-config` selects the local file (an empty value disables this
-evidence), and `--profile-effective` supplies an explicit timestamp. Use an earlier `--since` to count
-historical populations; historical activity in a resumed session is excluded
-from current-profile counters.
+evidence), and `--profile-effective` supplies an explicit timestamp. Use an
+earlier `--since` to count historical populations; historical activity in a
+resumed session is excluded from current-profile counters.
 
 Routing audit metadata uses the actual message/stream timestamp and contains
 expected/observed models and an activation class. `PRE_ACTIVATION` requests
@@ -216,15 +217,17 @@ The report discloses `coverage.session_schema`.
 - Assistant messages carry `agent` and `model` in `data`. Their `content` items
   are `text`, `tool` (the tool name is `name`) and `reasoning`, which is ignored.
 - Delegations come from the `task` tool (`subagent_type`) and the new `subagent`
-  tool (`agent`). `apply_patch`, `edit`, `write` (`edit` and `write` not observed on 2.3.0), `question` and `skill` map as on 1.x.
+  tool (`agent`). `apply_patch`, `edit`, `write` (`edit` and `write` not
+  observed on 2.3.0), `question` and `skill` map as on 1.x.
 - `user` messages are user text; `system` and `synthetic` messages are not
   counted as user text.
-- Session attribution: a NULL session `model` (as on sessions created on 2.x)
-  comes from the first assistant message of the session's own agent; with no assistant
-  message from that agent, or no session agent, the model stays NULL. A NULL
-  session `agent` comes from the session's first assistant message and is counted
-  as `coverage.sessions_agent_from_messages`. That counter covers the whole
-  database, not only the selected window.
+- Session attribution: a NULL session `agent` comes from the session's first
+  assistant message and is counted as `coverage.sessions_agent_from_messages`.
+  That counter covers the whole database, not only the selected window. Agents
+  are filled first. Then a NULL session `model` (as on sessions created on 2.x)
+  comes from the first assistant message of the session's own agent; with no
+  assistant message from that agent, or no session agent (no assistant message
+  carries one), the model stays NULL.
 
 ### Source coverage
 
@@ -245,13 +248,18 @@ Also not applicable on 2.x: the 1.18.32 compaction `KNOWN_DEVIATION` check, and
 database-sourced provider errors. Provider errors still come from the log's
 `stream error` lines.
 
-On a 2.x database, migrated sessions keep `version = 1.18.32`. Read through v2 with
-an earlier `--since`, a compaction variant mismatch that a v1 read classified as an
-informational `KNOWN_DEVIATION` appears as an ordinary routing flag.
+Migrated sessions keep their 1.x `version` (e.g. `1.18.32`; measured on 2.3.0),
+but a v2 read has no parent link, so the check never matches. A compaction
+variant mismatch that a v1 read classified as informational `KNOWN_DEVIATION` is
+classified by activation class instead, and at or after the profile boundary it
+is an ordinary routing flag. This matters only when `--profile-effective` puts
+the boundary before such activity; an earlier `--since` alone does not, because
+flags start at the later of the two.
 
 ### Manifests and boundary
 
-Both targets formats are accepted: the 1.x one and `opencode-v2-routing-targets/1`
+Both targets formats are accepted: the 1.x one and
+`opencode-v2-routing-targets/1`
 (`agents.<role>` with `providerID`, `model`, `variant`, `mode`, and
 `default_model`). The default `--manifest` follows the detected schema:
 `eval/manifests/current-routing-targets.json` for `v1`,
@@ -262,10 +270,10 @@ Both targets formats are accepted: the 1.x one and `opencode-v2-routing-targets/
 
 A manifest with a `decision_reference`, such as a private one passed with
 `--manifest`, uses the aligned config's mtime only when it falls on that
-reference's date. Otherwise the reference must name a dated file that exists three
-directories above the manifest. If it does not, the report stops with
-`profile_alignment_record_missing` (or `profile_activation_date_unavailable`); pass
-`--profile-effective`.
+reference's date. Otherwise the reference, resolved from the directory three levels
+above the manifest, must be an existing file with a date in its name. If it is
+not, the report stops with `profile_alignment_record_missing` (or
+`profile_activation_date_unavailable`); pass `--profile-effective`.
 
 ## Storage discovery (1.x; see OpenCode 2)
 
@@ -310,8 +318,8 @@ The retry and snapshot `patch` bullets below are 1.x only (see OpenCode 2).
   or an intentional TUI selection; review is mandatory.
 - Eval dispatcher recognition uses retained record IDs and experiment-agent or
   temporary-worktree evidence. Unknown external harnesses may need dismissal.
-- Log rotation limits Title and stream-error coverage. Reports disclose how
-  many log files were read.
+- Log rotation limits Title (1.x only; on 2.x `title_requests` is unavailable)
+  and stream-error coverage. Reports disclose how many log files were read.
 - A retry is inferred from a later stream for the same session and agent; it is
   not an HTTP-level SDK retry audit.
 - Approval detection recognizes explicit English and Italian confirmation plus

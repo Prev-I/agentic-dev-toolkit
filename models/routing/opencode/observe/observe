@@ -109,8 +109,12 @@ def has_schema(db, required):
 
 def detect_schema(db):
     # A 2.x database keeps its frozen 1.x tables, so v2 must win when both match.
+    tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if has_schema(db, V2_REQUIRED):
         return "v2"
+    if "session_v2" in tables:
+        # A 2.x database is never read through its frozen 1.x tables.
+        raise ObserveError("unsupported_session_schema")
     if has_schema(db, V1_REQUIRED):
         return "v1"
     raise ObserveError("unsupported_session_schema")
@@ -253,6 +257,20 @@ def v2_fill_agents(db, sessions):
                 filled += 1
                 break
     return filled
+
+
+def v2_fill_models(sessions, messages):
+    """2.x sessions store no model (NULL): the route is per assistant message,
+    so the session's model is that of its first assistant message run by the
+    session's own agent. Another agent's turn (e.g. plan before build) says
+    nothing about the session agent's route; with none, or with no session
+    agent to match (None == None must not match), it stays NULL."""
+    for sid, rows in messages.items():
+        if not sessions[sid]["model"]:
+            first = next((m for m in rows if m["data"].get("role") == "assistant" and m["data"].get("model")
+                          and sessions[sid]["agent"] and m["data"].get("agent") == sessions[sid]["agent"]), None)
+            if first:
+                sessions[sid]["model"] = first["data"]["model"]
 
 
 def read_messages(db, schema, session_ids):
@@ -514,7 +532,8 @@ def dispatcher_sessions(path):
     return sessions
 
 
-def parse_log_files(log_dir, since):
+def parse_log_files(log_dir, since, schema="v1"):
+    """On v2 the log has no `stream` line, so streams come from the database instead."""
     streams = []
     errors = defaultdict(list)
     starts = {}
@@ -550,7 +569,8 @@ def parse_log_files(log_dir, since):
                     "provider": values.get("providerID"), "model": values.get("modelID"), "run": run,
                 }
                 if values.get("message") == "stream":
-                    streams.append(event)
+                    if schema == "v1":
+                        streams.append(event)
                 elif values.get("message") == "stream error":
                     raw = values.get("error.error", "").lower()
                     if "abort" in raw or "cancel" in raw:
@@ -617,18 +637,15 @@ def collect(args):
     messages = read_messages(db, schema, [sid for sid in sessions if roots[sid] in root_info])
     message_root = {message["id"]: (sid, message) for sid, rows in messages.items() for message in rows}
     if schema == "v2":
-        # 2.x sessions store no model (NULL): the route is per assistant message,
-        # so the session's model is that of its first assistant message run by
-        # the session's own agent. Another agent's turn (e.g. plan before build)
-        # says nothing about the session agent's route; with none, stay NULL.
-        for sid, rows in messages.items():
-            if not sessions[sid]["model"]:
-                first = next((m for m in rows if m["data"].get("role") == "assistant" and m["data"].get("model")
-                              and m["data"].get("agent") == sessions[sid]["agent"]), None)
-                if first:
-                    sessions[sid]["model"] = first["data"]["model"]
+        v2_fill_models(sessions, messages)
 
-    streams, log_errors, log_count, process_starts = parse_log_files(Path(args.log_dir) if args.log_dir else None, since)
+    streams, log_errors, log_count, process_starts = parse_log_files(Path(args.log_dir) if args.log_dir else None, since, schema)
+    if schema == "v2":
+        # One stream per assistant message, as 1.x logged one per request.
+        streams = [{"sid": sid, "time": message["time"], "agent": message["data"].get("agent"),
+                    "provider": message["data"].get("providerID"), "model": message["data"].get("modelID"), "run": None}
+                   for sid, rows in messages.items() for message in rows
+                   if message["data"].get("role") == "assistant" and message["time"] >= since]
     db.close()
     reviews = load_reviews(state)
     flags = []
@@ -928,7 +945,7 @@ def collect(args):
                 if event["time"] < max(since, profile_effective):
                     continue
                 add_flag(rid, "provider_error", reason, agent=event["agent"], provider=event["provider"])
-                if any(stream["sid"] == sid and stream["agent"] == event["agent"] and stream["time"] > event["time"] for stream in streams):
+                if schema == "v1" and any(stream["sid"] == sid and stream["agent"] == event["agent"] and stream["time"] > event["time"] for stream in streams):
                     provider_retries[event["provider"] or "unknown"][event["agent"] or "unknown"] += 1
 
     for stream in streams:
@@ -1009,6 +1026,7 @@ def collect(args):
             "dispatcher_ids_loaded": len(known_dispatchers),
             "opencode_versions": sorted({s["version"] for s in sessions.values() if s["version"]}),
             "session_schema": schema,
+            "stream_source": "database" if schema == "v2" else "log",
             **({"unavailable_signals": list(V2_UNAVAILABLE_SIGNALS),
                 "sessions_agent_from_messages": agents_from_messages} if schema == "v2" else {}),
         },

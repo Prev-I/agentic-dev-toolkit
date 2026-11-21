@@ -118,6 +118,20 @@ def build(base):
         tool("task", {"subagent_type": "reviewer", "prompt": CANARY}, {"sessionId": "ses_v2_review", "model": CANARY}),
         tool("subagent", {"agent": "expert", "prompt": PACKET}, {"sessionID": "ses_v2_expert"})])
 
+    # Delegations whose children DO exist in session_v2, each with its own
+    # assistant message: their requests are counted per child agent.
+    add_session(db, "ses_v2_parent2", repo, start=4500)
+    user(db, "ses_v2_parent2", "p2_u", 4501, CANARY)
+    assistant(db, "ses_v2_parent2", "p2_a", 4502, [
+        tool("task", {"subagent_type": "reviewer", "prompt": CANARY}, {"sessionId": "ses_v2_c_review"}),
+        tool("subagent", {"agent": "expert", "prompt": PACKET}, {"sessionID": "ses_v2_c_expert"})])
+    add_session(db, "ses_v2_c_review", repo, agent="reviewer", parent="ses_v2_parent2", start=4510)
+    assistant(db, "ses_v2_c_review", "c1_a", 4511, [text(CANARY)], agent="reviewer",
+              route=model(model_id="claude-opus-5.5", variant="high"))
+    add_session(db, "ses_v2_c_expert", repo, agent="expert", parent="ses_v2_parent2", start=4520)
+    assistant(db, "ses_v2_c_expert", "c2_a", 4521, [text(CANARY)], agent="expert",
+              route=model(provider="openai", model_id="gpt-6-astra", variant="xhigh"))
+
     # Build root whose first assistant turn ran as plan: the root model comes
     # from build's own message, never from plan's.
     add_session(db, "ses_v2_switch", repo, start=6000)
@@ -176,16 +190,16 @@ def main():
         report(db, state)  # text format stays private too
         key = (state / "hash.key").read_bytes()
         hashes = {sid: session_hash(key, sid) for sid in (
-            "ses_v2_aligned", "ses_v2_mismatch", "ses_v2_gate", "ses_v2_parent", "ses_v2_migrated", "ses_stale",
+            "ses_v2_aligned", "ses_v2_mismatch", "ses_v2_gate", "ses_v2_parent", "ses_v2_parent2", "ses_v2_migrated", "ses_stale",
             "ses_v2_switch", "ses_v2_plan_only", "ses_v2_noagent", "ses_v2_noagent_empty", "ses_v2_seq")}
 
         # Default manifest follows the schema; only session_v2 rows are read.
         assert out["coverage"]["session_schema"] == "v2"
         assert out["coverage"]["unavailable_signals"] == ["snapshot_edits", "retries"]
         assert out["coverage"]["opencode_versions"] == ["1.18.32", "2.3.0"], out["coverage"]
-        assert out["session_classes"] == {"eval_dispatcher": 1, "production": 9, "pre_profile": 0}, out["session_classes"]
+        assert out["session_classes"] == {"eval_dispatcher": 1, "production": 10, "pre_profile": 0}, out["session_classes"]
         assert out["coverage"]["sessions_agent_from_messages"] == 1
-        assert out["populations"]["production"]["agents"] == {"build": 9}, out["populations"]["production"]["agents"]
+        assert out["populations"]["production"]["agents"] == {"build": 10}, out["populations"]["production"]["agents"]
         assert hashes["ses_stale"] not in serialized
         assert "src/stale-snapshot.py" not in serialized and "tests/conftest.py" not in serialized
         assert out["signals"]["provider_error"] == 0 and out["signals"]["scope"] == 0
@@ -193,6 +207,9 @@ def main():
         # Routing with model NULL comes from the assistant messages.
         routing = [item for item in out["review"] if item["signal"] == "routing"]
         assert {(item["session"], item["reason"], item["observed_model"], item.get("variant")) for item in routing} == {
+            # Streams come from the assistant messages on 2.x (no variant on a stream).
+            (hashes["ses_v2_mismatch"], "request_model_differs", "github-copilot/gpt-6-luna", None),
+            (hashes["ses_v2_noagent"], "request_model_differs", "github-copilot/gpt-6-luna", None),
             (hashes["ses_v2_mismatch"], "root_model_differs", "github-copilot/gpt-6-luna", "low"),
             (hashes["ses_v2_mismatch"], "request_route_differs", "github-copilot/gpt-6-luna", "low"),
             (hashes["ses_v2_noagent"], "root_model_differs", "github-copilot/gpt-6-luna", "low"),
@@ -200,9 +217,12 @@ def main():
         }, routing
         requests = {(r["agent"], r["provider"], r["model"], r["variant"]): r["requests"] for r in out["routing_requests"]}
         assert requests == {
-            ("build", "github-copilot", "gpt-6.1-sol", "high"): 9,
+            ("build", "github-copilot", "gpt-6.1-sol", "high"): 10,
             ("build", "github-copilot", "gpt-6-luna", "low"): 2,
             ("plan", "github-copilot", "claude-opus-5.5", "xhigh"): 2,
+            # Children present in session_v2: counted per child agent.
+            ("reviewer", "github-copilot", "claude-opus-5.5", "high"): 1,
+            ("expert", "openai", "gpt-6-astra", "xhigh"): 1,
         }, requests
 
         # Gate: user approval counts, system/synthetic text never does; denied edits do not count.
@@ -212,9 +232,11 @@ def main():
         assert out["checkpoint"]["build_sessions_with_gate"] == 3
 
         # Delegations: task and subagent produce the same tasks entries.
-        assert out["escalations"] == {"expert": 1, "reviewer": 1, "breakglass": 0}, out["escalations"]
-        assert out["populations"]["production"]["task_children"] == {"expert": 1, "reviewer": 1}
-        assert out["expert_escalations"] == [{"parent": hashes["ses_v2_parent"], "repository": "product", "decision_packet": True}]
+        assert out["escalations"] == {"expert": 2, "reviewer": 2, "breakglass": 0}, out["escalations"]
+        assert out["populations"]["production"]["task_children"] == {"expert": 2, "reviewer": 2}
+        assert sorted(out["expert_escalations"], key=lambda e: e["parent"]) == sorted(
+            [{"parent": hashes[name], "repository": "product", "decision_packet": True}
+             for name in ("ses_v2_parent", "ses_v2_parent2")], key=lambda e: e["parent"])
 
         # locate reads session_v2, never the stale session table.
         found = run("locate", hashes["ses_v2_aligned"], "--db", str(db), "--state-dir", str(state))

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Logs on 2.x: stream counts come from the database; errors and process starts from the log."""
+"""Logs on 2.x: requests come from the database message loop; errors and process starts from the log."""
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -97,7 +97,7 @@ def main():
                             ("build", "github-copilot", "gpt-6.1-sol", "high"): 1,
                             ("title", "github-copilot", "gpt-6-luna", "low"): 1}, requests
 
-        # No log directory: same database-derived streams.
+        # No log directory: requests still come from the message loop.
         bare, _ = report("", base / "state2")
         assert bare["coverage"]["stream_source"] == "database" and bare["coverage"]["log_files"] == 0
 

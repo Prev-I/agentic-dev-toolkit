@@ -256,7 +256,9 @@ edited. It was not measured whether 1.x sent the agent-level temperature.
    variant-carried temperature for `reviewer` and `expert` and an explicit
    replacement for the dropped provider `blacklist`. Temperature is removed,
    and `blacklist` is replaced by not declaring the model.
-2. The observe tool on the 2.x database tables.
+2. **Closed** by Part 3 of the V2 routing work: the observe tool reads the 2.x
+   database tables; see the
+   [OpenCode 2 section](../../observe/README.md#opencode-2) of the observe README.
 3. `opencode-gateway-restart.sh` on 2.x.
 4. A live cutover verification record for the runbook.
 5. **Closed** by

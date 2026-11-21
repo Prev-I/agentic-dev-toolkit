@@ -152,14 +152,14 @@ def connect_readonly(path):
 
 SESSION_KEYS = ("id", "parent", "directory", "version", "agent", "model", "created", "updated")
 SESSION_COLUMNS = "id,parent_id,directory,version,agent,model,time_created,time_updated"
-# Signals a 2.x database has no source for: no `patch` part (snapshot edits) and
-# no `retry` part exist in session_message, so they are reported unavailable.
+# Signals a 2.x database has no source for. `snapshot_edits`, `retries`: no `patch`
+# or `retry` part exists in session_message. `log_stream_signals`: stream-derived
+# request_model_differs and provider_retries need an independent log stream, which
+# 2.x does not write per session (no `stream` line; `llm runtime selected` has no
+# session.id), and the message loop already counts every assistant message and
+# raises request_route_differs. `title_requests`: automatic title generation is
+# not stored per session on 2.3.0 (measured).
 V2_UNAVAILABLE_SIGNALS = ["snapshot_edits", "retries", "log_stream_signals", "title_requests"]
-# Stream-derived request_model_differs and provider_retries need an independent
-# log stream, which 2.x does not write per session (no `stream` line, and
-# `llm runtime selected` has no session.id); the message loop already counts
-# every assistant message and raises request_route_differs. Automatic title
-# generation is not stored per session on 2.3.0 (measured).
 
 
 def read_sessions(db, schema):

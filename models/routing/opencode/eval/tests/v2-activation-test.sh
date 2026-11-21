@@ -189,6 +189,14 @@ assert_contains "$(<"$workspace/main.err")" "$backup_dir"
 # comments are the generated header reports no dropped comments.
 activate "$main_root" "$workspace/main/backups" >/dev/null 2>"$workspace/main2.err"
 [[ "$(<"$workspace/main2.err")" != *"comments"* ]] || fail "generated header reported as user comments: $(<"$workspace/main2.err")"
+
+# The same with CRLF line endings (an editor on Windows): still no note.
+crlf_root="$workspace/crlf/config"
+mkdir -p "$crlf_root"
+sed 's/$/\r/' "$main_root/opencode.jsonc" >"$crlf_root/opencode.jsonc"
+grep -q $'^// profile_id: .*\r$' "$crlf_root/opencode.jsonc" || fail "CRLF fixture not CRLF"
+activate "$crlf_root" "$workspace/crlf/backups" >/dev/null 2>"$workspace/crlf.err"
+[[ "$(<"$workspace/crlf.err")" != *"comments"* ]] || fail "CRLF generated header reported as user comments: $(<"$workspace/crlf.err")"
 python3 "$helper" load "$main_root/opencode.jsonc" >"$workspace/after2.json"
 cmp -s "$workspace/after.json" "$workspace/after2.json" || fail "second activation changed content"
 
@@ -302,7 +310,7 @@ term_shim="$workspace/term-shim"
 mkdir -p "$term_shim"
 cat >"$term_shim/python3" <<SH
 #!/usr/bin/env bash
-if [[ "\${!#}" == */term/backups/*/manifest.json ]]; then
+if [[ "\${!#}" == */term*/backups/*/manifest.json ]]; then
   kill -TERM "\$PPID"
 fi
 exec "$real_python" "\$@"
@@ -319,6 +327,28 @@ rc=$( (PATH="$term_shim:$PATH" bash -c 'source "$1"; shift; activate_profile_v2 
 assert_eq 143 "$rc"
 cmp -s "$term_root/opencode.jsonc" "$workspace/main-original.jsonc" || fail "interrupted activation changed the target"
 assert_eq "opencode.jsonc" "$(ls -A "$term_root")"
+
+# The same interrupt when the activation runs sourced in a subshell of this
+# shell: the signal must be re-raised on the subshell, not on this shell
+# ($$ would name this shell; $BASHPID names the subshell). The shim's parent
+# is the subshell, so TERM goes to the subshell only.
+sub_root="$workspace/term-sub/config"
+mkdir -p "$sub_root"
+cp "$workspace/main-original.jsonc" "$sub_root/opencode.jsonc"
+(
+  PATH="$term_shim:$PATH" activate_profile_v2 --profile "$profile" --targets "$targets" \
+    --config-root "$sub_root" --backup-root "$workspace/term-sub/backups" \
+    --model-routing "$routing_md" >/dev/null 2>&1
+  printf 'survived\n' >"$workspace/term-sub/after-call"
+) &
+sub_pid=$!
+rc=0
+wait "$sub_pid" 2>/dev/null || rc=$?
+# Reaching this line at all means this shell was not signalled.
+assert_eq 143 "$rc"
+[[ ! -e "$workspace/term-sub/after-call" ]] || fail "subshell kept running after TERM"
+cmp -s "$sub_root/opencode.jsonc" "$workspace/main-original.jsonc" || fail "interrupted subshell activation changed the target"
+assert_eq "opencode.jsonc" "$(ls -A "$sub_root")"
 
 # --- Unparseable target is refused and left untouched ----------------------
 bad_root="$workspace/bad/config"

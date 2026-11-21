@@ -37,7 +37,9 @@ _v2_activation_signal() {
   [[ -z "$_v2_activation_tmp" || "$_v2_activation_tmp" == /dev/null ]] || rm -f "$_v2_activation_tmp"
   trap - INT TERM
   [[ -z "$_v2_activation_saved_traps" ]] || eval "$_v2_activation_saved_traps"
-  kill -s "$1" "$$"
+  # $BASHPID, not $$: in a subshell $$ is the parent shell, which must not
+  # receive a signal meant for this one.
+  kill -s "$1" "$BASHPID"
 }
 
 activate_profile_v2() {
@@ -205,7 +207,7 @@ FIXED_HEADER = {line for line in header_lines("x", "x", "x", "x", "x", ["x"])
 
 def without_generated_header(raw):
     """Drop a leading header this tool wrote, so only user comments remain."""
-    lines = raw.split("\n")
+    lines = [line.rstrip("\r") for line in raw.split("\n")]  # tolerate CRLF
     if lines[0] != HEADER_MARK:
         return raw
     index = 1

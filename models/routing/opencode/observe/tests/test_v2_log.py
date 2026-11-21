@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Logs on 2.x: stream counts come from the database; errors and process starts from the log."""
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import runpy
@@ -11,8 +12,10 @@ from test_v2_config import v2_schema
 from test_v2_db import PROFILE, add_session, assistant, model, text, user
 
 
-def stamp(offset):
-    return __import__("datetime").datetime.fromtimestamp(EPOCH / 1000 + offset, __import__("datetime").timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+def stamp(ms):
+    """Log timestamp for an offset in milliseconds, the unit the database helpers use."""
+    moment = datetime.fromtimestamp((EPOCH + ms) / 1000, timezone.utc)
+    return f"{moment:%Y-%m-%dT%H:%M:%S}.{moment.microsecond // 1000:03d}Z"
 
 
 def line(offset, message, **kv):
@@ -24,12 +27,13 @@ def write_log(directory):
     directory.mkdir()
     lines = [
         # 1.x era: stream lines name the session; they must be ignored on v2.
-        line(1, "stream", **{"session.id": "ses_log", "agent": "build", "providerID": "github-copilot", "modelID": "gpt-6-luna"}),
+        # Its model differs from every database message, so reading it on v2 would show.
+        line(1, "stream", **{"session.id": "ses_log", "agent": "build", "providerID": "github-copilot", "modelID": "claude-opus-5.5"}),
         # 2.x era: no stream line; llm runtime selected has no session.id.
         line(2, "llm runtime selected", **{"llm.runtime": "native", "llm.provider": "github-copilot", "llm.model": "gpt-6-luna"}),
-        line(1010, "stream error", **{"session.id": "ses_log", "agent": "build", "providerID": "github-copilot",
+        line(1500, "stream error", **{"session.id": "ses_log", "agent": "build", "providerID": "github-copilot",
                                       "modelID": "gpt-6.1-sol", "mode": "primary", "error.error": "429 rate limit " + "x"}),
-        line(1011, "other", **{"session.id": "ses_log", "run": "run_b", "role": "cli"}),
+        line(1511, "other", **{"session.id": "ses_log", "run": "run_b", "role": "cli"}),
     ]
     (directory / "opencode.log").write_text("\n".join(lines) + "\n")
 
@@ -60,7 +64,10 @@ def main():
         add_session(db, "ses_log", repo, start=1000)
         user(db, "ses_log", "l_u", 1001, CANARY)
         assistant(db, "ses_log", "l_a", 1002, [text(CANARY)], route=model(model_id="gpt-6-luna", variant="low"))
-        assistant(db, "ses_log", "l_b", 1020, [text(CANARY)])
+        # After the stream error (1500 ms): a 1.x-style retry detector would count it.
+        assistant(db, "ses_log", "l_b", 2000, [text(CANARY)])
+        # A title message is one request under one key, not two.
+        assistant(db, "ses_log", "l_t", 3000, [text(CANARY)], agent="title", route=model(model_id="gpt-6-luna", variant="low"))
         db.commit()
         db.close()
 
@@ -74,16 +81,21 @@ def main():
         out, key = report(logs, base / "state")
         sid = module["session_hash"](key, "ses_log")
         assert out["coverage"]["stream_source"] == "database" and out["coverage"]["log_files"] == 1
-        assert "retries" in out["coverage"]["unavailable_signals"]
+        assert {"retries", "log_stream_signals", "title_requests"} <= set(out["coverage"]["unavailable_signals"])
         errors = [f for f in out["review"] if f["signal"] == "provider_error"]
         assert [(f["session"], f["reason"], f["agent"]) for f in errors] == [(sid, "rate_limit", "build")], errors
-        # A later request exists in the database, yet 2.x records no retries.
+        # Requests follow the error in the database, yet the signal is unavailable on 2.x.
         assert out["provider_retries"] == {}, out["provider_retries"]
-        # Streams from the assistant messages: only the off-target one differs.
-        differs = [f for f in out["review"] if f["signal"] == "routing" and f["reason"] == "request_model_differs"]
-        assert [(f["session"], f["observed_model"]) for f in differs] == [(sid, "github-copilot/gpt-6-luna")], differs
-        # The 1.x `stream` line (gpt-6-luna at +1s) must not add a second request.
-        assert sum(r["requests"] for r in out["routing_requests"]) == 2, out["routing_requests"]
+        # The log's stream line is never read on v2: only the database's off-target message is flagged,
+        # once, by the message loop; request_model_differs (stream-derived) never fires.
+        routing = [(f["reason"], f["observed_model"]) for f in out["review"] if f["signal"] == "routing"]
+        assert sorted(routing) == [("request_route_differs", "github-copilot/gpt-6-luna"),
+                                   ("root_model_differs", "github-copilot/gpt-6-luna")], routing
+        assert not any("opus" in item for _, item in routing)
+        requests = {(r["agent"], r["provider"], r["model"], r["variant"]): r["requests"] for r in out["routing_requests"]}
+        assert requests == {("build", "github-copilot", "gpt-6-luna", "low"): 1,
+                            ("build", "github-copilot", "gpt-6.1-sol", "high"): 1,
+                            ("title", "github-copilot", "gpt-6-luna", "low"): 1}, requests
 
         # No log directory: same database-derived streams.
         bare, _ = report("", base / "state2")

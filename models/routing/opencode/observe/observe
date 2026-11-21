@@ -154,7 +154,12 @@ SESSION_KEYS = ("id", "parent", "directory", "version", "agent", "model", "creat
 SESSION_COLUMNS = "id,parent_id,directory,version,agent,model,time_created,time_updated"
 # Signals a 2.x database has no source for: no `patch` part (snapshot edits) and
 # no `retry` part exist in session_message, so they are reported unavailable.
-V2_UNAVAILABLE_SIGNALS = ["snapshot_edits", "retries"]
+V2_UNAVAILABLE_SIGNALS = ["snapshot_edits", "retries", "log_stream_signals", "title_requests"]
+# Stream-derived request_model_differs and provider_retries need an independent
+# log stream, which 2.x does not write per session (no `stream` line, and
+# `llm runtime selected` has no session.id); the message loop already counts
+# every assistant message and raises request_route_differs. Automatic title
+# generation is not stored per session on 2.3.0 (measured).
 
 
 def read_sessions(db, schema):
@@ -533,7 +538,7 @@ def dispatcher_sessions(path):
 
 
 def parse_log_files(log_dir, since, schema="v1"):
-    """On v2 the log has no `stream` line, so streams come from the database instead."""
+    """On v2 there are no streams: the database message loop is the only request source."""
     streams = []
     errors = defaultdict(list)
     starts = {}
@@ -640,12 +645,6 @@ def collect(args):
         v2_fill_models(sessions, messages)
 
     streams, log_errors, log_count, process_starts = parse_log_files(Path(args.log_dir) if args.log_dir else None, since, schema)
-    if schema == "v2":
-        # One stream per assistant message, as 1.x logged one per request.
-        streams = [{"sid": sid, "time": message["time"], "agent": message["data"].get("agent"),
-                    "provider": message["data"].get("providerID"), "model": message["data"].get("modelID"), "run": None}
-                   for sid, rows in messages.items() for message in rows
-                   if message["data"].get("role") == "assistant" and message["time"] >= since]
     db.close()
     reviews = load_reviews(state)
     flags = []
@@ -945,7 +944,7 @@ def collect(args):
                 if event["time"] < max(since, profile_effective):
                     continue
                 add_flag(rid, "provider_error", reason, agent=event["agent"], provider=event["provider"])
-                if schema == "v1" and any(stream["sid"] == sid and stream["agent"] == event["agent"] and stream["time"] > event["time"] for stream in streams):
+                if any(stream["sid"] == sid and stream["agent"] == event["agent"] and stream["time"] > event["time"] for stream in streams):
                     provider_retries[event["provider"] or "unknown"][event["agent"] or "unknown"] += 1
 
     for stream in streams:

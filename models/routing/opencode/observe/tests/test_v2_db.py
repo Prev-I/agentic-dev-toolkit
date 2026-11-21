@@ -195,7 +195,7 @@ def main():
 
         # Default manifest follows the schema; only session_v2 rows are read.
         assert out["coverage"]["session_schema"] == "v2"
-        assert out["coverage"]["unavailable_signals"] == ["snapshot_edits", "retries"]
+        assert out["coverage"]["unavailable_signals"] == ["snapshot_edits", "retries", "log_stream_signals", "title_requests"]
         assert out["coverage"]["opencode_versions"] == ["1.18.32", "2.3.0"], out["coverage"]
         assert out["session_classes"] == {"eval_dispatcher": 1, "production": 10, "pre_profile": 0}, out["session_classes"]
         assert out["coverage"]["sessions_agent_from_messages"] == 1
@@ -207,9 +207,6 @@ def main():
         # Routing with model NULL comes from the assistant messages.
         routing = [item for item in out["review"] if item["signal"] == "routing"]
         assert {(item["session"], item["reason"], item["observed_model"], item.get("variant")) for item in routing} == {
-            # Streams come from the assistant messages on 2.x (no variant on a stream).
-            (hashes["ses_v2_mismatch"], "request_model_differs", "github-copilot/gpt-6-luna", None),
-            (hashes["ses_v2_noagent"], "request_model_differs", "github-copilot/gpt-6-luna", None),
             (hashes["ses_v2_mismatch"], "root_model_differs", "github-copilot/gpt-6-luna", "low"),
             (hashes["ses_v2_mismatch"], "request_route_differs", "github-copilot/gpt-6-luna", "low"),
             (hashes["ses_v2_noagent"], "root_model_differs", "github-copilot/gpt-6-luna", "low"),

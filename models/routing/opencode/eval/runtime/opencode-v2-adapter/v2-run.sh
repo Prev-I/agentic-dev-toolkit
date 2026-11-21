@@ -7,7 +7,7 @@
 #   v2_call_role URL ROLE WORKDIR         one `opencode run` of ROLE; writes
 #                                         WORKDIR/calls/ROLE{.jsonl,.err,.json,.assistant.json}
 #                                         (the client gets XDG_* dirs under its probe dir)
-#   V2_PICK_ASSISTANT                     the jq predicate that picks the used model
+#   V2_PICK_ASSISTANT                     the jq filter that selects every assistant message
 #
 # v2_run_isolated runs the collector in a subshell that owns its EXIT/INT/TERM
 # traps (the caller's traps are never read or modified) and returns the

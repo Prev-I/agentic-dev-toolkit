@@ -1406,6 +1406,7 @@ the toolkit checkout:
 
 ```bash
 work=$(mktemp -d)
+OPENCODE_BIN=~/.opencode/bin/opencode \
 bash models/routing/opencode/eval/runtime/opencode-v2-adapter/verify-effective-routing.sh \
   --server http://127.0.0.1:4096 --credentials ~/.config/opencode-runtime/secrets.env \
   --targets models/routing/opencode/v2/manifests/current-routing-targets.json \

@@ -262,7 +262,7 @@ stop_server
 
 # 13. --call with a different model used is a FAIL; a failing run too.
 fx=$(fresh callbad)
-edit "$fx/api_session_ses_breakglass_message.json" '(.data[].info | select(.role == "assistant") | .model.id) = "gpt-6-luna"'
+edit "$fx/api_session_ses_breakglass_message.json" '(.data[] | select(.type == "assistant") | .model.id) = "gpt-6-luna"'
 serve "$fx"
 OPENCODE_BIN="$root/tests/fixtures-v2/fake-opencode-run.sh" run_probe callbad --call
 assert_eq 1 "$rc"

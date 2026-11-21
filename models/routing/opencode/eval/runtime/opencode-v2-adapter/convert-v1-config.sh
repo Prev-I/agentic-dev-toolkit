@@ -19,18 +19,20 @@
 #      the sandbox's config file appears; its `info` is the translation;
 #   2. every `agents.<role>.request.body.temperature` is removed (2.x does not
 #      send it), and `request` with it when left empty;
-#   3. the result must hold no V1 key; it is written to a staging file beside
-#      the output (with a `//` provenance header when the output ends in
-#      `.jsonc`);
-#   4. a second sandboxed server loads the staged result, and its `document`
-#      `info` must equal it as parsed JSON;
+#   3. the result must hold no V1 key;
+#   4. a second sandboxed server loads the result, and its `document` `info`
+#      must equal it as parsed JSON; only then is it staged beside the output
+#      (with a `//` provenance header when the output ends in `.jsonc`);
 #   5. the input (and an output it replaces) is backed up to
 #      BACKUP_ROOT/convert-<stamp>/ with a SHA256SUMS, and the staged file is
 #      moved onto the output atomically, keeping the replaced file's mode.
 #
 # `dropped: <key path>` is printed for each removed temperature, each V1
-# `provider.<p>.blacklist`, `server`, and any other V1 top-level key whose
-# content has no counterpart in the result.
+# `provider.<p>.blacklist`, `server`, any other V1 top-level key whose content
+# has no counterpart in the result, each entry of `agent`, `mode`, `provider`,
+# `command` or `mcp` missing from its target map (`agents`, `providers`,
+# `commands`, `mcp.servers`), and each provider listed in `disabled_providers`
+# or `enabled_providers` that no `policies` entry names as its resource.
 #
 # Isolation: HOME and XDG_* alone do not isolate a 2.x server (it also loads
 # the account's ~/.opencode and its working directory's config). Each server
@@ -164,6 +166,35 @@ if cmd == "finalize":
     for key in v1:
         if renamed.get(key, key) not in result:
             dropped.append(key)
+    # Second level: every entry of a map-valued V1 key must reach its target
+    # map. Checked per source, so a key sharing a target cannot mask another.
+    entry_targets = {"agent": ("agents",), "mode": ("agents",),
+                     "provider": ("providers",), "command": ("commands",),
+                     "mcp": ("mcp", "servers")}
+    for key, target_path in entry_targets.items():
+        source = v1.get(key)
+        if not isinstance(source, dict) or not source:
+            continue
+        target = result
+        for part in target_path:
+            target = target.get(part) if isinstance(target, dict) else None
+        if not isinstance(target, dict):
+            target = {}
+        for name in source:
+            if name not in target:
+                dropped.append("%s.%s" % (key, name))
+    # disabled_providers / enabled_providers: each listed provider must appear
+    # as a `policies` resource.
+    policies = result.get("policies")
+    resources = set()
+    if isinstance(policies, list):
+        resources = {p.get("resource") for p in policies if isinstance(p, dict)}
+    for key in ("disabled_providers", "enabled_providers"):
+        listed = v1.get(key)
+        if isinstance(listed, list):
+            for name in listed:
+                if name not in resources:
+                    dropped.append("%s.%s" % (key, name))
     left = [k for k in v2config.V1_KEYS if k in result]
     mcp = result.get("mcp")
     if isinstance(mcp, dict) and "servers" not in mcp:
@@ -224,9 +255,12 @@ PY
 _cv_serve() {
   local sb=$1 bin=$2 config=$3 port pid url rc deadline
   local timeout=${V2_CONFIG_POLL_TIMEOUT:-30}
-  mkdir -p "$sb/home" "$sb/config/opencode" "$sb/data" "$sb/state" "$sb/cache" "$sb/work"
-  cp "$config" "$sb/config/opencode/opencode.json"
-  port=$(_cv_py port)
+  if ! mkdir -p "$sb/home" "$sb/config/opencode" "$sb/data" "$sb/state" "$sb/cache" "$sb/work" \
+     || ! cp "$config" "$sb/config/opencode/opencode.json"; then
+    _cv_err "cannot build the sandbox in $sb"
+    return 1
+  fi
+  port=$(_cv_py port) && [[ -n "$port" ]] || { _cv_err "cannot pick a free loopback port"; return 1; }
   (
     cd "$sb/work"
     exec setsid env -i PATH=/usr/bin:/bin HOME="$sb/home" \
@@ -257,7 +291,8 @@ _cv_serve() {
       return 1
     fi
     if (( rc == 0 )); then
-      printf '%s' "$V2_LAST_BODY" >"$sb/api-config.json"
+      printf '%s' "$V2_LAST_BODY" >"$sb/api-config.json" \
+        || { _cv_err "cannot write $sb/api-config.json"; return 1; }
       rc=0
       _cv_py document "$sb/api-config.json" "$sb/config/opencode/opencode.json" "$sb" "$sb/info.json" || rc=$?
       (( rc == 3 )) || break
@@ -270,9 +305,10 @@ _cv_serve() {
   done
   (( rc == 0 )) || return 1
   if v2_api_get "$url" /api/info >/dev/null 2>&1; then
-    _cv_py version "$V2_LAST_BODY" >"$sb/version"
+    _cv_py version "$V2_LAST_BODY" >"$sb/version" \
+      || { _cv_err "cannot read the server version"; return 1; }
   else
-    printf 'unknown\n' >"$sb/version"
+    printf 'unknown\n' >"$sb/version" || { _cv_err "cannot write $sb/version"; return 1; }
   fi
   v2_stop_pid "$pid"
 }
@@ -280,61 +316,82 @@ _cv_serve() {
 # Runs inside v2_run_isolated: WORK is removed, and the servers stopped, on exit.
 _cv_collect() {
   local work=$1 input=$2 output=$3 backup_root=$4 bin=$5
-  local stage staged version stamp backup_dir n sum header_path dropped
-  V2_PASSWORD=$(_cv_py password)
+  local stage staged version stamp backup_dir n sum prev_sum header_path dropped
+  V2_PASSWORD=$(_cv_py password) && [[ -n "$V2_PASSWORD" ]] \
+    || { _cv_err "cannot generate the sandbox password"; return 1; }
 
-  _cv_py strict "$input" "$work/v1.json"
+  _cv_py strict "$input" "$work/v1.json" || { _cv_err "cannot read $input as JSON"; return 1; }
   _cv_serve "$work/first" "$bin" "$work/v1.json" || return 1
-  version=$(cat "$work/first/version")
+  version=$(cat "$work/first/version") || { _cv_err "cannot read the server version"; return 1; }
   dropped=$(_cv_py finalize "$input" "$work/first/info.json" "$work/result.json") || return 1
 
-  stage=$(mktemp -d "$(dirname "$output")/.convert-v1.XXXXXX") || { _cv_err "cannot stage beside $output"; return 1; }
-  _V2_TMPDIRS+=("$stage")
-  staged="$stage/$(basename "$output")"
-  sum=$(sha256sum "$input" | cut -d' ' -f1)
-  if [[ "$output" == *.jsonc ]]; then
-    header_path=${input//[$'\r\n']/?}
-    {
-      printf '// Converted from the OpenCode 1.x config %s\n' "$header_path"
-      printf '// source sha256: %s\n' "$sum"
-      printf '// converted at: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-      printf '// OpenCode version: %s\n' "$version"
-      printf "// converted with OpenCode 2's own translation (GET /api/config, document layer info)\n"
-      cat "$work/result.json"
-    } >"$staged"
-  else
-    cp "$work/result.json" "$staged"
-  fi
-
-  if [[ "$(python3 -B "$v2_convert_root/v2config.py" shape "$staged")" != v2 ]]; then
+  if [[ "$(python3 -B "$v2_convert_root/v2config.py" shape "$work/result.json")" != v2 ]]; then
     _cv_err "the result is not V2-shaped"
     return 1
   fi
-  _cv_py strict "$staged" "$work/reload.json"
-  _cv_serve "$work/second" "$bin" "$work/reload.json" || return 1
-  if ! _cv_py same "$work/second/info.json" "$staged"; then
+  # Reload check before anything appears beside the output.
+  _cv_serve "$work/second" "$bin" "$work/result.json" || return 1
+  if ! _cv_py same "$work/second/info.json" "$work/result.json"; then
     _cv_err "reload check failed: a second server does not read the result back unchanged"
     return 1
   fi
 
+  sum=$(sha256sum "$input" | cut -d' ' -f1) && [[ -n "$sum" ]] \
+    || { _cv_err "cannot hash $input"; return 1; }
+  stage=$(mktemp -d "$(dirname "$output")/.convert-v1.XXXXXX") || { _cv_err "cannot stage beside $output"; return 1; }
+  _V2_TMPDIRS+=("$stage")
+  staged="$stage/$(basename "$output")"
+  if [[ "$output" == *.jsonc ]]; then
+    header_path=${input//[$'\r\n']/?}
+    if ! {
+      printf '// Converted from the OpenCode 1.x config %s\n' "$header_path" &&
+      printf '// source sha256: %s\n' "$sum" &&
+      printf '// converted at: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" &&
+      printf '// OpenCode version: %s\n' "$version" &&
+      printf "// converted with OpenCode 2's own translation (GET /api/config, document layer info)\n" &&
+      cat "$work/result.json"
+    } >"$staged"; then
+      _cv_err "cannot write $staged"
+      return 1
+    fi
+  elif ! cp "$work/result.json" "$staged"; then
+    _cv_err "cannot write $staged"
+    return 1
+  fi
+  if ! _cv_py same "$staged" "$work/result.json"; then
+    _cv_err "the staged output does not match the checked result"
+    return 1
+  fi
+
   if [[ -e "$output" ]]; then
-    chmod --reference="$output" "$staged" || return 1
+    chmod --reference="$output" "$staged" || { _cv_err "cannot copy the mode of $output"; return 1; }
   fi
   stamp=$(date +%Y%m%dT%H%M%S%z)
   backup_dir="$backup_root/convert-$stamp"
   n=1
-  while [[ -e "$backup_dir" ]]; do
+  # mkdir without -p claims the directory atomically; an existing one is skipped.
+  until mkdir "$backup_dir" 2>/dev/null; do
+    if [[ ! -e "$backup_dir" ]] || (( n > 100 )); then
+      _cv_err "cannot create a backup directory under $backup_root"
+      return 1
+    fi
     backup_dir="$backup_root/convert-$stamp-$n"
     n=$(( n + 1 ))
   done
-  mkdir -p "$backup_dir" || { _cv_err "cannot create $backup_dir"; return 1; }
-  cp -p "$input" "$backup_dir/$(basename "$input")" || return 1
-  printf '%s  %s\n' "$sum" "$(basename "$input")" >"$backup_dir/SHA256SUMS"
+  if ! cp -p "$input" "$backup_dir/$(basename "$input")" \
+     || ! printf '%s  %s\n' "$sum" "$(basename "$input")" >"$backup_dir/SHA256SUMS"; then
+    _cv_err "cannot back up $input to $backup_dir; nothing replaced"
+    return 1
+  fi
   if [[ -e "$output" && "$output" != "$input" ]]; then
-    mkdir -p "$backup_dir/previous-output"
-    cp -p "$output" "$backup_dir/previous-output/$(basename "$output")" || return 1
-    printf '%s  %s\n' "$(sha256sum "$output" | cut -d' ' -f1)" \
-      "previous-output/$(basename "$output")" >>"$backup_dir/SHA256SUMS"
+    prev_sum=$(sha256sum "$output" | cut -d' ' -f1) && [[ -n "$prev_sum" ]] \
+      || { _cv_err "cannot hash $output; nothing replaced"; return 1; }
+    if ! mkdir "$backup_dir/previous-output" \
+       || ! cp -p "$output" "$backup_dir/previous-output/$(basename "$output")" \
+       || ! printf '%s  %s\n' "$prev_sum" "previous-output/$(basename "$output")" >>"$backup_dir/SHA256SUMS"; then
+      _cv_err "cannot back up $output to $backup_dir; nothing replaced"
+      return 1
+    fi
   fi
   if ! (cd "$backup_dir" && sha256sum -c --quiet SHA256SUMS >/dev/null 2>&1); then
     _cv_err "the backup in $backup_dir does not verify; nothing replaced"

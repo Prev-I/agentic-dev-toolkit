@@ -24,12 +24,14 @@ sleep 1
 
 # A wrapper per mode: records which variables the converter passed, then sets
 # the fake's own and runs it.
-for mode in normal differ leak nodoc; do
+for mode in normal differ leak nodoc lossy; do
+  info="$T/canned-info.json"
+  [[ "$mode" != lossy ]] || info="$T/canned-lossy.json"
   cat >"$T/bin/opencode-$mode" <<EOF
 #!/usr/bin/env bash
 FAKE_SERVE_ENV_NAMES=\$(env | cut -d= -f1 | sort | paste -sd, -)
 export FAKE_SERVE_ENV_NAMES
-export FAKE_SERVE_INFO='$T/canned-info.json' FAKE_SERVE_MODE='$mode' FAKE_SERVE_LOG='$T/serve.log'
+export FAKE_SERVE_INFO='$info' FAKE_SERVE_MODE='$mode' FAKE_SERVE_LOG='$T/serve.log'
 exec '$fixtures/fake-opencode-serve.sh' "\$@"
 EOF
   chmod +x "$T/bin/opencode-$mode"
@@ -117,10 +119,11 @@ in_sum=$(sha256sum "$T/in.jsonc" | cut -d' ' -f1)
 run basic normal --input "$T/in.jsonc" --output "$T/out.json" --backup-root "$T/bk"
 (( rc == 0 )) || fail "basic conversion exited $rc: $err"
 same "$T/expected.json" "$T/out.json" || fail "output differs from the canned translation minus temperature"
-assert_contains "$out" "dropped: agents.reviewer.request.body.temperature"
-assert_contains "$out" "dropped: provider.gw.blacklist"
-assert_contains "$out" "dropped: server"
-[[ "$out" != *"dropped: agent"$'\n'* && "$out" != *"dropped: provider"$'\n'* ]] || fail "a translated key was reported dropped: $out"
+# Exactly these, so nothing translated (agent, provider, permission,
+# autoupdate, ...) is falsely reported.
+assert_eq "dropped: agents.reviewer.request.body.temperature
+dropped: provider.gw.blacklist
+dropped: server" "$(grep '^dropped: ' <<<"$out" | sort)"
 assert_eq v2 "$(shape "$T/out.json")"
 assert_eq '{' "$(head -c 1 "$T/out.json")"
 assert_eq "$in_sum" "$(sha256sum "$T/in.jsonc" | cut -d' ' -f1)"
@@ -161,6 +164,39 @@ PY
 run extra normal --input "$T/extra.json" --output "$T/extra-out.json" --backup-root "$T/bk"
 (( rc == 0 )) || fail "extra-key conversion exited $rc: $err"
 assert_contains "$out" "dropped: x_custom"
+
+# 3b. Entries the translation drops are reported one by one, per source key, so
+# a key sharing a target (agent/mode -> agents) cannot mask a loss.
+python3 -B - "$adapter" "$T/in.jsonc" "$T/canned-info.json" "$T/lossy.json" "$T/canned-lossy.json" <<'PY'
+import json, sys
+sys.dont_write_bytecode = True
+sys.path.insert(0, sys.argv[1])
+import v2config
+v1 = v2config.load(sys.argv[2])
+v1["provider"]["legacy"] = {"npm": "@ai-sdk/openai-compatible", "models": {}}
+v1["agent"]["old"] = {"model": "gw/m1"}
+v1["mode"] = {"planner": {"model": "gw/m1"}}
+v1["command"] = {"c1": {"template": "x"}}
+v1["mcp"] = {"srv": {"type": "local", "command": ["true"]}}
+v1["disabled_providers"] = ["legacy", "ghost"]
+json.dump(v1, open(sys.argv[4], "w"))
+info = json.load(open(sys.argv[3]))
+info["agents"]["planner"] = {"model": {"providerID": "gw", "model": "m1"}}
+info["commands"] = {}
+info["mcp"] = {"servers": {}}
+info["policies"] = [{"action": "provider.use", "resource": "legacy", "effect": "deny"}]
+json.dump(info, open(sys.argv[5], "w"))
+PY
+run lossy lossy --input "$T/lossy.json" --output "$T/lossy-out.json" --backup-root "$T/bk"
+(( rc == 0 )) || fail "lossy conversion exited $rc: $err"
+assert_eq "dropped: agent.old
+dropped: agents.reviewer.request.body.temperature
+dropped: command.c1
+dropped: disabled_providers.ghost
+dropped: mcp.srv
+dropped: provider.gw.blacklist
+dropped: provider.legacy
+dropped: server" "$(grep '^dropped: ' <<<"$out" | sort)"
 
 # 4. A V2 input is refused with 2, and nothing is written.
 run v2in normal --input "$T/out.json" --output "$T/v2-out.json" --backup-root "$T/bk"

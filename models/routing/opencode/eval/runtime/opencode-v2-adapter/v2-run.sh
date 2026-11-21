@@ -26,20 +26,30 @@ _V2_TMPDIRS=()
 # Process-group leaders (started with setsid) to stop before the temp dirs go.
 _V2_PIDS=()
 
-# v2_stop_pid PID: TERM the process group led by PID (and PID), wait up to 5 s,
-# then KILL; reaps it when it is this shell's child.
+# v2_stop_pid PID: TERM the process group led by PID (and PID), wait up to 5 s
+# for the whole group to be gone, then KILL what is left of it; reaps PID when
+# it is this shell's child. The group, not the leader, decides: a leader that
+# exits first must not leave its children running.
 v2_stop_pid() {
   local pid=$1 state
   [[ -n "$pid" ]] || return 0
-  kill -s TERM -- "-$pid" 2>/dev/null || kill -s TERM "$pid" 2>/dev/null || true
+  kill -s TERM -- "-$pid" 2>/dev/null || true
+  kill -s TERM "$pid" 2>/dev/null || true
   for _ in $(seq 1 50); do
-    kill -0 "$pid" 2>/dev/null || break
     state=$(ps -o stat= -p "$pid" 2>/dev/null || true)
-    [[ "$state" != Z* ]] || break
+    if [[ -z "$state" || "$state" == Z* ]]; then
+      # The leader is gone or a zombie: reap it (a zombie still counts as a
+      # group member), then the group alone decides.
+      wait "$pid" 2>/dev/null || true
+      kill -0 -- "-$pid" 2>/dev/null || break
+    fi
     sleep 0.1
   done
+  if kill -0 -- "-$pid" 2>/dev/null; then
+    kill -s KILL -- "-$pid" 2>/dev/null || true
+  fi
   if kill -0 "$pid" 2>/dev/null; then
-    kill -s KILL -- "-$pid" 2>/dev/null || kill -s KILL "$pid" 2>/dev/null || true
+    kill -s KILL "$pid" 2>/dev/null || true
   fi
   wait "$pid" 2>/dev/null || true
   # Forget it, so a reused pid is never signalled later.

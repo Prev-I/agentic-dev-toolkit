@@ -5,6 +5,7 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 bundle="$root/../v2"
 v1root="$root/.."
 helper="$root/runtime/opencode-v2-adapter/v2config.py"
+# shellcheck source=./test-lib.sh disable=SC1091
 source "$root/tests/test-lib.sh"
 
 assert_file "$helper"

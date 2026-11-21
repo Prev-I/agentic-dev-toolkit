@@ -2,7 +2,9 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck source=./test-lib.sh disable=SC1091
 source "$root/tests/test-lib.sh"
+# shellcheck source=../runtime/opencode-v2-adapter/verify-effective-routing.sh disable=SC1091
 source "$root/runtime/opencode-v2-adapter/verify-effective-routing.sh"
 
 # verify_effective_routing_v2 against fake-api.py serving fixtures-v2/api.
@@ -418,6 +420,7 @@ rc=0
   trap 'echo "$?" >"$marker"' EXIT
   # shellcheck disable=SC2030,SC2031
   export TMPDIR="$tmpbase"
+  # shellcheck disable=SC2329 # replaces the verifier's collector; the verifier calls it
   _vr_collect() { exit 3; }
   verify_effective_routing_v2 --server "http://127.0.0.1:1" --credentials "$workdir/ok.env" \
     --targets "$targets" --outdir "$workdir/fatal" --neutral-cwd "$workdir/neutral"
@@ -547,5 +550,20 @@ inner_signal() {
 }
 inner_signal TERM 143
 inner_signal KILL 137
+
+# 16. run as a script (not sourced): the function runs, the result file is
+# written, the status is the exit code; no arguments is a usage error (2).
+fx=$(fresh direct)
+serve "$fx"
+rc=0
+bash "$root/runtime/opencode-v2-adapter/verify-effective-routing.sh" --server "$base" \
+  --credentials "$workdir/ok.env" --targets "$targets" \
+  --outdir "$workdir/direct" --neutral-cwd "$workdir/neutral" >"$workdir/direct.log" 2>&1 || rc=$?
+assert_eq 0 "$rc"
+[[ -s "$workdir/direct/effective-routing.json" ]] || fail "direct run wrote no effective-routing.json"
+rc=0
+bash "$root/runtime/opencode-v2-adapter/verify-effective-routing.sh" >"$workdir/direct-none.log" 2>&1 || rc=$?
+assert_eq 2 "$rc"
+stop_server
 
 printf 'PASS: v2-effective-routing-test\n'

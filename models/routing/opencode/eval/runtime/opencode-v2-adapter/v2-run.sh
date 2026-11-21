@@ -20,6 +20,7 @@
 # verifier's test).
 set -Eeuo pipefail
 
+# shellcheck source=./v2-http.sh disable=SC1091
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/v2-http.sh"
 
 _V2_TMPDIRS=()
@@ -91,6 +92,7 @@ v2_run_isolated() {
       exit 0' _vr_watchdog "$parent" "$inner" >/dev/null 2>&1 </dev/null &
     watchdog=$!
     work=$(mktemp -d)
+    # shellcheck disable=SC2030 # registered inside the subshell on purpose; its EXIT trap removes it
     _V2_TMPDIRS+=("$work")
     "$1" "$work" "${@:2}"
   ) || rc=$?
@@ -108,6 +110,7 @@ V2_PICK_ASSISTANT='[(.data // [])[] | select(type == "object")
 v2_call_role() {
   local url=$1 role=$2 work=$3 probe token out rc=0 sid='' body='' have=0
   probe=$(mktemp -d)
+  # shellcheck disable=SC2031 # the same array, in the function that cleans it up
   _V2_TMPDIRS+=("$probe")
   token="probe-$RANDOM-$RANDOM-$$"
   printf '%s\n' "$token" >"$probe/probe.txt"

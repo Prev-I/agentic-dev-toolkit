@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 v2_probe_root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-# shellcheck source=./v2-run.sh
+# shellcheck source=./v2-run.sh disable=SC1091
 source "$v2_probe_root/v2-run.sh"
 
 # Breakglass probe (OpenCode 2): the emergency agent must resolve as a primary
@@ -236,3 +236,5 @@ for p in problems:
 sys.exit(1 if problems else 0)
 PY
 }
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then probe_breakglass_v2 "$@"; fi

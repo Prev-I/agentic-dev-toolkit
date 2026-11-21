@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck source=./test-lib.sh disable=SC1091
 source "$root/tests/test-lib.sh"
 
 # convert_v1_config against a fake `opencode serve` (fixtures-v2/fake-opencode-serve.sh).

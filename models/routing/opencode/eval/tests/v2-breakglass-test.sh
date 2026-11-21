@@ -2,7 +2,9 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+# shellcheck source=./test-lib.sh disable=SC1091
 source "$root/tests/test-lib.sh"
+# shellcheck source=../runtime/opencode-v2-adapter/probe-breakglass.sh disable=SC1091
 source "$root/runtime/opencode-v2-adapter/probe-breakglass.sh"
 
 # probe_breakglass_v2 against fake-api.py serving fixtures-v2/api.
@@ -292,5 +294,20 @@ stop_server
 # 15. no bytecode is written next to the scripts.
 [[ -z "$(find "$root/runtime/opencode-v2-adapter" -name __pycache__)" ]] \
   || fail "a __pycache__ appeared in the adapter directory"
+
+# 16. run as a script (not sourced): the function runs, the result file is
+# written, the status is the exit code; no arguments is a usage error (2).
+fx=$(fresh direct)
+serve "$fx"
+rc=0
+bash "$root/runtime/opencode-v2-adapter/probe-breakglass.sh" --server "$base" \
+  --credentials "$workdir/ok.env" --targets "$targets" \
+  --outdir "$workdir/direct" --cwd "$workdir/cwd" >"$workdir/direct.log" 2>&1 || rc=$?
+assert_eq 0 "$rc"
+[[ -s "$workdir/direct/breakglass.json" ]] || fail "direct run wrote no breakglass.json"
+rc=0
+bash "$root/runtime/opencode-v2-adapter/probe-breakglass.sh" >"$workdir/direct-none.log" 2>&1 || rc=$?
+assert_eq 2 "$rc"
+stop_server
 
 printf 'PASS: v2-breakglass-test\n'

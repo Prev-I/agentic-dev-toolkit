@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 v2_verify_root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-# shellcheck source=./v2-run.sh
+# shellcheck source=./v2-run.sh disable=SC1091
 source "$v2_verify_root/v2-run.sh"
 
 # Effective-routing verifier (OpenCode 2): ask the RUNNING server what each role
@@ -276,3 +276,5 @@ print(f"overall: {overall}")
 sys.exit(1 if overall == "MISMATCH" else 0)
 PY
 }
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then verify_effective_routing_v2 "$@"; fi

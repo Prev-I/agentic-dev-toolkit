@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-# shellcheck source=models/routing/opencode/eval/tests/test-lib.sh
+# shellcheck source=models/routing/opencode/eval/tests/test-lib.sh disable=SC1091
 source "$root/tests/test-lib.sh"
 adapter="$root/runtime/opencode-v2-adapter"
 helper="$adapter/v2config.py"

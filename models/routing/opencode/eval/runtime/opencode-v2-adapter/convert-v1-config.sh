@@ -50,7 +50,7 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 v2_convert_root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-# shellcheck source=./v2-run.sh
+# shellcheck source=./v2-run.sh disable=SC1091
 source "$v2_convert_root/v2-run.sh"
 
 _cv_usage() {

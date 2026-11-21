@@ -74,6 +74,10 @@ verify_effective_routing_v2() {
   mkdir -p "$outdir"
   rm -f "${outdir:?}/effective-routing.json"
   [[ -f "$targets" ]] || { printf 'verify_effective_routing_v2: no such targets file: %s\n' "$targets" >&2; return 2; }
+  jq -e 'true' "$targets" >/dev/null 2>&1 || {
+    printf 'verify_effective_routing_v2: the targets file is not valid JSON: %s\n' "$targets" >&2
+    return 2
+  }
   jq -e '(.agents | type) == "object" and (.agents | length) > 0' "$targets" >/dev/null 2>&1 || {
     printf 'verify_effective_routing_v2: the targets manifest declares no agents (a non-empty "agents" map is required): %s\n' "$targets" >&2
     return 2

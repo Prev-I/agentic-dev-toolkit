@@ -301,4 +301,30 @@ set -e
 [[ $rc == 2 ]] || fail "a dangling symlink beside a config must exit 2, got $rc"
 grep -q 'is a symlink' "$workdir/entry.txt" || fail "dangling symlink message missing"
 
+# A report from an earlier run must not survive an entry-point run that is
+# refused before the checker sees --json (symlinked config -> exit 2).
+setup_aligned
+printf '{"status":"ALIGNED"}\n' >"$workdir/stale.json"
+ln -s "$workdir/nowhere.json" "$live/opencode.json"
+set +e
+XDG_CONFIG_HOME="$workdir/xdg" bash "$root/check-alignment.sh" --json "$workdir/stale.json" >"$workdir/entry.txt" 2>&1
+rc=$?
+set -e
+[[ $rc == 2 ]] || fail "a symlinked config with --json must exit 2, got $rc"
+[[ ! -e "$workdir/stale.json" ]] || fail "a stale --json report survived a refused entry-point run"
+
+# A value that is not an option/value pair for the adapter must survive: here
+# `--json` is the value of `--profile`, so real.json is not a report path.
+printf '{"keep":true}\n' >"$workdir/real.json"
+set +e
+XDG_CONFIG_HOME="$workdir/xdg" bash "$root/check-alignment.sh" --profile --json "$workdir/real.json" >"$workdir/entry.txt" 2>&1
+set -e
+[[ -e "$workdir/real.json" ]] || fail "the wrapper removed a file that was not a --json value"
+
+# The JSON report lists the breakglass decision among the routing-owned keys.
+setup_aligned
+run_check || fail "aligned fixture must pass for the report check"
+jq -e '.routing_owned_keys | index("permissions[breakglass]")' "$workdir/report.json" >/dev/null \
+  || fail "routing_owned_keys must list permissions[breakglass]"
+
 printf 'PASS: V2 alignment check (drift vs stale, user-owned keys never flagged)\n'

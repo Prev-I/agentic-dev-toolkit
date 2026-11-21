@@ -21,6 +21,13 @@ source "$root/runtime/opencode-v2-adapter/check-alignment.sh"
 # shellcheck source=models/routing/opencode/eval/runtime/opencode-v1-adapter/select-activation-target.sh disable=SC1091 # path built from the script's own directory at run time
 source "$root/runtime/opencode-v1-adapter/select-activation-target.sh"
 
+# Never leave an earlier report behind: the early exits below run before
+# check_alignment_v2 sees --json, so a failed run must not read as ALIGNED.
+args=("$@")
+for ((i = 0; i + 1 < ${#args[@]}; i += 2)); do
+  [[ "${args[i]}" != --json ]] || rm -f -- "${args[i+1]}"
+done
+
 # The installed configuration lives wherever OpenCode reads its user-global
 # config. Honour XDG_CONFIG_HOME so this works on a non-default setup.
 config_home=${XDG_CONFIG_HOME:-$HOME/.config}

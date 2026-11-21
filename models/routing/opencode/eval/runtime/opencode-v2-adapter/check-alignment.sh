@@ -343,7 +343,8 @@ document = {
     "status": status,
     "profile": profile_path,
     "installed_configuration": live_config,
-    "routing_owned_keys": ["model", "permissions[action=subagent]", "instructions"]
+    "routing_owned_keys": ["model", "permissions[action=subagent]", "permissions[breakglass]",
+                           "instructions"]
                           + [f"agents.{r}" for r in roles],
     "auto_repair": False,
     "drift": drift,

@@ -205,6 +205,11 @@ def header_lines(profile_id, source_hash, commit, activated_at, stamp, undeclare
     return lines
 
 
+# The header convert-v1-config.sh writes; its test pins the first-line prefix.
+CONVERTER_MARK_PREFIX = "// Converted from the OpenCode 1.x config "
+CONVERTER_PREFIXES = ("// source sha256: ", "// converted at: ", "// OpenCode version: ")
+CONVERTER_LAST_LINE = "// converted with OpenCode 2's own translation (GET /api/config, document layer info)"
+
 FIXED_HEADER = {line for line in header_lines("x", "x", "x", "x", "x", ["x"])
                 if not line.startswith(VARIABLE_PREFIXES)}
 
@@ -212,6 +217,15 @@ FIXED_HEADER = {line for line in header_lines("x", "x", "x", "x", "x", ["x"])
 def without_generated_header(raw):
     """Drop a leading header this tool wrote, so only user comments remain."""
     lines = [line.rstrip("\r") for line in raw.split("\n")]  # tolerate CRLF
+    if lines[0].startswith(CONVERTER_MARK_PREFIX):
+        # convert-v1-config.sh writes this header for .jsonc output; recognised
+        # only when contiguous at the top of the file.
+        # Exactly the five lines the converter emits, in its order.
+        if (len(lines) >= 5
+                and all(lines[i + 1].startswith(CONVERTER_PREFIXES[i]) for i in range(3))
+                and lines[4] == CONVERTER_LAST_LINE):
+            return "\n".join(lines[5:])
+        return raw
     if lines[0] != HEADER_MARK:
         return raw
     index = 1

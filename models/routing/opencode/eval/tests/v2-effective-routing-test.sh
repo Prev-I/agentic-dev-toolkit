@@ -418,6 +418,27 @@ for agents_json in '{}' 'null'; do
   [[ ! -e "$workdir/nocreds/effective-routing.json" ]] || fail "stale file survived an empty agents map"
 done
 
+# a targets file that is not JSON gets its own message, still exit 2.
+printf 'not json {\n' >"$workdir/badjson.json"
+printf '{"overall":"PASS"}\n' >"$workdir/nocreds/effective-routing.json"
+rc=0
+verify_effective_routing_v2 --server "http://127.0.0.1:1" --credentials "$workdir/ok.env" \
+  --targets "$workdir/badjson.json" --outdir "$workdir/nocreds" --neutral-cwd "$workdir/neutral" \
+  >"$workdir/badjson.log" 2>&1 || rc=$?
+assert_eq 2 "$rc"
+assert_contains "$(<"$workdir/badjson.log")" "is not valid JSON"
+[[ "$(<"$workdir/badjson.log")" != *"declares no agents"* ]] || fail "invalid JSON reported as declaring no agents"
+[[ ! -e "$workdir/nocreds/effective-routing.json" ]] || fail "stale file survived an invalid targets file"
+
+# --server defaults to http://127.0.0.1:4096; checked without any network by
+# replacing the isolated runner with one that prints its arguments.
+default_server=$(
+  v2_run_isolated() { shift; printf '%s\n' "$1"; }
+  verify_effective_routing_v2 --credentials "$workdir/ok.env" --targets "$targets" \
+    --outdir "$workdir/default-server" --neutral-cwd "$workdir/neutral"
+)
+assert_eq "http://127.0.0.1:4096" "$default_server"
+
 # 16. an unrelated later deny does not count: the last entry that can decide
 # subagent breakglass is still the allow.
 fx=$(fresh bgother)

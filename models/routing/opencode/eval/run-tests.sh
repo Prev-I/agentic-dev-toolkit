@@ -18,7 +18,7 @@ for test_file in "${EVAL_TEST_DIR:-$root/tests}"/*-test.sh; do
   done
   if [[ -n "$missing" ]]; then
     printf 'SKIP: missing suite tools:%s\n' "$missing" >"$log"; status=77
-  elif (cd "$repo" && bash "$test_file") >"$log" 2>&1; then status=0; else status=$?; fi
+  elif (cd "$repo" && bash "$test_file") </dev/null >"$log" 2>&1; then status=0; else status=$?; fi
   cat "$log"
   if { (( status == 77 || status == 0 )) && grep -q '^SKIP:' "$log"; }; then
     skipped=$((skipped+1)); not_passed+=("SKIP $(basename "$test_file")")

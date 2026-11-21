@@ -321,4 +321,14 @@ bash "$root/runtime/opencode-v2-adapter/probe-breakglass.sh" >"$workdir/direct-n
 assert_eq 2 "$rc"
 stop_server
 
+# --server defaults to http://127.0.0.1:4096; checked without any network by
+# replacing the isolated runner with one that prints its arguments.
+default_server=$(
+  # shellcheck disable=SC2329 # called by probe_breakglass_v2
+  v2_run_isolated() { shift; printf '%s\n' "$1"; }
+  probe_breakglass_v2 --credentials "$workdir/ok.env" --targets "$targets" \
+    --outdir "$workdir/default-server" --cwd "$workdir/cwd"
+)
+assert_eq "http://127.0.0.1:4096" "$default_server"
+
 printf 'PASS: v2-breakglass-test\n'

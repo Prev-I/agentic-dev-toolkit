@@ -122,8 +122,9 @@ prompts, agent, scorer and the paths it freezes. A candidate is
 `KEY=model:PROVIDER/MODEL#VARIANT`, or `KEY=agent:NAME` for an agent of a V2
 profile passed with `--profile`.
 
-**Three phases, and an approval between the first two.** Nothing is spent
-before the operator approves a frozen protocol.
+**Three runner phases (`prepare`, `dispatch`, `score`), with one operator step,
+the approval, between the first two.** Nothing is spent before the operator
+approves a frozen protocol.
 
 1. **`prepare`** writes the protocol, a catalog snapshot (`GET /api/model` from
    one sandboxed server, with no model call) and a freeze manifest, then prints
@@ -133,13 +134,19 @@ before the operator approves a frozen protocol.
 2. **The operator reads the protocol and writes `approval.json`** into the
    record, exactly as printed. It names the ceiling and the freeze manifest's
    digest, so approving one protocol cannot release another.
-3. **`dispatch`** refuses (exit 3) an approval that differs, or a provider
-   fragment, credentials file or profile whose digest is not the one frozen.
-   It verifies the freeze manifest before every call, probes each candidate,
+3. **`dispatch`** refuses (exit 3) an approval that differs, a provider
+   fragment, credentials file or profile whose digest is not the one frozen,
+   or an OpenCode runtime other than the one `prepare` measured (both read it
+   from `GET /api/info` of one sandboxed server, with no model call). It
+   verifies the freeze manifest before every call, probes each candidate,
    then runs every workload for every repetition, alternating the candidate
    order. Exit `0` when the screening is `COMPLETE`, `1` when `INCOMPLETE`.
-4. **`score`** runs the role's normaliser and scorer and writes a `result.md`
-   skeleton. Adjudication and the conclusion stay with the operator: `result.md`
+4. **`score`** checks the freeze manifest and that it is the one `approval.json`
+   approved, runs the role's normaliser and scorer and writes a `result.md`
+   skeleton. Run it from a checkout at the protocol's `toolkit_commit`: the
+   adapter and the `--opencode-dir` files are frozen in place, so a later edit
+   to the adapter or to `v2/.opencode` makes an older record fail the freeze.
+   Adjudication and the conclusion stay with the operator: `result.md`
    says `Operator: not yet adjudicated`, and the runner never writes
    `adjudication.json`.
 
@@ -147,12 +154,16 @@ before the operator approves a frozen protocol.
 adapter=models/routing/opencode/eval/runtime/opencode-v2-adapter
 bash "$adapter/run-screening.sh" prepare --role reviewer --out ~/screenings/v2-reviewer-a-b \
   --candidate a=model:PROVIDER/MODEL_A#high --candidate b=model:PROVIDER/MODEL_B#high \
-  --runs 3 --budget 400 --providers ~/screening/providers.json --credentials ~/screening/auth.json
+  --runs 3 --budget 400 --providers ~/screenings/inputs/providers.json \
+  --credentials ~/screenings/inputs/auth.json
 # review protocol.json, then write the printed object to ~/screenings/v2-reviewer-a-b/approval.json
 bash "$adapter/run-screening.sh" dispatch --out ~/screenings/v2-reviewer-a-b \
-  --providers ~/screening/providers.json --credentials ~/screening/auth.json
+  --providers ~/screenings/inputs/providers.json --credentials ~/screenings/inputs/auth.json
 bash "$adapter/run-screening.sh" score --out ~/screenings/v2-reviewer-a-b
 ```
+
+The inputs sit beside the records, never inside one: a record keeps only their
+digests, so it can be shared without them.
 
 **What the operator supplies, and why.** Providers and credentials are
 deployment-specific, so the toolkit ships neither:
@@ -185,6 +196,28 @@ account's `~/.opencode` holding no config, agents, commands or plugins. The
 layer list is kept in each `dispatch.json`, with each layer's content reduced to
 a digest.
 
+**What the sandbox does not isolate.** `HOME` and `XDG_*` isolate OpenCode's
+configuration, not the filesystem. The model's tools (the build role allows
+every tool, under `--auto`) run with the operator's uid, so they can read
+anything the operator can, including the sandbox's own `auth.json` and
+database next to the call's working directory. As a backstop, after every call
+(capability probes included) the runner searches the call's output, and for
+the build role its workspace copy and `work-product.patch`, for every string of
+12 or more characters in the credentials file and the provider fragment; each
+occurrence is replaced with `[REDACTED]` and the screening halts
+`CREDENTIAL_EXPOSED`. That limits what reaches the record, not what a tool can
+read or send while it runs. `score` for the build role also runs model-written
+code on the host, outside any sandbox: the candidate's `tests/install.sh` and
+installer checks, as the October verifier did. Run screenings on a machine and
+account where both are acceptable.
+
+**After an abnormal end.** A `SIGKILL`, an out-of-memory kill or a shutdown
+skips the runner's cleanup, so `.work/` can stay in the record with sandbox
+credentials in it (the runner creates files with umask `077`). The next
+`dispatch` or `score` on that record removes it before anything else, stopping
+only a recorded server that is still running in its sandbox, and says so in one
+line.
+
 **The record.** `--out` may be anywhere outside those directories; its name
 must start with `v2-`.
 
@@ -201,7 +234,7 @@ capability/KEY/        the capability probe: probe.json and dispatch/
 runs/NN-WORKLOAD-rREP-KEY/   dispatch/, and reported.json or extract-error.txt
                        (reviewer) or work-product.patch (build)
 findings-KEY-rREP.json, scores/KEY-rREP.json   reviewer normalisation and scores
-post-run-diagnostic/   the build scorer's output
+post-run-diagnostic/, scores/build-quality.json   the build scorer's output
 result.md              the skeleton the operator completes
 ```
 
@@ -209,12 +242,16 @@ result.md              the skeleton the operator completes
 
 - A failed capability probe, or a run classified `CAPABILITY_REGRESSION`, stops
   that candidate; the others continue.
-- A `BUDGET_STOP`, a refused admission, or a call whose cost is unknown (it
-  started a step and reported no cost) halts the whole screening: the record is
-  `INCOMPLETE` and `dispatch` exits `1`. Every other failed run is recorded and
+- A `BUDGET_STOP`, a refused admission, a call whose cost is unknown (it
+  started a step and reported no cost, `UNKNOWN_COST`), a call cut off
+  mid-step (a step started and never finished, `INCOMPLETE_COST`; its finished
+  steps are still ledgered), or an exposed credential (`CREDENTIAL_EXPOSED`)
+  halts the whole screening: the record is `INCOMPLETE` and `dispatch` exits
+  `1`. `result.md` then marks the total spend a lower bound. Every other failed run is recorded and
   its candidate continues. A probe classified `INVALID_ENVIRONMENT`, no live
   candidate after the probes, or an unexpected error also halts it.
-- `score` verifies the freeze manifest first and writes nothing on a mismatch.
+- `score` verifies the freeze manifest and the approval's digest of it first,
+  and writes nothing on a mismatch.
 - `--budget` is split equally into one account per candidate,
   `candidate_KEY`. Each call is admitted only if the account can still afford
   `cap / (runs × workloads + 1)` (the `+ 1` is the probe), and a running call is

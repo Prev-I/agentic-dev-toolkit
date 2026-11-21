@@ -27,12 +27,14 @@
 #      BACKUP_ROOT/convert-<stamp>/ with a SHA256SUMS, and the staged file is
 #      moved onto the output atomically, keeping the replaced file's mode.
 #
-# `dropped: <key path>` is printed for each removed temperature, each V1
-# `provider.<p>.blacklist`, `server`, any other V1 top-level key whose content
-# has no counterpart in the result, each entry of `agent`, `mode`, `provider`,
-# `command` or `mcp` missing from its target map (`agents`, `providers`,
-# `commands`, `mcp.servers`), and each provider listed in `disabled_providers`
-# or `enabled_providers` that no `policies` entry names as its resource.
+# `dropped: <key path>` is printed for each removed temperature; each V1
+# `provider.<p>.blacklist` and `provider.<p>.whitelist` (2.3.0 drops both);
+# `server`; any other V1 top-level key whose content has no counterpart in
+# the result; each entry of `agent`, `mode`, `provider`, `command` or `mcp`
+# missing from its target map (`agents`, `providers`, `commands`,
+# `mcp.servers`); and each provider listed in `disabled_providers` (or
+# `enabled_providers`) without a `provider.use` policy naming it, as the
+# resource or within a list-valued resource, with effect deny (or allow).
 #
 # Isolation: HOME and XDG_* alone do not isolate a 2.x server (it also loads
 # the account's ~/.opencode and its working directory's config). Each server
@@ -155,9 +157,13 @@ if cmd == "finalize":
     if isinstance(providers, dict):
         out_providers = result.get("providers") or {}
         for name, entry in providers.items():
-            if isinstance(entry, dict) and "blacklist" in entry and \
-                    "blacklist" not in (out_providers.get(name) or {}):
-                dropped.append("provider.%s.blacklist" % name)
+            kept = out_providers.get(name) if isinstance(out_providers, dict) else None
+            kept = kept if isinstance(kept, dict) else {}
+            # 2.3.0 drops both model filters (measured: a filter-only built-in
+            # provider becomes `{}`); a lost whitelist widens what may be used.
+            for filt in ("blacklist", "whitelist"):
+                if isinstance(entry, dict) and filt in entry and filt not in kept:
+                    dropped.append("provider.%s.%s" % (name, filt))
     # Where each V1 top-level key's content lands in V2.
     renamed = {"agent": "agents", "mode": "agents", "permission": "permissions",
                "provider": "providers", "disabled_providers": "policies",
@@ -183,17 +189,26 @@ if cmd == "finalize":
         for name in source:
             if name not in target:
                 dropped.append("%s.%s" % (key, name))
-    # disabled_providers / enabled_providers: each listed provider must appear
-    # as a `policies` resource.
-    policies = result.get("policies")
-    resources = set()
-    if isinstance(policies, list):
-        resources = {p.get("resource") for p in policies if isinstance(p, dict)}
-    for key in ("disabled_providers", "enabled_providers"):
-        listed = v1.get(key)
-        if isinstance(listed, list):
-            for name in listed:
-                if name not in resources:
+    # disabled_providers / enabled_providers become `provider.use` policies
+    # (measured on 2.3.0: a deny per disabled provider; for enabled ones a
+    # `deny *` then an allow each). Each listed provider needs a policy with
+    # its own name as resource and the matching effect.
+    wanted = {"disabled_providers": "deny", "enabled_providers": "allow"}
+    if any(isinstance(v1.get(k), list) for k in wanted):
+        granted = set()
+        policies = result.get("policies")
+        for policy in policies if isinstance(policies, list) else []:
+            if not isinstance(policy, dict) or policy.get("action") != "provider.use":
+                continue
+            resource = policy.get("resource")
+            names = resource if isinstance(resource, list) else [resource]
+            for name in names:
+                if isinstance(name, str):
+                    granted.add((name, policy.get("effect")))
+        for key, effect in wanted.items():
+            listed = v1.get(key)
+            for name in listed if isinstance(listed, list) else []:
+                if not isinstance(name, str) or (name, effect) not in granted:
                     dropped.append("%s.%s" % (key, name))
     left = [k for k in v2config.V1_KEYS if k in result]
     mcp = result.get("mcp")

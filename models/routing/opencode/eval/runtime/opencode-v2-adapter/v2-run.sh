@@ -37,9 +37,10 @@ v2_stop_pid() {
   kill -s TERM "$pid" 2>/dev/null || true
   for _ in $(seq 1 50); do
     state=$(ps -o stat= -p "$pid" 2>/dev/null || true)
-    if [[ -z "$state" || "$state" == Z* ]]; then
-      # The leader is gone or a zombie: reap it (a zombie still counts as a
-      # group member), then the group alone decides.
+    if ! kill -0 "$pid" 2>/dev/null || [[ "$state" == Z* ]]; then
+      # The leader is gone or a zombie (never just "ps printed nothing", which
+      # would make wait block on a live child): reap it, since a zombie still
+      # counts as a group member, then the group alone decides.
       wait "$pid" 2>/dev/null || true
       kill -0 -- "-$pid" 2>/dev/null || break
     fi

@@ -24,9 +24,12 @@ sleep 1
 
 # A wrapper per mode: records which variables the converter passed, then sets
 # the fake's own and runs it.
-for mode in normal differ leak nodoc lossy; do
-  info="$T/canned-info.json"
-  [[ "$mode" != lossy ]] || info="$T/canned-lossy.json"
+for mode in normal differ leak nodoc lossy real; do
+  case $mode in
+    lossy) info="$T/canned-lossy.json" ;;
+    real) info="$fixtures/convert/real-2.3.0-info.json" ;;
+    *) info="$T/canned-info.json" ;;
+  esac
   cat >"$T/bin/opencode-$mode" <<EOF
 #!/usr/bin/env bash
 FAKE_SERVE_ENV_NAMES=\$(env | cut -d= -f1 | sort | paste -sd, -)
@@ -179,12 +182,20 @@ v1["mode"] = {"planner": {"model": "gw/m1"}}
 v1["command"] = {"c1": {"template": "x"}}
 v1["mcp"] = {"srv": {"type": "local", "command": ["true"]}}
 v1["disabled_providers"] = ["legacy", "ghost"]
+v1["enabled_providers"] = ["gw", "nogo"]
 json.dump(v1, open(sys.argv[4], "w"))
 info = json.load(open(sys.argv[3]))
 info["agents"]["planner"] = {"model": {"providerID": "gw", "model": "m1"}}
 info["commands"] = {}
 info["mcp"] = {"servers": {}}
-info["policies"] = [{"action": "provider.use", "resource": "legacy", "effect": "deny"}]
+# An object-valued and a list-valued resource must not crash the check; the
+# list counts for each name in it. `nogo` has the wrong effect.
+info["policies"] = [
+    {"action": "provider.use", "resource": {"odd": True}, "effect": "deny"},
+    {"action": "provider.use", "resource": ["legacy", "other"], "effect": "deny"},
+    {"action": "provider.use", "resource": "gw", "effect": "allow"},
+    {"action": "provider.use", "resource": "nogo", "effect": "deny"},
+]
 json.dump(info, open(sys.argv[5], "w"))
 PY
 run lossy lossy --input "$T/lossy.json" --output "$T/lossy-out.json" --backup-root "$T/bk"
@@ -193,10 +204,28 @@ assert_eq "dropped: agent.old
 dropped: agents.reviewer.request.body.temperature
 dropped: command.c1
 dropped: disabled_providers.ghost
+dropped: enabled_providers.nogo
 dropped: mcp.srv
 dropped: provider.gw.blacklist
 dropped: provider.legacy
 dropped: server" "$(grep '^dropped: ' <<<"$out" | sort)"
+
+# 3c. The real 2.3.0 translation of one entry of each kind (fixtures-v2/convert,
+# observed on 2026-11-21): only genuine losses are reported.
+run real real --input "$fixtures/convert/v1-all-kinds.jsonc" --output "$T/real-out.json" --backup-root "$T/bk"
+(( rc == 0 )) || fail "real-shape conversion exited $rc: $err"
+assert_eq "dropped: agents.writer.request.body.temperature
+dropped: provider.gw.blacklist
+dropped: provider.openai.blacklist
+dropped: provider.openai.whitelist
+dropped: server" "$(grep '^dropped: ' <<<"$out" | sort)"
+python3 -B - "$fixtures/convert/real-2.3.0-info.json" "$T/real-out.json" <<'PY' \
+  || fail "real-shape output differs from the observed translation minus temperature"
+import json, sys
+want = json.load(open(sys.argv[1]))
+del want["agents"]["writer"]["request"]
+sys.exit(0 if json.load(open(sys.argv[2])) == want else 1)
+PY
 
 # 4. A V2 input is refused with 2, and nothing is written.
 run v2in normal --input "$T/out.json" --output "$T/v2-out.json" --backup-root "$T/bk"
@@ -250,6 +279,24 @@ POLL=2 run nodoc nodoc --input "$T/in.jsonc" --output "$T/nodoc.json" --backup-r
 assert_eq 1 "$rc"
 assert_contains "$err" "document"
 [[ ! -e "$T/nodoc.json" ]] || fail "output written although no document layer appeared"
+
+# 10b. v2_stop_pid stays bounded when `ps` reports nothing for a live leader
+# that ignores TERM: it must not `wait` on it, and the group is KILLed.
+rc=0
+(
+  # shellcheck source=SCRIPTDIR/../runtime/opencode-v2-adapter/v2-run.sh
+  source "$adapter/v2-run.sh"
+  # shellcheck disable=SC2329  # called by v2_stop_pid
+  ps() { return 1; }
+  setsid bash -c 'trap "" TERM; sleep 60' </dev/null >/dev/null 2>&1 &
+  leader=$!
+  sleep 0.3
+  start=$SECONDS
+  v2_stop_pid "$leader"
+  (( SECONDS - start < 10 )) || exit 3
+  ! kill -0 -- "-$leader" 2>/dev/null || exit 4
+) || rc=$?
+assert_eq 0 "$rc"
 
 # 11. Nothing survives, nothing leaks.
 sleep 0.5

@@ -35,6 +35,14 @@ rc=0; err=$(v2config layers "$work/layers-leak.json" "$sb" 2>&1) || rc=$?
 assert_eq 1 "$rc"
 assert_contains "$err" "  - /etc/x (directory) is outside the sandbox"
 
+# layers_pathless_hides_info: a layer's info (the effective config) never
+# reaches the problem text.
+printf '[{"type":"global","info":{"providers":{"fakep":{"key":"INFO-MARKER-77"}}}}]\n' >"$work/layers-nopath.json"
+rc=0; err=$(v2config layers "$work/layers-nopath.json" "$sb" 2>&1) || rc=$?
+assert_eq 1 "$rc"
+assert_contains "$err" "a layer with no path (type global, keys ['info', 'type'])"
+[[ "$err" != *INFO-MARKER-77* ]] || fail "a layer's info reached the problem text"
+
 # build_config_minimal
 printf '{"providers":{"fakep":{"settings":{"baseURL":"http://127.0.0.1:9/v1"}}}}\n' >"$work/fragment.json"
 printf '{"name":"screening-reviewer","row":{"mode":"primary"}}\n' >"$work/row.json"

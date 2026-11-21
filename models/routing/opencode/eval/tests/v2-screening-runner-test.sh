@@ -13,10 +13,13 @@ fixtures="$root/tests/fixtures-v2"
 work=$(mktemp -d)
 work=$(cd "$work" && pwd -P)
 runner_pid=''
-# Every pid a fake logged, and a runner left running; stopped by pid only.
+extra_pids=()
+# Every pid a fake logged, a runner left running, and the test's own stand-ins;
+# stopped by pid only.
 cleanup() {
   local p
   [[ -z "$runner_pid" ]] || kill -s KILL "$runner_pid" 2>/dev/null || true
+  for p in "${extra_pids[@]}"; do kill -s KILL "$p" 2>/dev/null || true; done
   for p in $(sed -n 's/^\(serve\|run\) pid=\([0-9]*\) .*/\2/p' "$work/state/log" 2>/dev/null || true); do
     kill -s KILL "$p" 2>/dev/null || true
   done
@@ -76,6 +79,17 @@ dispatch() {
 
 log_count() {
   grep -c "^$1 pid=" "$state/log" 2>/dev/null || true
+}
+
+# gone PID: PID (a child of this shell) has exited, within 5 s.
+gone() {
+  local state
+  for _ in $(seq 1 50); do
+    state=$(ps -o stat= -p "$1" 2>/dev/null || true)
+    [[ -n "$state" && "$state" != Z* ]] || return 0
+    sleep 0.1
+  done
+  return 1
 }
 
 no_secret_in() {
@@ -150,6 +164,16 @@ for h in Protocol Candidates Spend Capability Scores Adjudication; do
   grep -q "^## $h" "$rec/result.md" || fail "result.md has no $h heading"
 done
 [[ ! -e "$rec/adjudication.json" ]] || fail "score wrote adjudication.json"
+# result_names_missing_runs: each reviewer candidate-run shows its missing_runs.
+assert_contains "$(grep '^| a | 1 |' "$rec/result.md")" "missing_runs=0"
+# score_checks_the_approval: a rewritten manifest whose entries still verify.
+cp "$rec/freeze-manifest.json" "$work/manifest.keep"
+jq -c . "$work/manifest.keep" >"$rec/freeze-manifest.json"
+rc=0
+bash "$runner" score --out "$rec" >/dev/null 2>"$work/score.err" || rc=$?
+assert_eq 1 "$rc"
+assert_contains "$(<"$work/score.err")" "approval.json"
+cp "$work/manifest.keep" "$rec/freeze-manifest.json"
 assert_eq marker "$(ls -A "$work/home")"
 assert_eq '' "$(ls -A "$work/tmp")"
 [[ ! -e "$rec/.work" ]] || fail ".work survived"
@@ -160,12 +184,29 @@ done < <(grep -o '\(home\|cwd\|xdg_config\)=[^ ]*' "$state/log" | cut -d= -f2-)
 # no_credential_in_record (a full run)
 no_secret_in "$rec"
 
-# dispatch_twice_refused
+# stale_work_removed, then dispatch_twice_refused: an abnormal end left .work
+# behind; the refused dispatch removes it first, stopping only a recorded pid
+# that is a server of that sandbox.
+stale="$rec/.work/sandbox.A"
+mkdir -p "$stale/data/opencode" "$stale/work" "$rec/.work/sandbox.B"
+printf '{"fakep":{"type":"api","key":"tok-SECRET-123"}}\n' >"$stale/data/opencode/auth.json"
+(cd "$stale/work" && exec sleep 300) </dev/null >/dev/null 2>&1 &
+ours=$!
+sleep 300 >/dev/null 2>&1 &
+other=$!
+extra_pids+=("$ours" "$other")
+printf '%s\n' "$ours" >"$stale/pid"
+printf '%s\n' "$other" >"$rec/.work/sandbox.B/pid"
 before=$(find "$rec/runs" -type f -printf '%p %T@\n' | sort)
 rc=0
 dispatch "$rec" 2>/dev/null || rc=$?
 assert_eq 2 "$rc"
 assert_eq "$before" "$(find "$rec/runs" -type f -printf '%p %T@\n' | sort)"
+[[ ! -e "$rec/.work" ]] || fail "a refused dispatch left the stale .work"
+gone "$ours" || fail "the stale sandbox's server $ours survived"
+kill -0 "$other" 2>/dev/null || fail "a pid that is not a sandbox server ($other) was stopped"
+kill -s KILL "$other" 2>/dev/null || true
+wait "$ours" "$other" 2>/dev/null || true
 
 # approval_mismatch_refuses, then capability_failure_stops_candidate
 scenario '{"screening-reviewer@fakep/m2#high":{"probe":{"exit":1,"error_message":"Model not found"}},
@@ -185,8 +226,12 @@ assert_eq '' "$(find "$rec/runs" -mindepth 1 -maxdepth 1 -name '*-b')"
 assert_eq 6 "$(find "$rec/runs" -mindepth 1 -maxdepth 1 -name '*-a' | wc -l)"
 assert_eq '"STOPPED_CAPABILITY"' "$(jq -c .stopped.b "$rec/status.json")"
 no_secret_in "$rec"
-# The stopped candidate cannot be scored; score says so and goes on.
-bash "$runner" score --out "$rec" >/dev/null || fail "score failed"
+# The stopped candidate cannot be scored; score says so and goes on. A stale
+# .work is removed first.
+mkdir -p "$rec/.work/sandbox.C/data/opencode"
+bash "$runner" score --out "$rec" >/dev/null 2>"$work/score.err" || fail "score failed: $(<"$work/score.err")"
+[[ ! -e "$rec/.work" ]] || fail "score left the stale .work"
+assert_contains "$(<"$work/score.err")" "stale scratch area"
 assert_contains "$(<"$rec/result.md")" "NOT_SCORABLE"
 assert_file "$rec/scores/a-r1.json"
 
@@ -224,6 +269,56 @@ assert_eq '"INCOMPLETE"' "$(jq -c .state "$rec/status.json")"
 assert_eq '"UNKNOWN_COST"' "$(jq -c .halted.reason "$rec/status.json")"
 assert_eq 01-clean-r1-a "$(ls "$rec/runs")"
 
+# credential_exposed_halts: model text echoing the credential, in a run and in
+# a probe, is redacted in place and halts the screening.
+for where in run probe; do
+  if [[ "$where" == run ]]; then
+    scenario '{"screening-reviewer":{"text":"the key is tok-SECRET-123","cost_per_step":0.01,"probe":{"text":"CAPABILITY_OK"}}}'
+  else
+    scenario '{"screening-reviewer":{"text":"x","cost_per_step":0.01,"probe":{"text":"tok-SECRET-123"}}}'
+  fi
+  rec="$work/v2-exposed-$where"
+  prepare "$rec" reviewer 100 a=model:fakep/m1#high || fail "prepare failed"
+  approve "$rec"
+  rc=0
+  bash "$runner" dispatch --out "$rec" --providers "$work/fragment.json" --credentials "$work/creds.json" \
+    2>"$work/exposed.err" || rc=$?
+  assert_eq 1 "$rc"
+  assert_eq '"INCOMPLETE"' "$(jq -c .state "$rec/status.json")"
+  assert_eq '"CREDENTIAL_EXPOSED"' "$(jq -c .halted.reason "$rec/status.json")"
+  ! grep -q tok-SECRET-123 "$work/exposed.err" || fail "the scan printed the credential"
+  no_secret_in "$rec"
+  if [[ "$where" == run ]]; then
+    d="$rec/runs/01-clean-r1-a/dispatch"
+    assert_eq 01-clean-r1-a "$(ls "$rec/runs")"
+  else
+    d="$rec/capability/a/dispatch"
+    assert_eq '' "$(ls -A "$rec/runs")"
+  fi
+  assert_eq '"CREDENTIAL_EXPOSED"' "$(jq -c .classification "$d/dispatch.json")"
+  grep -q '\[REDACTED\]' "$d/raw.jsonl" || fail "no redaction marker in $d/raw.jsonl"
+done
+
+# incomplete_cost_halts: a call cut off mid-step ledgers its finished steps and
+# halts the screening; result.md marks the total a lower bound.
+scenario '{"screening-reviewer":{"steps":3,"partial":true,"exit":1,"error_message":"socket closed unexpectedly",
+  "cost_per_step":0.01,"probe":{"text":"CAPABILITY_OK","steps":1,"partial":false,"exit":0}}}'
+rec="$work/v2-partial"
+prepare "$rec" reviewer 100 a=model:fakep/m1#high || fail "prepare failed"
+approve "$rec"
+rc=0
+dispatch "$rec" 2>/dev/null || rc=$?
+assert_eq 1 "$rc"
+assert_eq '"INCOMPLETE_COST"' "$(jq -c .halted.reason "$rec/status.json")"
+assert_eq '"INCOMPLETE_COST"' "$(jq -c .stopped.a "$rec/status.json")"
+d="$rec/runs/01-clean-r1-a/dispatch/dispatch.json"
+assert_eq 1 "$(jq .unfinished_steps "$d")"
+assert_eq false "$(jq .cost_complete "$d")"
+assert_eq true "$(jq .cost_complete "$rec/capability/a/dispatch/dispatch.json")"
+assert_eq true "$(jq '([.entries[] | select(.label == "01-clean-r1-a") | .credits] | add) == 2' "$rec/ledger.json")"
+bash "$runner" score --out "$rec" >/dev/null 2>&1 || true
+assert_contains "$(<"$rec/result.md")" "(lower bound)"
+
 # all_candidates_stopped_halts: no live candidate after the probes.
 scenario '{"screening-reviewer":{"exit":1,"error_message":"Model not found"}}'
 rec="$work/v2-nolive"
@@ -248,6 +343,32 @@ assert_eq 1 "$rc"
 assert_eq '"INVALID_ENVIRONMENT"' "$(jq -c .classification "$rec/capability/a/probe.json")"
 assert_eq '"INVALID_ENVIRONMENT"' "$(jq -c .halted.reason "$rec/status.json")"
 [[ ! -e "$rec/capability/b" ]] || fail "the screening went on after an invalid environment"
+
+# runtime_version_change_refuses: the runtime is not the one prepare measured.
+scenario "$reviewer_ok"
+rec="$work/v2-version"
+prepare "$rec" reviewer 100 a=model:fakep/m1#high || fail "prepare failed"
+approve "$rec"
+printf '2.4.0-fake\n' >"$state/version"
+rc=0
+bash "$runner" dispatch --out "$rec" --providers "$work/fragment.json" --credentials "$work/creds.json" \
+  2>"$work/version.err" || rc=$?
+rm -f "$state/version"
+assert_eq 3 "$rc"
+assert_contains "$(<"$work/version.err")" "2.4.0-fake"
+[[ ! -e "$rec/runs" && ! -e "$rec/capability" && ! -e "$rec/status.json" && ! -e "$rec/.work" ]] \
+  || fail "a refused runtime wrote dispatch output"
+
+# record_path_with_ampersand: placeholders expand literally.
+scenario "$reviewer_ok"
+rec="$work/a&b/v2-amp"
+mkdir -p "$work/a&b"
+prepare "$rec" reviewer 100 a=model:fakep/m1#high || fail "prepare failed"
+approve "$rec"
+dispatch "$rec" || fail "dispatch failed"
+bash "$runner" score --out "$rec" >/dev/null 2>"$work/score.err" || fail "score failed: $(<"$work/score.err")"
+assert_file "$rec/findings-a-r1.json"
+assert_file "$rec/scores/a-r1.json"
 
 # freeze_mismatch_refuses
 scenario "$reviewer_ok"
@@ -283,15 +404,16 @@ scenario '{"screening-reviewer":{"text":"{\"findings\":[]}","cost_per_step":0.01
 rec="$work/v2-interrupt"
 prepare "$rec" reviewer 100 a=model:fakep/m1#high || fail "prepare failed"
 approve "$rec"
-serves=$(log_count serve)
+runs=$(log_count run)
 # The runner itself, not a function wrapping it, so that the TERM reaches it.
+# It is stopped during a call: the first server it starts is the runtime check's.
 bash "$runner" dispatch --out "$rec" --providers "$work/fragment.json" --credentials "$work/creds.json" 2>/dev/null &
 runner_pid=$!
 for _ in $(seq 1 200); do
-  (( $(log_count serve) > serves )) && break
+  (( $(log_count run) > runs )) && break
   sleep 0.1
 done
-(( $(log_count serve) > serves )) || fail "the dispatch never started a server"
+(( $(log_count run) > runs )) || fail "the dispatch never started a call"
 kill -s TERM "$runner_pid"
 rc=0
 wait "$runner_pid" || rc=$?
@@ -301,6 +423,7 @@ while IFS= read -r p; do
   ! kill -0 "$p" 2>/dev/null || fail "process $p survived the interrupt"
 done < <(sed -n 's/^\(serve\|run\) pid=\([0-9]*\) .*/\2/p' "$state/log")
 [[ ! -e "$rec/.work" ]] || fail ".work survived the interrupt"
+assert_eq '"INTERRUPTED"' "$(jq -c .halted.reason "$rec/status.json")"
 
 # build_role_captures_patch
 scenario '{"screening-build":{"text":"done","cost_per_step":0.01,
@@ -308,6 +431,11 @@ scenario '{"screening-build":{"text":"done","cost_per_step":0.01,
   "probe":{"text":"CAPABILITY_OK","write_file":null}}}'
 rec="$work/v2-build"
 prepare "$rec" build 100 a=model:fakep/m1#high || fail "prepare failed"
+for p in models/routing/opencode/eval/records/astra-build-followup/oracle.sh \
+    models/routing/opencode/eval/records/sol-build/empty-path-check.sh; do
+  jq -e --arg p "$p" 'any(.files[]; .path == $p)' "$rec/freeze-manifest.json" >/dev/null \
+    || fail "the build freeze manifest does not cover $p"
+done
 approve "$rec"
 dispatch "$rec" || fail "build dispatch failed"
 patch=$(find "$rec/runs" -path '*-gate-r1-a/work-product.patch')
@@ -321,6 +449,8 @@ bash "$runner" score --out "$rec" >/dev/null 2>"$work/score.err" || rc=$?
 assert_eq 1 "$rc"
 assert_contains "$(<"$work/score.err")" "SCORE_FAILED"
 assert_contains "$(<"$rec/result.md")" "SCORE_FAILED"
+assert_contains "$(<"$rec/result.md")" "scores/build-quality.json"
+[[ "$(<"$rec/result.md")" != *"no per-run score file"* ]] || fail "result.md misnames the build score"
 
 # agent_candidate_uses_profile
 cat >"$work/profile.jsonc" <<'EOF'
@@ -352,5 +482,22 @@ d=$(find "$rec/runs" -path '*-gate-r1-p/dispatch/dispatch.json')
 assert_eq '"prof-7"' "$(jq -c .routing_profile_id "$d")"
 assert_eq '["build@fakep/m2#high"]' "$(jq -c .routing_observed "$d")"
 no_secret_in "$rec"
+
+# agent_candidate_expect_frozen: dispatch checks the routing prepare resolved,
+# not what the agent resolves to at dispatch time.
+rec="$work/v2-agent2"
+quiet bash "$runner" prepare --role build --out "$rec" --candidate p=agent:build --runs 1 --budget 100 \
+  --providers "$work/fragment.json" --credentials "$work/creds.json" \
+  --profile "$work/profile.jsonc" --profile-id prof-7 >"$rec.approval" || fail "agent prepare failed"
+approve "$rec"
+printf '{"id":"m1","providerID":"fakep","variant":"high"}\n' >"$state/agent-model.json"
+rc=0
+bash "$runner" dispatch --out "$rec" --providers "$work/fragment.json" --credentials "$work/creds.json" \
+  --profile "$work/profile.jsonc" 2>/dev/null || rc=$?
+rm -f "$state/agent-model.json"
+assert_eq 1 "$rc"
+d="$rec/capability/p/dispatch/dispatch.json"
+assert_eq '"build@fakep/m2#high"' "$(jq -c .routing_expected "$d")"
+assert_eq '"ROUTING_MISMATCH"' "$(jq -c .classification "$d")"
 
 printf 'PASS: v2-screening-runner\n'

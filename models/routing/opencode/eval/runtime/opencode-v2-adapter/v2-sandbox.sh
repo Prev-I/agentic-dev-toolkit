@@ -34,6 +34,10 @@
 # parameter is unmeasured, so both must pass), are written to SANDBOX/layers.json
 # as {"default": [...], "directory": [...]} and checked with
 # v2config.check_layers. SANDBOX/version (GET /api/info) and SANDBOX/url follow.
+# A server that exits early is reported on stderr, but the last lines of its
+# own log go to file descriptor V2_SERVER_LOG_FD (default 2): a caller that
+# keeps stderr in a record points it at the terminal, so no server output (it
+# may echo provider settings) is kept.
 #
 # Call v2_sandbox_serve in the shell that will destroy the sandbox, not inside
 # `$(...)`: the server must be that shell's child for _V2_PIDS and wait to work.
@@ -138,8 +142,11 @@ s = socket.socket()
 s.bind(("127.0.0.1", 0))
 print(s.getsockname()[1])
 s.close()') && [[ -n "$port" ]] || { _sb_err "cannot pick a free loopback port"; return 1; }
+  [[ "${V2_SERVER_LOG_FD:-2}" =~ ^[0-9]+$ ]] || { _sb_err "V2_SERVER_LOG_FD is not a file descriptor"; return 1; }
   (
     cd "$sb/work"
+    # The server never holds the caller's log descriptor.
+    [[ "${V2_SERVER_LOG_FD:-2}" == 2 ]] || exec {V2_SERVER_LOG_FD}>&-
     exec setsid env -i PATH=/usr/bin:/bin HOME="$sb/home" \
       XDG_CONFIG_HOME="$sb/config" XDG_DATA_HOME="$sb/data" \
       XDG_STATE_HOME="$sb/state" XDG_CACHE_HOME="$sb/cache" \
@@ -158,8 +165,8 @@ s.close()') && [[ -n "$port" ]] || { _sb_err "cannot pick a free loopback port";
   deadline=$(( SECONDS + timeout ))
   while :; do
     if ! kill -0 "$pid" 2>/dev/null; then
-      _sb_err "the sandboxed server exited early; its log:"
-      tail -n 20 "$sb/server.log" >&2 || true
+      _sb_err "the sandboxed server exited early; the last lines of its log are on the terminal"
+      tail -n 20 "$sb/server.log" >&"${V2_SERVER_LOG_FD:-2}" || true
       return 1
     fi
     rc=0

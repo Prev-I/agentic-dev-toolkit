@@ -57,13 +57,16 @@
       "--repo",
       "{repo}"
     ],
-    "stdout": null
+    "stdout": null,
+    "file": "scores/build-quality.json"
   },
   "frozen": [
     "{eval}/records/astra-build-followup/base-snapshot",
     "{eval}/fixtures/build-workloads/build-feature/snapshot",
     "{eval}/runtime/opencode-v2-adapter/roles/build/coding-prompt.txt",
     "{eval}/runtime/opencode-v2-adapter/roles/build/gate-prompt.txt",
-    "{eval}/scoring/build-quality-oc2.py"
+    "{eval}/scoring/build-quality-oc2.py",
+    "{eval}/records/astra-build-followup/oracle.sh",
+    "{eval}/records/sol-build/empty-path-check.sh"
   ]
 }

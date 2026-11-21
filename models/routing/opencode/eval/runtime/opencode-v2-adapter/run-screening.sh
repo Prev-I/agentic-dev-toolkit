@@ -26,19 +26,32 @@
 # (opencode_dir is then absolute).
 #
 # dispatch exits 3 unless DIR/approval.json is exactly that object and the
-# providers, credentials and profile digests match the protocol; 2 when runs/ or
-# capability/ exist; 1 on a freeze mismatch (verified before every call). Each
-# candidate is probed into capability/KEY/, then for rep 1..N and each workload
-# in definition order the live candidates run, forward when
-# (rep + workload_index) % 2 == 1 (workload_index from 0), else reversed. A run
-# is runs/NN-WORKLOAD-rREP-KEY/: dispatch/, reported.json or extract-error.txt
-# (extract: json) and work-product.patch (capture_patch). A model candidate
-# runs as the role's agent with its model (routing expected AGENT@P/M#V); an
-# agent candidate runs the profile alone. Stops (Ruling 5): a failed probe
-# (STOPPED_CAPABILITY) or CAPABILITY_REGRESSION stops the candidate;
-# BUDGET_STOP, a refused admission, an unknown cost, a probe classified
+# providers, credentials and profile digests match the protocol, and when the
+# OpenCode runtime differs from protocol runtime_version (measured as prepare
+# does: GET /api/info of one sandboxed server, no model call; nothing is then
+# written); 2 when runs/ or capability/ exist; 1 on a freeze mismatch (verified
+# before every call). Each candidate is probed into capability/KEY/, then for
+# rep 1..N and each workload in definition order the live candidates run,
+# forward when (rep + workload_index) % 2 == 1 (workload_index from 0), else
+# reversed. A run is runs/NN-WORKLOAD-rREP-KEY/: dispatch/, reported.json or
+# extract-error.txt (extract: json) and work-product.patch (capture_patch). A
+# model candidate runs as the role's agent with its model; an agent candidate
+# runs the profile alone. Either way every call is checked against the
+# candidate's protocol `expect` (AGENT@P/M#V, frozen at prepare). Stops
+# (Ruling 5): a failed probe (STOPPED_CAPABILITY) or CAPABILITY_REGRESSION
+# stops the candidate; BUDGET_STOP, a refused admission, an unknown cost
+# (UNKNOWN_COST), a call cut off mid-step (cost_complete false: INCOMPLETE_COST),
+# an exposed credential (CREDENTIAL_EXPOSED), a probe classified
 # INVALID_ENVIRONMENT, or no live candidate after the probes halts the
 # screening, as does an unexpected error (halted reason ERROR).
+#
+# The model's tools run with the operator's uid, so after every call (probes
+# included) each string value of 12 or more characters in the credentials file
+# and in the provider fragment is searched for in the call's output directory
+# and, for the build role, in the workspace copy and work-product.patch. Every
+# occurrence is replaced in place with [REDACTED], the call's dispatch.json is
+# classified CREDENTIAL_EXPOSED, and the screening halts. Nothing found is
+# printed except the names of the files changed.
 # status.json is {state: COMPLETE|INCOMPLETE, stopped: {KEY: REASON}, halted};
 # exit 0 when COMPLETE, 1 when INCOMPLETE. The budget (Ruling 6) is one account
 # candidate_KEY per candidate with cap = budget / candidates, admission per call
@@ -48,20 +61,29 @@
 # under its own name; oracle files (ground-truth.json, oracle.json) are never
 # copied in. The patch compares that workspace with what the call left.
 #
-# score verifies the freeze manifest first (1 on a mismatch, nothing written),
-# then runs the role's normalise and score argv (placeholders {eval} {repo}
+# score verifies the freeze manifest, and that its sha256 is approval.json's
+# freeze_manifest_sha256, first (1 on a mismatch, nothing written), then runs the role's normalise and score argv (placeholders {eval} {repo}
 # {record} {fixture} {key} {rep}) and writes DIR/result.md. A candidate-run
 # whose normaliser reports "clean control missing" (exit 3) is NOT_SCORABLE;
-# any other scorer failure is listed in result.md and makes score exit 1. It
-# never writes adjudication.json.
+# any other scorer failure is listed in result.md and makes score exit 1. Its
+# Spend total is marked a lower bound when any call's cost is unknown or
+# incomplete; a per-run score row shows the findings' missing_runs count, and a
+# role scored per record names its score.file in every row. It never writes
+# adjudication.json.
 #
 # The runner's own TMPDIR is DIR/.work and sandboxes live under it; an EXIT,
 # INT, TERM and HUP trap removes it, after stopping by recorded pid any sandbox
-# server still running there. Calls run one at a time, each in its own session, and a signal
-# stops the running call's process group before the runner exits. The record
-# holds only the sha256 of the provider fragment, credentials and profile.
+# server still running there. Calls run one at a time, each in its own session,
+# and a signal stops the running call's process group before the runner exits.
+# A .work that an abnormal end (SIGKILL, OOM, a shutdown) left behind is
+# removed when dispatch or score starts, before any refusal, after stopping each
+# recorded pid that is alive and whose working directory is its sandbox's work/;
+# one line on stderr says so. The runner's files are created under umask 077.
+# The record holds only the sha256 of the provider fragment, credentials and
+# profile.
 set -Eeuo pipefail
 IFS=$'\n\t'
+umask 077
 adapter=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 eval_root=$(cd "$adapter/../.." && pwd)
 repo=$(cd "$eval_root/../../../.." && pwd)
@@ -128,6 +150,27 @@ stop_sandbox_servers() {
   done
 }
 
+# A .work an abnormal end left in the record: it may hold sandbox credentials,
+# databases and configs with the provider fragment. Only a recorded pid that is
+# alive and runs in its sandbox's work/ is stopped; any other is left alone.
+clear_stale_work() {
+  local stale f pid sb
+  [[ -n "$out" && -f "$out/protocol.json" ]] || return 0
+  stale="$out/.work"
+  [[ -d "$stale" && ! -L "$stale" ]] || return 0
+  for f in "$stale"/sandbox.*/pid; do
+    [[ -f "$f" ]] || continue
+    pid=$(<"$f")
+    sb=$(dirname -- "$f")
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]] || continue
+    kill -0 "$pid" 2>/dev/null || continue
+    [[ "$(readlink "/proc/$pid/cwd" 2>/dev/null)" == "$(realpath -m -- "$sb/work")" ]] || continue
+    v2_stop_pid "$pid"
+  done
+  rm -rf -- "$stale"
+  err "removed a stale scratch area left by an earlier run: $stale"
+}
+
 on_exit() {
   local rc=$?
   stop_child
@@ -176,12 +219,14 @@ run_child() {
 # A role file's string with its placeholders replaced.
 expand() {
   local s=$1 key=${2:-} rep=${3:-}
-  s=${s//\{eval\}/$eval_root}
-  s=${s//\{repo\}/$repo}
-  s=${s//\{record\}/$out}
-  s=${s//\{fixture\}/$fixture}
-  s=${s//\{key\}/$key}
-  s=${s//\{rep\}/$rep}
+  # Quoted replacements: bash 5.2's patsub_replacement would otherwise expand
+  # an & in a path to the matched placeholder.
+  s=${s//\{eval\}/"$eval_root"}
+  s=${s//\{repo\}/"$repo"}
+  s=${s//\{record\}/"$out"}
+  s=${s//\{fixture\}/"$fixture"}
+  s=${s//\{key\}/"$key"}
+  s=${s//\{rep\}/"$rep"}
   printf '%s' "$s"
 }
 
@@ -504,16 +549,35 @@ before_call() {
   if [[ "${kinds[$key]}" == model ]]; then
     call_opts+=(--agent "$agent_name" --expect "${expects[$key]}")
   else
-    call_opts+=(--agent "${agents[$key]}" --profile-id "$profile_id" --profile-digest "$profile_digest")
+    call_opts+=(--agent "${agents[$key]}" --expect "${expects[$key]}" --profile-id "$profile_id"
+      --profile-digest "$profile_digest")
   fi
+}
+
+# exposure_check KEY LABEL DISPATCH_JSON PATH...: the credential backstop. Any
+# string of 12 or more characters from the credentials file or the provider
+# fragment found under PATH... is redacted in place, and the screening halts.
+exposure_check() {
+  local key=$1 label=$2 json=$3 rc=0
+  shift 3
+  python3 -I -B "$adapter/v2config.py" redact "$creds" "$providers" -- "$@" >&2 || rc=$?
+  (( rc != 0 )) || return 0
+  (( rc == 1 )) || halt CREDENTIAL_SCAN_FAILED "$label"
+  if [[ -f "$json" ]]; then
+    jq '.classification_before_redaction = .classification | .classification = "CREDENTIAL_EXPOSED"' \
+      "$json" >"$work/exposed.json" && mv -- "$work/exposed.json" "$json"
+  fi
+  stopped[$key]=CREDENTIAL_EXPOSED
+  halt CREDENTIAL_EXPOSED "$label"
 }
 
 # after_call KEY LABEL DIR: Ruling 5 on a finished call's dispatch.json.
 after_call() {
-  local key=$1 label=$2 dir=$3 classification known
+  local key=$1 label=$2 dir=$3 classification known complete
   [[ -f "$dir/dispatch.json" ]] || halt DISPATCH_REFUSED "$label"
   classification=$(jq -r .classification "$dir/dispatch.json")
   known=$(jq -r .cost_known "$dir/dispatch.json")
+  complete=$(jq -r 'if has("cost_complete") then .cost_complete else true end' "$dir/dispatch.json")
   if [[ "$classification" == BUDGET_STOP ]]; then
     stopped[$key]=BUDGET_STOP
     halt BUDGET_STOP "$label"
@@ -521,6 +585,12 @@ after_call() {
   if [[ "$known" != true ]]; then
     stopped[$key]=UNKNOWN_COST
     halt UNKNOWN_COST "$label"
+  fi
+  # A call cut off mid-step: its last step's cost was never reported, so the
+  # ledger holds a lower bound.
+  if [[ "$complete" != true ]]; then
+    stopped[$key]=INCOMPLETE_COST
+    halt INCOMPLETE_COST "$label"
   fi
   if [[ "$classification" == CAPABILITY_REGRESSION ]]; then
     stopped[$key]=CAPABILITY_REGRESSION
@@ -556,6 +626,7 @@ dispatch() {
     esac
     shift 2
   done
+  clear_stale_work
   [[ -n "$out" ]] || die 2 "--out is required"
   need_file --providers "$providers"
   need_file --credentials "$creds"
@@ -596,7 +667,6 @@ PY
   fi
   [[ ! -e "$out/runs" && ! -e "$out/capability" ]] || die 2 "runs/ or capability/ already exist in $out"
 
-  phase=dispatch
   work="$out/.work"
   rm -rf -- "$work"
   mkdir -- "$work"
@@ -606,6 +676,27 @@ PY
   # record's frozen copy.
   ocdir=$(jq -r .opencode_dir "$protocol")
   if [[ "$ocdir" == /* ]]; then ocdir="$out/opencode-dir"; else ocdir="$repo/$ocdir"; fi
+
+  # The runtime, measured as prepare measured it: GET /api/info of one
+  # sandboxed server with prepare's config, and no model call.
+  local base=- sb version frozen_version
+  [[ -z "$profile" ]] || base=$profile
+  python3 -I -B "$adapter/v2config.py" build-config "$base" "$providers" - "$work/catalog-config.json" \
+    || die 1 "cannot build the runtime check's config"
+  sb=$(v2_sandbox_create "$work") || die 1 "cannot create the runtime check's sandbox"
+  catalog_sb=$sb
+  v2_sandbox_populate "$sb" "$work/catalog-config.json" "$creds" "$ocdir" \
+    || die 1 "cannot populate the runtime check's sandbox"
+  v2_sandbox_serve "$sb" || die 1 "the runtime check's server did not start"
+  version=$(<"$sb/version")
+  v2_sandbox_destroy "$sb" || true
+  catalog_sb=''
+  rm -f -- "$work/catalog-config.json"
+  frozen_version=$(jq -r .runtime_version "$protocol")
+  [[ "$version" == "$frozen_version" ]] \
+    || die 3 "the OpenCode runtime is $version; the protocol froze $frozen_version"
+
+  phase=dispatch
   admission=$(jq -r .budget.admission_per_call "$protocol")
   local runs timeout extract capture
   runs=$(jq -r .runs "$protocol")
@@ -678,6 +769,7 @@ PY
     # shellcheck disable=SC2016 # expanded by the child shell
     run_child "${BASH:-bash}" -c 'source "$1"; shift; v2_capability_probe "$@"' _ \
       "$adapter/capability-probe.sh" "$out/capability/$key" "$key" "${call_opts[@]}" || rc=$?
+    exposure_check "$key" "capability-$key" "$out/capability/$key/dispatch/dispatch.json" "$out/capability/$key"
     (( rc != 2 )) || halt DISPATCH_REFUSED "capability-$key"
     after_call "$key" "capability-$key" "$out/capability/$key/dispatch"
     if (( rc != 0 )); then
@@ -736,6 +828,7 @@ PY
           bash "$adapter/capture-tree-patch.sh" "$ws" "$wout" "$out/runs/$label/work-product.patch" \
             || err "cannot capture the work product of $label"
         fi
+        exposure_check "$key" "$label" "$out/runs/$label/dispatch/dispatch.json" "$out/runs/$label" "$wout"
         rm -rf -- "$ws" "$wout"
         after_call "$key" "$label" "$out/runs/$label/dispatch"
       done
@@ -775,9 +868,13 @@ score() {
     esac
     shift 2
   done
+  clear_stale_work
   [[ -n "$out" && -f "$out/protocol.json" && -f "$out/status.json" ]] || die 2 "not a dispatched record: $out"
   out=$(cd "$out" && pwd -P)
   verify_freeze || die 1 "the record does not match its freeze manifest; nothing scored"
+  [[ -f "$out/approval.json" \
+     && "$(jq -r '.freeze_manifest_sha256 // ""' "$out/approval.json" 2>/dev/null)" == "$(sha256 "$out/freeze-manifest.json")" ]] \
+    || die 1 "freeze-manifest.json is not the manifest approval.json approved; nothing scored"
   work="$out/.work"
   rm -rf -- "$work"
   mkdir -- "$work"
@@ -821,13 +918,13 @@ score() {
   fi
   printf '%s' "$notes" >"$work/notes.json"
 
-  python3 -I -B - "$out" "$work/notes.json" <<'PY'
+  python3 -I -B - "$out" "$work/notes.json" "$per" "$(jq -r '.score.file // ""' "$role_file")" <<'PY'
 import glob
 import json
 import os
 import sys
 
-out, notes_path = sys.argv[1:]
+out, notes_path, per, record_file = sys.argv[1:]
 
 
 def load(name, default=None):
@@ -861,7 +958,20 @@ for account, cap in ledger.get("caps", {}).items():
     spent = sum(e["credits"] for e in ledger.get("entries", []) if e["account"] == account)
     lines.append("| %s | %s | %s |" % (account, cap, round(spent, 10)))
 total = sum(e["credits"] for e in ledger.get("entries", []))
-lines += ["", "Total spent: %s credits." % round(total, 10), ""]
+partial = False
+for path in glob.glob(os.path.join(out, "capability", "*", "dispatch", "dispatch.json")) \
+        + glob.glob(os.path.join(out, "runs", "*", "dispatch", "dispatch.json")):
+    try:
+        call = json.load(open(path, encoding="utf-8"))
+    except (OSError, ValueError):
+        continue
+    if call.get("cost_known") is False or call.get("cost_complete", True) is False:
+        partial = True
+if partial:
+    lines += ["", "Total spent: %s credits (lower bound): a call's cost is unknown or was cut off "
+              "mid-step." % round(total, 10), ""]
+else:
+    lines += ["", "Total spent: %s credits." % round(total, 10), ""]
 lines += ["## Capability", "", "| Key | Probe |", "|---|---|"]
 for c in protocol["candidates"]:
     probe = load(os.path.join("capability", c["key"], "probe.json"), {})
@@ -879,7 +989,17 @@ for c in protocol["candidates"]:
         elif isinstance(score, dict):
             summary = ", ".join("%s=%s" % (k, v) for k, v in score.items()
                                 if isinstance(v, (str, int, float, bool)))
+            findings = load("findings-%s-r%s.json" % (c["key"], rep))
+            if isinstance(findings, dict) and isinstance(findings.get("missing_runs"), list):
+                summary += ", missing_runs=%d" % len(findings["missing_runs"])
             lines.append("| %s | %s | `%s` | %s |" % (c["key"], rep, name, summary))
+        elif per == "record" and record_file:
+            if os.path.isfile(os.path.join(out, record_file)):
+                lines.append("| %s | %s | `%s` | record-level score, every candidate's runs in one file |"
+                             % (c["key"], rep, record_file))
+            else:
+                lines.append("| %s | %s | none | record-level `%s` was not written |"
+                             % (c["key"], rep, record_file))
         else:
             lines.append("| %s | %s | none | no per-run score file |" % (c["key"], rep))
 for n in notes:

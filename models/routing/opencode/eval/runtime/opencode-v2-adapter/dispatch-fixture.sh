@@ -22,6 +22,8 @@
 # absent or empty (2 otherwise); a failed copy is INVALID_ENVIRONMENT/
 # WORKSPACE_OUT_FAILED. server_layers records each layer of both GET
 # /api/config answers as {path, type, info_sha256}, never the config itself.
+# DIR/setup.err keeps only the adapter's own setup messages: the log of a
+# server that exits early goes to this process's stderr (V2_SERVER_LOG_FD).
 #
 # The client is `timeout --preserve-status S [capped-opencode.sh] OPENCODE_BIN
 # --server URL run (--agent A | --model P/M#V) --format json --archived --auto
@@ -48,7 +50,10 @@
 # Credits are reported cost * 100. A stream with no step_start costs 0; one
 # with a step_start and no reported cost is unknown (derived_credits null,
 # cost_known false). A known non-zero cost of a started call is appended to
-# --ledger under --account even when the call failed.
+# --ledger under --account even when the call failed. unfinished_steps is the
+# number of step_start events beyond the step_finish events (a call cut off
+# mid-step, whose last step's cost was never reported); cost_complete is false
+# when it is above 0, and the cost of the finished steps is still ledgered.
 set -Eeuo pipefail
 IFS=$'\n\t'
 dispatch_root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -156,9 +161,9 @@ _dispatch_main() {
   fi
   local raw="$outdir/raw.jsonl" setup_err="$outdir/setup.err"
   local prompt commit target status='' start end version=unknown url='' agent_data=''
-  local setup_failure='' classification failure_class sb
+  local setup_failure='' classification failure_class sb logfd
   prompt=$(<"$prompt_file")
-  commit=$(git rev-parse HEAD 2>/dev/null || printf unknown)
+  commit=$(git -C "$dispatch_root" rev-parse HEAD 2>/dev/null || printf unknown)
   [[ -n "$routing_profile_id" ]] || routing_profile_id=direct-model-evaluation
   if [[ -n "$agent" ]]; then target="agent:$agent"; else target="$model"; fi
   : >"$raw"
@@ -180,9 +185,10 @@ _dispatch_main() {
     if ! v2_sandbox_populate "$sb" "$config" "$creds" ${ocdir:+"$ocdir"} 2>>"$setup_err" \
         || { [[ -n "$fixture_workspace" ]] && ! cp -a -- "$fixture_workspace/." "$sb/work/" 2>>"$setup_err"; } \
         || ! mkdir -p "$sb/client/config" "$sb/client/data" "$sb/client/state" "$sb/client/cache" 2>>"$setup_err" \
-        || ! v2_sandbox_serve "$sb" 2>>"$setup_err"; then
+        || ! { exec {logfd}>&2; V2_SERVER_LOG_FD=$logfd v2_sandbox_serve "$sb" 2>>"$setup_err"; }; then
       setup_failure=SANDBOX_REFUSED
     fi
+    [[ -z "${logfd:-}" ]] || exec {logfd}>&-
   fi
   if [[ -z "$setup_failure" ]]; then
     url=$(<"$sb/url")
@@ -252,6 +258,7 @@ error_message = ""
 error_status = None
 session = None
 started = False
+starts = finishes = 0
 for line in open(raw, encoding="utf-8", errors="replace"):
     try:
         event = json.loads(line)
@@ -267,7 +274,9 @@ for line in open(raw, encoding="utf-8", errors="replace"):
         texts.append(str(part.get("text", "")))
     elif kind == "step_start":
         started = True
+        starts += 1
     elif kind == "step_finish":
+        finishes += 1
         # cost is per step and summed; tokens are a running snapshot, so the
         # last one is the total.
         step_cost = part.get("cost")
@@ -285,7 +294,8 @@ with open(response, "w", encoding="utf-8") as handle:
 with open(parsed, "w", encoding="utf-8") as handle:
     json.dump({"cost": cost, "tokens": tokens, "error_text": error_message or None,
                "status_code": error_status, "session": session, "step_started": started,
-               "cost_known": (not started) or cost is not None}, handle)
+               "cost_known": (not started) or cost is not None,
+               "unfinished_steps": max(starts - finishes, 0)}, handle)
 PY
 
   local sid body tries=1 i
@@ -459,6 +469,8 @@ document = {
     "observed_cost": parsed.get("cost"),
     "derived_credits": None if credits == "null" else float(credits),
     "cost_known": bool(parsed.get("cost_known")),
+    "unfinished_steps": parsed.get("unfinished_steps", 0),
+    "cost_complete": parsed.get("unfinished_steps", 0) == 0,
     "normalized_steady_state_cost": None,
     "tokens": parsed.get("tokens"),
     "wall_clock_ms": int(env["END"]) - int(env["START"]),

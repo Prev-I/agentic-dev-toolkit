@@ -5,6 +5,7 @@ Usage: v2config.py load FILE | shape FILE | md-frontmatter FILE
        v2config.py layers API_CONFIG_JSON SANDBOX
        v2config.py build-config BASE_JSON_OR_- FRAGMENT AGENT_ROW_JSON_OR_- OUT
        v2config.py real-dirs
+       v2config.py redact SOURCE... -- PATH...
 Exit codes: 0 success, 1 finding, 2 usage or unparseable input.
 
 layers: 0 when every layer of a GET /api/config answer passes check_layers;
@@ -14,6 +15,14 @@ build-config: BASE (a profile file, or - for a minimal config), FRAGMENT (a
   AGENT_ROW (a file holding {"name": N, "row": {...}}, or -) are merged into
   OUT as strict JSON, always with "update": "disable".
 real-dirs: the OpenCode directories a sandbox must not resolve inside.
+redact: every string value of 12 or more characters anywhere in each SOURCE
+  (JSON or JSONC, read recursively; a SOURCE that does not parse contributes
+  each whitespace-separated token of that length) is searched for, verbatim and
+  JSON-escaped, in every regular file under each PATH (a file or a directory;
+  symlinks are not followed, a missing PATH is skipped), and each occurrence is
+  replaced in place with [REDACTED]. 0 when nothing was found; 1 when something
+  was redacted, with one "redact: a credential was redacted in FILE" line per
+  file on stdout; 2 when a SOURCE cannot be read. No secret is ever printed.
 """
 import fnmatch
 import json
@@ -309,7 +318,14 @@ def check_layers(layers, sandbox):
     for layer in layers:
         path = layer.get("path") if isinstance(layer, dict) else None
         if not isinstance(path, str) or not path:
-            bad.append("a layer with no path: %s" % json.dumps(layer)[:200])
+            # Never the layer itself: its `info` is the effective config,
+            # provider settings and keys included.
+            if isinstance(layer, dict):
+                kind = layer.get("type")
+                kind = kind[:40] if isinstance(kind, str) else type(kind).__name__
+                bad.append("a layer with no path (type %s, keys %s)" % (kind, sorted(layer)))
+            else:
+                bad.append("a layer with no path (a %s, not an object)" % type(layer).__name__)
         elif _inside(path, sandbox):
             continue
         elif os.path.realpath(path) == account:
@@ -411,6 +427,92 @@ def _build_config_command(base_path, fragment_path, row_path, out):
     return 0
 
 
+REDACT_MIN = 12
+REDACTED = b"[REDACTED]"
+
+
+def _secret_strings(value, found):
+    if isinstance(value, str):
+        if len(value) >= REDACT_MIN:
+            found.add(value)
+    elif isinstance(value, dict):
+        for item in value.values():
+            _secret_strings(item, found)
+    elif isinstance(value, list):
+        for item in value:
+            _secret_strings(item, found)
+
+
+def secret_needles(sources):
+    """The byte strings to redact: each secret verbatim and JSON-escaped
+    (ASCII-only and not), longest first. Raises OSError on an unreadable
+    source."""
+    secrets = set()
+    for source in sources:
+        with open(source, encoding="utf-8-sig", errors="replace") as handle:
+            text = handle.read()
+        try:
+            _secret_strings(json.loads(strip_jsonc(text)), secrets)
+        except ValueError:
+            secrets.update(t for t in text.split() if len(t) >= REDACT_MIN)
+    needles = set()
+    for secret in secrets:
+        needles.add(secret.encode("utf-8"))
+        for ascii_only in (True, False):
+            needles.add(json.dumps(secret, ensure_ascii=ascii_only)[1:-1].encode("utf-8"))
+    return sorted(needles, key=len, reverse=True)
+
+
+def _files_under(path):
+    if os.path.islink(path):
+        return
+    if os.path.isfile(path):
+        yield path
+        return
+    for directory, dirs, files in os.walk(path):
+        dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(directory, d))]
+        for name in sorted(files):
+            full = os.path.join(directory, name)
+            if os.path.isfile(full) and not os.path.islink(full):
+                yield full
+
+
+def redact(sources, paths):
+    """Redact SOURCES' secrets in place under PATHS; the files changed."""
+    needles = secret_needles(sources)
+    changed = []
+    for path in paths:
+        for name in _files_under(path):
+            with open(name, "rb") as handle:
+                data = handle.read()
+            new = data
+            for needle in needles:
+                new = new.replace(needle, REDACTED)
+            if new != data:
+                with open(name, "r+b") as handle:
+                    handle.write(new)
+                    handle.truncate()
+                changed.append(name)
+    return changed
+
+
+def _redact_command(args):
+    if "--" not in args:
+        return usage()
+    split = args.index("--")
+    sources, paths = args[:split], args[split + 1:]
+    if not sources:
+        return usage()
+    try:
+        changed = redact(sources, paths)
+    except OSError as error:
+        sys.stderr.write("redact: cannot read a source or a file (%s)\n" % error.strerror)
+        return 2
+    for name in changed:
+        print("redact: a credential was redacted in %s" % name)
+    return 1 if changed else 0
+
+
 def usage():
     sys.stderr.write(__doc__)
     return 2
@@ -421,6 +523,8 @@ def main(argv):
         return _layers_command(argv[2], argv[3])
     if len(argv) == 6 and argv[1] == "build-config":
         return _build_config_command(*argv[2:])
+    if len(argv) >= 2 and argv[1] == "redact":
+        return _redact_command(argv[2:])
     if len(argv) == 2 and argv[1] == "real-dirs":
         for path in real_dirs():
             print(path)

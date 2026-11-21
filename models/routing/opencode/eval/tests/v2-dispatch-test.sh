@@ -108,6 +108,8 @@ assert_eq '"screening-reviewer"' "$(jq -c '.[0].agent' "$work/ok/assistant.json"
 assert_eq 1 "$(jq '.entries | length' "$work/ledger.json")"
 assert_eq 5.2 "$(jq '.entries[0].credits' "$work/ledger.json")"
 assert_eq '"fakep"' "$(jq -c '.entries[0].provider' "$work/ledger.json")"
+assert_eq 0 "$(field "$work/ok" .unfinished_steps)"
+assert_eq true "$(field "$work/ok" .cost_complete)"
 run_line=$(grep '^run pid=' "$state/log" | tail -n 1)
 run_cwd=$(sed -n 's/.* cwd=\(.*\) xdg_config=.*/\1/p' <<<"$run_line")
 [[ "$run_cwd" == "$parent/"*/work ]] || fail "run cwd not the sandbox's work dir: $run_cwd"
@@ -221,6 +223,23 @@ assert_eq 1 "$rc"
 assert_eq true "$(field "$work/nostep" .cost_known)"
 assert_eq true "$(field "$work/nostep" ".derived_credits == 0")"
 
+# dispatch_unfinished_step: a call cut off mid-step ledgers its finished steps
+# and says its cost is incomplete.
+new_ledger
+scenario '{"screening-reviewer":{"steps":3,"partial":true,"exit":1,"error_message":"socket closed unexpectedly","cost_per_step":0.01}}'
+rc=0; dispatch "$work/partial" --agent screening-reviewer || rc=$?
+assert_eq 1 "$rc"
+assert_eq 1 "$(field "$work/partial" .unfinished_steps)"
+assert_eq false "$(field "$work/partial" .cost_complete)"
+assert_eq true "$(field "$work/partial" .cost_known)"
+assert_eq true "$(jq '([.entries[].credits] | add) == 2' "$work/ledger.json")"
+
+# dispatch_commit_from_any_cwd: the commit is the adapter's checkout's, not
+# the caller's working directory's.
+scenario '{"screening-reviewer":{"text":"x"}}'
+(cd "$work" && dispatch "$work/commit" --agent screening-reviewer) || fail "commit dispatch failed"
+assert_eq "\"$(git -C "$adapter" rev-parse HEAD)\"" "$(field "$work/commit" .routing_profile_commit)"
+
 # dispatch_model_flag
 scenario '{"fakep/m1#high":{"text":"direct"}}'
 dispatch "$work/model" --model 'fakep/m1#high' || fail "model dispatch failed: $(cat "$work/model/dispatch.json")"
@@ -240,6 +259,19 @@ assert_eq '"INVALID_ENVIRONMENT"' "$(field "$work/refused" .classification)"
 assert_eq '"SANDBOX_REFUSED"' "$(field "$work/refused" .failure_class)"
 ! kill -0 "$(last_pid serve)" 2>/dev/null || fail "refused server survived"
 ! grep -rq '127.0.0.1:9' "$work/refused" || fail "the provider fragment reached a refused record"
+assert_eq '' "$(ls -A "$parent")"
+
+# dispatch_server_exits_early: the server's own log goes to the terminal, never
+# into the record's setup.err.
+printf 'die\n' >"$state/mode"
+rc=0; dispatch "$work/died" --agent screening-reviewer 2>"$work/died.err" || rc=$?
+rm -f "$state/mode"
+assert_eq 1 "$rc"
+assert_eq '"SANDBOX_REFUSED"' "$(field "$work/died" .failure_class)"
+assert_file "$work/died/setup.err"
+assert_contains "$(<"$work/died/setup.err")" "exited early"
+! grep -q FAKE-SERVER-LOG-MARKER "$work/died/setup.err" || fail "the server log reached setup.err"
+assert_contains "$(<"$work/died.err")" FAKE-SERVER-LOG-MARKER
 assert_eq '' "$(ls -A "$parent")"
 
 # usage errors

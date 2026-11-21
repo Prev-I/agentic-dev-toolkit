@@ -197,6 +197,27 @@ sed 's/$/\r/' "$main_root/opencode.jsonc" >"$crlf_root/opencode.jsonc"
 grep -q $'^// profile_id: .*\r$' "$crlf_root/opencode.jsonc" || fail "CRLF fixture not CRLF"
 activate "$crlf_root" "$workspace/crlf/backups" >/dev/null 2>"$workspace/crlf.err"
 [[ "$(<"$workspace/crlf.err")" != *"comments"* ]] || fail "CRLF generated header reported as user comments: $(<"$workspace/crlf.err")"
+
+# The header convert-v1-config.sh writes for .jsonc output is not a user comment.
+# The prefix is pinned against the converter so the two cannot drift.
+grep -qF "printf '// Converted from the OpenCode 1.x config %s" "$adapter/convert-v1-config.sh" \
+  || fail "convert-v1-config.sh no longer emits the header prefix activation recognises"
+conv_body="{\"\$schema\":\"https://opencode.ai/config.json\"}"
+conv_root="$workspace/conv/config"
+mkdir -p "$conv_root"
+conv_header() {
+  printf '%s\n' '// Converted from the OpenCode 1.x config /tmp/old/opencode.jsonc' \
+    '// source sha256: abc123' '// converted at: 2026-11-21T00:00:00Z' '// OpenCode version: 2.0.0' \
+    "// converted with OpenCode 2's own translation (GET /api/config, document layer info)"
+}
+{ conv_header; printf '%s\n' "$conv_body"; } >"$conv_root/opencode.jsonc"
+activate "$conv_root" "$workspace/conv/backups" >/dev/null 2>"$workspace/conv.err"
+[[ "$(<"$workspace/conv.err")" != *"comments"* ]] || fail "converter header reported as user comments: $(<"$workspace/conv.err")"
+conv2_root="$workspace/conv2/config"
+mkdir -p "$conv2_root"
+{ conv_header; printf '// my own note\n%s\n' "$conv_body"; } >"$conv2_root/opencode.jsonc"
+activate "$conv2_root" "$workspace/conv2/backups" >/dev/null 2>"$workspace/conv2.err"
+assert_contains "$(<"$workspace/conv2.err")" "user comments in $conv2_root/opencode.jsonc were dropped"
 python3 "$helper" load "$main_root/opencode.jsonc" >"$workspace/after2.json"
 cmp -s "$workspace/after.json" "$workspace/after2.json" || fail "second activation changed content"
 

@@ -22,9 +22,10 @@ v2_alignment_root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # to the absolute path of the installed model-routing.md. Everything else is
 # user-owned and never reported.
 #
-# Not ported from the 1.x checker: the STALE_PROCESS warning. On 2.x the config
-# is served by a long-running service that the operator restarts deliberately,
-# so a process older than the file is not a signal.
+# Not ported from the 1.x checker: the STALE_PROCESS warning. On 2.x the oracle
+# for what the runtime actually resolves is the running server's API
+# (verify-effective-routing.sh), not process start times against the config
+# mtime; this check compares files only.
 
 check_alignment_v2() {
   local profile="" targets="" bundle_root="" live_config="" live_support="" json_out=""
@@ -79,6 +80,7 @@ import hashlib
 import json
 import os
 import sys
+import tempfile
 
 sys.path.insert(0, os.environ["HELPER_DIR"])
 import v2config  # noqa: E402
@@ -149,22 +151,50 @@ if live_shape != "v1":
                       "actual": render(subagent_entries(live)),
                       "detail": "top-level subagent rules, in order (the Breakglass containment control)"})
 
+    # Activation owns every entry whose basename is model-routing.md, so an
+    # extra one besides the expected path is drift too.
     instructions = live.get("instructions")
-    matches = [i for i in instructions if i == installed_routing] if isinstance(instructions, list) else []
-    if len(matches) != 1:
+    entries = instructions if isinstance(instructions, list) else []
+    matches = [i for i in entries if isinstance(i, str) and os.path.normpath(i) == installed_routing]
+    extras = [i for i in entries if isinstance(i, str) and os.path.normpath(i) != installed_routing
+              and os.path.basename(os.path.normpath(i)) == "model-routing.md"]
+    if len(matches) != 1 or extras:
         drift.append({"kind": "config", "key": "instructions",
-                      "expected": f"exactly one entry equal to {installed_routing}",
+                      "expected": f"exactly one model-routing.md entry, equal to {installed_routing}",
                       "actual": render(instructions),
                       "detail": "the installed model-routing.md instruction"})
 
 # --- support files ----------------------------------------------------------
 
+UNDECODABLE = object()
+
 def read_text(path):
+    """Text without a leading BOM; None when absent; UNDECODABLE when not UTF-8."""
     try:
-        with open(path, encoding="utf-8") as handle:
+        with open(path, encoding="utf-8-sig") as handle:
             return handle.read()
+    except UnicodeDecodeError:
+        return UNDECODABLE
     except OSError:
         return None
+
+def has_bom(path):
+    try:
+        with open(path, "rb") as handle:
+            return handle.read(3) == b"\xef\xbb\xbf"
+    except OSError:
+        return False
+
+def front_of_text(text):
+    """md_frontmatter on already-decoded text (BOM stripped)."""
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".md", delete=False) as tmp:
+        tmp.write(text)
+    try:
+        return v2config.md_frontmatter(tmp.name)
+    finally:
+        os.unlink(tmp.name)
+
+PARSE_ERRORS = (OSError, ValueError, v2config.FrontmatterError)
 
 def body_of(text):
     lines = text.split("\n")
@@ -192,32 +222,76 @@ for name in agent_names:
         drift.append({"kind": "support", "file": label, "detail": "not installed",
                       "expected": "<present in bundle>", "actual": "<missing>"})
         continue
+    if live_text is UNDECODABLE:
+        drift.append({"kind": "support", "file": label,
+                      "detail": "installed file is not valid UTF-8 (unparseable)",
+                      "expected": "<valid UTF-8>", "actual": "<undecodable>"})
+        continue
+    if repo_text is None or repo_text is UNDECODABLE:
+        drift.append({"kind": "support", "file": label,
+                      "detail": "repository bundle file is missing or unreadable (unparseable)",
+                      "expected": "<parseable frontmatter>", "actual": "<unparseable>"})
+        continue
     try:
-        repo_front = v2config.md_frontmatter(repo_file)
-    except (OSError, ValueError, v2config.FrontmatterError) as error:
+        repo_front = front_of_text(repo_text)
+    except PARSE_ERRORS as error:
         drift.append({"kind": "support", "file": label,
                       "detail": f"repository bundle file is unparseable ({error})",
                       "expected": "<parseable frontmatter>", "actual": "<unparseable>"})
         continue
+    bom_note = " (a leading UTF-8 BOM was stripped)" if has_bom(live_file) else ""
     try:
-        live_front = v2config.md_frontmatter(live_file)
-    except (OSError, ValueError, v2config.FrontmatterError) as error:
+        live_front = front_of_text(live_text)
+    except PARSE_ERRORS as error:
         drift.append({"kind": "support", "file": label,
-                      "detail": f"installed file is unparseable ({error})",
+                      "detail": f"installed file is unparseable ({error}){bom_note}",
                       "expected": render(repo_front), "actual": "<unparseable>"})
         continue
-    if "permission" in live_front or "model" in live_front:
+    if "permission" in live_front:
         drift.append({"kind": "support", "file": label,
-                      "detail": "installed file has OpenCode 1.x-shaped frontmatter (permission/model key)",
+                      "detail": "installed file has OpenCode 1.x-shaped frontmatter (permission key)" + bom_note,
+                      "expected": render(repo_front), "actual": render(live_front)})
+    elif "model" in live_front:
+        drift.append({"kind": "support", "file": label,
+                      "detail": "installed file sets a model: the bundle keeps model routing in opencode.jsonc" + bom_note,
                       "expected": render(repo_front), "actual": render(live_front)})
     elif repo_front != live_front:
         drift.append({"kind": "support", "file": label,
-                      "detail": "frontmatter differs -- permissions are a security boundary",
+                      "detail": "frontmatter differs -- permissions are a security boundary" + bom_note,
                       "expected": render(repo_front), "actual": render(live_front)})
     elif body_of(repo_text) != body_of(live_text):
         stale.append({"kind": "support", "file": label,
-                      "detail": "frontmatter matches; prose differs",
+                      "detail": "frontmatter matches; prose differs" + bom_note,
                       "expected_sha256": digest(repo_text), "actual_sha256": digest(live_text)})
+
+# An agent file present ONLY in the install, naming a role this bundle routes,
+# can shadow a routing-owned row while the JSON still matches. The bundle ships
+# nothing to verify it against, so a permissions/permission/model key or an
+# unparseable file is drift; plain description/mode is the user's business.
+try:
+    live_agent_files = sorted(
+        e[:-3] for e in os.listdir(os.path.join(live_support, "agents")) if e.endswith(".md"))
+except OSError:
+    live_agent_files = []
+for name in live_agent_files:
+    if name in agent_names or name not in roles:
+        continue
+    label = f"agents/{name}.md"
+    text = read_text(os.path.join(live_support, "agents", f"{name}.md"))
+    try:
+        if text is UNDECODABLE or text is None:
+            raise ValueError("not valid UTF-8")
+        front = front_of_text(text)
+    except PARSE_ERRORS as error:
+        drift.append({"kind": "support", "file": label,
+                      "detail": f"installed-only agent file for routed role '{name}' is unparseable ({error})",
+                      "expected": "<not shipped by this bundle>", "actual": "<unparseable>"})
+        continue
+    if {"permissions", "permission", "model"} & set(front):
+        drift.append({"kind": "support", "file": label,
+                      "detail": f"installed-only agent file for routed role '{name}' carries permissions or a model, "
+                                "which can override the routing-owned row; the bundle ships nothing to verify it against",
+                      "expected": "<not shipped by this bundle>", "actual": render(front)})
 
 repo_routing = read_text(os.path.join(bundle_root, "model-routing.md"))
 live_routing = read_text(os.path.join(live_support, "model-routing.md"))
@@ -225,6 +299,10 @@ if repo_routing is None:
     drift.append({"kind": "support", "file": "model-routing.md",
                   "detail": "missing from the repository bundle",
                   "expected": "<present>", "actual": "<missing>"})
+elif live_routing is UNDECODABLE or repo_routing is UNDECODABLE:
+    drift.append({"kind": "support", "file": "model-routing.md",
+                  "detail": "file is not valid UTF-8 (unparseable)",
+                  "expected": "<valid UTF-8>", "actual": "<undecodable>"})
 elif live_routing is None:
     drift.append({"kind": "support", "file": "model-routing.md",
                   "detail": "not installed -- the routing policy the controller loads is absent",

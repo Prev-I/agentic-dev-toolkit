@@ -67,7 +67,8 @@ run_check || { cat "$workdir/out.txt"; fail "an activated install with the bundl
 # --- routing-owned config keys --------------------------------------------
 setup_aligned
 edit_config 'd["agents"]["reviewer"]["model"]["variant"] = "low"'
-run_check && fail "a changed role variant must be DRIFT"
+rc=0; run_check || rc=$?
+[[ $rc == 1 ]] || fail "a changed role variant must exit 1, got $rc"
 [[ "$(report_status)" == DRIFT ]] || fail "expected DRIFT, got $(report_status)"
 grep -q 'agents.reviewer' "$workdir/out.txt" || fail "drift must name the role"
 
@@ -95,6 +96,15 @@ edit_config 'd["instructions"] = []'
 run_check && fail "a removed model-routing.md instruction must be DRIFT"
 grep -q 'instructions' "$workdir/out.txt" || fail "drift must name instructions"
 
+setup_aligned
+edit_config 'd["instructions"].append("/elsewhere/model-routing.md")'
+run_check && fail "an extra model-routing.md instruction must be DRIFT"
+grep -q 'exactly one model-routing.md entry' "$workdir/out.txt" || fail "drift must describe the instruction rule"
+
+setup_aligned
+edit_config 'd["instructions"] = [e + "/" for e in d["instructions"]]'
+run_check || fail "a trailing slash on the instruction path must not be DRIFT"
+
 # --- agent markdown --------------------------------------------------------
 setup_aligned
 sed -i '$a An extra sentence in the body only.' "$live/agents/reviewer.md"
@@ -116,13 +126,54 @@ run_check && fail "a missing installed agent file must be DRIFT"
 grep -q 'agents/scout.md' "$workdir/out.txt" || fail "drift must name the missing file"
 
 setup_aligned
-sed -i 's/^permissions:/permission:/' "$live/agents/expert.md"
+printf -- '---\ndescription: d\npermission:\n  edit: deny\n---\nbody\n' >"$live/agents/expert.md"
 run_check && fail "V1-shaped installed frontmatter must be DRIFT"
 [[ "$(report_status)" == DRIFT ]] || fail "expected DRIFT, got $(report_status)"
+grep -q '1.x-shaped frontmatter' "$workdir/out.txt" || fail "the permission: branch must say 1.x-shaped"
 
 setup_aligned
 printf -- '---\nmodel: x/y\n---\nbody\n' >"$live/agents/expert.md"
 run_check && fail "a model: key in installed frontmatter must be DRIFT"
+grep -q 'keeps model routing in opencode.jsonc' "$workdir/out.txt" || fail "the model: branch must say where routing lives"
+
+# Invalid UTF-8 is DRIFT naming the file, never a crash.
+setup_aligned
+printf -- '---\ndescription: \x97\n---\nbody\n' >"$live/agents/expert.md"
+rc=0; run_check || rc=$?
+[[ $rc == 1 ]] || fail "undecodable agent file must exit 1, got $rc"
+grep -q 'agents/expert.md' "$workdir/out.txt" || fail "drift must name the undecodable file"
+grep -q 'not valid UTF-8' "$workdir/out.txt" || fail "drift must say not valid UTF-8"
+grep -q Traceback "$workdir/out.txt" && fail "undecodable file must not crash"
+setup_aligned
+printf 'bad \x97 byte\n' >"$live/model-routing.md"
+rc=0; run_check || rc=$?
+[[ $rc == 1 ]] || fail "undecodable model-routing.md must exit 1, got $rc"
+grep -q 'not valid UTF-8' "$workdir/out.txt" || fail "drift must say not valid UTF-8"
+grep -q Traceback "$workdir/out.txt" && fail "undecodable model-routing.md must not crash"
+
+# A BOM on an otherwise matching installed agent file is not drift.
+setup_aligned
+{ printf '\xef\xbb\xbf'; cat "$bundle_dir/.opencode/agents/expert.md"; } >"$live/agents/expert.md"
+run_check || { cat "$workdir/out.txt"; fail "a BOM-only difference must not be DRIFT"; }
+[[ "$(report_status)" == ALIGNED ]] || fail "BOM-only difference must be ALIGNED, got $(report_status)"
+
+# Installed-only agent files for a routed role can shadow its row.
+setup_aligned
+printf -- '---\ndescription: x\npermissions:\n  - action: edit\n    resource: "*"\n    effect: allow\n---\n' >"$live/agents/build.md"
+rc=0; run_check || rc=$?
+[[ $rc == 1 ]] || fail "shadowing installed-only agent must exit 1, got $rc"
+grep -q 'agents/build.md' "$workdir/out.txt" || fail "drift must name build.md"
+grep -q 'installed-only agent file' "$workdir/out.txt" || fail "drift must use the shadow wording"
+setup_aligned
+printf -- '---\ndescription: x\nmode: primary\n---\nbody\n' >"$live/agents/build.md"
+run_check || fail "installed-only agent with only description/mode must not be DRIFT"
+setup_aligned
+printf 'no frontmatter\n' >"$live/agents/build.md"
+run_check && fail "an unparseable installed-only routed agent must be DRIFT"
+setup_aligned
+printf -- '---\ndescription: x\npermissions:\n  - action: edit\n    resource: "*"\n    effect: allow\n---\n' >"$live/agents/my-helper.md"
+run_check || fail "a non-role installed-only agent must not be reported"
+grep -q 'my-helper' "$workdir/out.txt" && fail "non-role agent must not appear in the report"
 
 setup_aligned
 printf 'no frontmatter at all\n' >"$live/agents/expert.md"
@@ -180,9 +231,28 @@ set -e
 grep -q 'v2/opencode.jsonc' "$workdir/entry.json" || fail "the entry point JSON must name v2/opencode.jsonc"
 touch "$live/opencode.json"
 set +e
-XDG_CONFIG_HOME="$workdir/xdg" bash "$root/check-alignment.sh" >/dev/null 2>&1
+XDG_CONFIG_HOME="$workdir/xdg" bash "$root/check-alignment.sh" >"$workdir/entry.txt" 2>&1
 rc=$?
 set -e
 [[ $rc == 2 ]] || fail "an ambiguous config root must exit 2, got $rc"
+grep -q ambiguous "$workdir/entry.txt" || fail "ambiguity message missing"
+
+# A symlinked config, dangling included, is refused with exit 2.
+setup_aligned
+mv "$cfg" "$workdir/real.jsonc"; ln -s "$workdir/real.jsonc" "$cfg"
+set +e
+XDG_CONFIG_HOME="$workdir/xdg" bash "$root/check-alignment.sh" >"$workdir/entry.txt" 2>&1
+rc=$?
+set -e
+[[ $rc == 2 ]] || fail "a symlinked config must exit 2, got $rc"
+grep -q 'is a symlink' "$workdir/entry.txt" || fail "symlink message missing"
+setup_aligned
+ln -s "$workdir/nowhere.json" "$live/opencode.json"
+set +e
+XDG_CONFIG_HOME="$workdir/xdg" bash "$root/check-alignment.sh" >"$workdir/entry.txt" 2>&1
+rc=$?
+set -e
+[[ $rc == 2 ]] || fail "a dangling symlink beside a config must exit 2, got $rc"
+grep -q 'is a symlink' "$workdir/entry.txt" || fail "dangling symlink message missing"
 
 printf 'PASS: V2 alignment check (drift vs stale, user-owned keys never flagged)\n'

@@ -24,15 +24,25 @@ source "$root/runtime/opencode-v1-adapter/select-activation-target.sh"
 config_home=${XDG_CONFIG_HOME:-$HOME/.config}
 live_root="$config_home/opencode"
 
-# Resolve exactly the way activation does. select_activation_target refuses
-# (exit 1) when both opencode.json and opencode.jsonc exist, because there is
-# no safe way to know which one OpenCode will read. Picking one silently
-# would let this report ALIGNED against a file the runtime may ignore.
-if ! live_config=$(select_activation_target "$live_root"); then
+# Resolve the way activation does. A symlinked config is refused (activation
+# would replace the link, so there is nothing safe to compare), and a dangling
+# link counts as present. When both opencode.json and opencode.jsonc exist
+# there is no safe way to know which one OpenCode reads, so refuse rather than
+# report ALIGNED against a file the runtime may ignore.
+for candidate in "$live_root/opencode.json" "$live_root/opencode.jsonc"; do
+  if [[ -L "$candidate" ]]; then
+    printf 'check-alignment: %s is a symlink (to %s).\n' "$candidate" "$(readlink "$candidate")" >&2
+    printf 'check-alignment: refusing -- check the link target directly, or replace the link.\n' >&2
+    exit 2
+  fi
+done
+if [[ ( -e "$live_root/opencode.json" || -L "$live_root/opencode.json" ) \
+      && ( -e "$live_root/opencode.jsonc" || -L "$live_root/opencode.jsonc" ) ]]; then
   printf 'check-alignment: %s contains both opencode.json and opencode.jsonc.\n' "$live_root" >&2
   printf 'check-alignment: ambiguous -- cannot tell which one OpenCode reads. Remove one.\n' >&2
   exit 2
 fi
+live_config=$(select_activation_target "$live_root")
 
 check_alignment_v2 \
   --profile "$bundle/v2/opencode.jsonc" \

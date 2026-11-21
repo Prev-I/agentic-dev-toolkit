@@ -74,6 +74,29 @@ role_status() { jq -r --arg r "$1" '.roles[$r].status' "$out"; }
 roles=$(jq -r '.agents | keys[]' "$targets")
 assert_eq 11 "$(wc -l <<<"$roles")"
 
+# no_watchdog CALLER: within 5 s, no verifier watchdog started for the caller
+# shell CALLER (its BASHPID) is left; the watchdog's command line carries
+# `_vr_watchdog CALLER INNER`.
+no_watchdog() {
+  local left=''
+  for _ in $(seq 1 50); do
+    left=$(pgrep -f "_vr_watchdog $1 " || true)
+    [[ -z "$left" ]] && return 0
+    sleep 0.1
+  done
+  fail "verifier watchdog still running for caller $1: $left"
+}
+
+# wait_plan_poll: within 10 s, the verifier has asked for the plan agent (the
+# never-resolving one), so it is inside the poll.
+wait_plan_poll() {
+  for _ in $(seq 1 100); do
+    grep -q '^GET /api/agent/plan ' "$workdir/requests.log" 2>/dev/null && return 0
+    sleep 0.1
+  done
+  return 1
+}
+
 # 1. all eleven roles PASS, with every agent fixture marked lazy (Review focus 4).
 fx=$(fresh pass keep-lazy)
 assert_eq 11 "$(find "$fx" -name 'api_agent_*.lazy' | wc -l)"
@@ -411,6 +434,8 @@ before=$(trap -p)
 run_verify traps
 assert_eq 0 "$rc"
 assert_eq "$before" "$(trap -p)"
+# a normal run leaves no watchdog behind.
+no_watchdog "$$"
 trap - INT TERM
 stop_server
 
@@ -419,6 +444,7 @@ stop_server
 # and this shell survives.
 fx=$(fresh term)
 rm -f "${fx:?}/api_agent_plan.json"
+: >"$workdir/requests.log"
 serve "$fx"
 marker="$workdir/parent-exit"
 rm -rf "${tmpbase:?}"
@@ -431,15 +457,16 @@ mkdir -p "$tmpbase"
     --targets "$targets" --outdir "$workdir/term" --neutral-cwd "$workdir/neutral"
 ) >/dev/null 2>&1 &
 sub=$!
+# the per-run neutral directory exists only once _vr_collect runs, after the
+# verifier's traps and watchdog are in place; the plan request proves the poll.
 for _ in $(seq 1 100); do
-  [[ -n "$(ls -A "$tmpbase" 2>/dev/null)" ]] && break
+  compgen -G "$tmpbase/*/neutral" >/dev/null && break
   sleep 0.05
 done
-if [[ -z "$(ls -A "$tmpbase")" ]]; then
+if ! compgen -G "$tmpbase/*/neutral" >/dev/null || ! wait_plan_poll; then
   kill "$sub" 2>/dev/null || true
-  fail "verifier never created its work directory"
+  fail "verifier never reached the plan-agent poll"
 fi
-# the work directory exists only after the verifier's traps are installed.
 kill -TERM "$sub"
 rc=0; wait "$sub" || rc=$?
 assert_eq 143 "$rc"
@@ -451,7 +478,74 @@ for _ in $(seq 1 100); do
   sleep 0.1
 done
 [[ -z "$(ls -A "$tmpbase")" ]] || fail "temp directories left behind: $(ls -A "$tmpbase")"
+no_watchdog "$sub"
 kill -0 $$ || fail "the parent test shell died"
 stop_server
+
+# 19. a signal sent only to the verifier's collecting subshell (found through
+# its watchdog's command line) while the caller lives on: the verifier returns
+# 128+N and the watchdog ends with the subshell rather than outliving it. TERM
+# goes through the subshell's traps (temp directories removed); KILL runs no
+# trap at all, so only the watchdog's own check on the subshell can stop it.
+# inner_signal SIG STATUS
+inner_signal() {
+  local sig=$1 want=$2 fx rcfile stopflag sub wd inner
+  fx=$(fresh "inner$sig")
+  rm -f "${fx:?}/api_agent_plan.json"
+  : >"$workdir/requests.log"
+  serve "$fx"
+  rcfile="$workdir/inner$sig.rc"
+  stopflag="$workdir/inner$sig.stop"
+  rm -rf "${tmpbase:?}"
+  mkdir -p "$tmpbase"
+  (
+    # shellcheck disable=SC2030,SC2031
+    export TMPDIR="$tmpbase"
+    vrc=0
+    V2_AGENT_POLL_TIMEOUT=60 verify_effective_routing_v2 --server "$base" --credentials "$workdir/ok.env" \
+      --targets "$targets" --outdir "$workdir/inner$sig" --neutral-cwd "$workdir/neutral" || vrc=$?
+    echo "$vrc" >"$rcfile"
+    for _ in $(seq 1 200); do
+      [[ -e "$stopflag" ]] && break
+      sleep 0.05
+    done
+  ) >/dev/null 2>&1 &
+  sub=$!
+  if ! wait_plan_poll; then
+    kill "$sub" 2>/dev/null || true
+    fail "$sig: verifier never reached the plan-agent poll"
+  fi
+  wd=$(pgrep -f "_vr_watchdog $sub " | head -n1 || true)
+  if [[ -z "$wd" ]]; then
+    kill "$sub" 2>/dev/null || true
+    fail "$sig: no watchdog found for caller $sub"
+  fi
+  inner=$(tr '\0' '\n' <"/proc/$wd/cmdline" | tail -n1)
+  if ! [[ "$inner" =~ ^[0-9]+$ && "$inner" != "$sub" ]]; then
+    kill "$sub" 2>/dev/null || true
+    fail "$sig: bad subshell pid from the watchdog: $inner"
+  fi
+  kill -s "$sig" "$inner"
+  for _ in $(seq 1 100); do
+    [[ -s "$rcfile" ]] && break
+    sleep 0.1
+  done
+  if [[ ! -s "$rcfile" ]]; then
+    kill "$sub" 2>/dev/null || true
+    fail "$sig: verifier did not return after a signal to its subshell"
+  fi
+  assert_eq "$want" "$(<"$rcfile")"
+  # the caller is still alive, and its watchdog is already gone.
+  kill -0 "$sub" 2>/dev/null || fail "$sig: caller ended before the watchdog check"
+  no_watchdog "$sub"
+  if [[ "$sig" == TERM ]]; then
+    [[ -z "$(ls -A "$tmpbase")" ]] || fail "temp directories left behind: $(ls -A "$tmpbase")"
+  fi
+  touch "$stopflag"
+  wait "$sub" || fail "$sig: caller failed after the verifier returned"
+  stop_server
+}
+inner_signal TERM 143
+inner_signal KILL 137
 
 printf 'PASS: v2-effective-routing-test\n'

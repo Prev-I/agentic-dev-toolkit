@@ -132,7 +132,10 @@ verify_effective_routing_v2() {
   # traps are never read or changed, and a fatal error inside it ends only the
   # subshell, with its status. A watchdog ends the subshell if the caller dies
   # by a signal it has no handler for (the subshell would otherwise be orphaned
-  # with its temp directories).
+  # with its temp directories). The watchdog also stops as soon as the subshell
+  # is gone, so it cannot outlive the run even when the EXIT trap never kills
+  # it (SIGKILL, a signal before its PID is recorded), and it signals only a
+  # live subshell. Its command line carries `_vr_watchdog PARENT INNER`.
   local rc=0 parent=$BASHPID
   (
     inner=$BASHPID
@@ -140,10 +143,11 @@ verify_effective_routing_v2() {
     trap '_vr_cleanup; [[ -z "$watchdog" ]] || kill "$watchdog" 2>/dev/null || true' EXIT
     trap '_vr_cleanup; trap - INT; kill -s INT "$BASHPID"' INT
     trap '_vr_cleanup; trap - TERM; kill -s TERM "$BASHPID"' TERM
-    (
-      while kill -0 "$parent" 2>/dev/null; do sleep 0.5; done
-      kill -s TERM "$inner" 2>/dev/null || true
-    ) >/dev/null 2>&1 </dev/null &
+    # shellcheck disable=SC2016  # expanded by the watchdog's own shell
+    "${BASH:-bash}" -c '
+      while kill -0 "$1" 2>/dev/null && kill -0 "$2" 2>/dev/null; do sleep 0.5; done
+      if kill -0 "$2" 2>/dev/null; then kill -s TERM "$2" 2>/dev/null; fi
+      exit 0' _vr_watchdog "$parent" "$inner" >/dev/null 2>&1 </dev/null &
     watchdog=$!
     work=$(mktemp -d)
     _VR_TMPDIRS+=("$work")

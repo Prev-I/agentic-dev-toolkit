@@ -9,7 +9,8 @@
 
   "$schema": "https://opencode.ai/config.json",
 
-  // The single instructions entry; the installer rewrites it to an absolute path.
+  // Not used by activation: activation writes its own single entry, the absolute
+  // path given as --model-routing, and keeps the target's other entries.
   "instructions": [
     ".opencode/model-routing.md"
   ],

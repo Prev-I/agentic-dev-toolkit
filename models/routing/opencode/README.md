@@ -1,6 +1,6 @@
 # OpenCode multi-model routing starter
 
-This bundle routes OpenCode's built-in agents through one configuration file and adds three custom agents: `reviewer`, `expert` and `scout`. It targets OpenCode 2.x; the OpenCode 1.x bundle is kept as history (see "OpenCode 1.x (history)" below).
+This bundle routes OpenCode's built-in agents through one configuration file and adds four custom agents: the subagents `reviewer`, `expert` and `scout`, and `breakglass`, a custom primary agent that a human selects and no agent may dispatch. It targets OpenCode 2.x; the OpenCode 1.x bundle is kept as history (see "OpenCode 1.x (history)" below).
 
 Routing is split deliberately into two layers:
 
@@ -45,7 +45,13 @@ commands run from the repository root. Paths under `~/.config/opencode` assume
    only `dry_run=1`, the `target` and its `before_sha256`; it writes nothing and
    does not show a diff. Copy the contents of `v2/.opencode/` (`agents/` and
    `model-routing.md`) into the config root first, so `model-routing.md` exists at
-   the absolute path you pass. Alignment compares the installed files there.
+   the absolute path you pass. Alignment compares the installed files there, and
+   expects `model-routing.md` at `<config-root>/model-routing.md`: activation
+   writes the path normalised and warns when it is anywhere else or missing. An
+   undeclared variant on a model the target's `providers` block declares is
+   refused; a provider block with no entry for the model (such as the
+   converter's `"openai": {}`) is not checked statically, only noted, and the
+   verifier checks it against `/api/model`.
 
    ```bash
    cp -r models/routing/opencode/v2/.opencode/. ~/.config/opencode/
@@ -69,8 +75,9 @@ commands run from the repository root. Paths under `~/.config/opencode` assume
    Breakglass, forbidden references) and writes `effective-routing.json`. Add
    `--project-cwd DIR` to see project overrides, and `--call` to run each role
    once. `--credentials` is a dotenv file holding `OPENCODE_PASSWORD` or
-   `OPENCODE_SERVER_PASSWORD`; it reaches curl through stdin, never argv. This
-   Use a fresh directory for `--neutral-cwd`, so that no project config above it
+   `OPENCODE_SERVER_PASSWORD`; it reaches curl through stdin, never argv.
+   `--server` defaults to `http://127.0.0.1:4096` (the probe below too). Use a
+   fresh directory for `--neutral-cwd`, so that no project config above it
    can change what the server resolves, and for `--outdir`, so the result is not
    mixed with an older run:
 
@@ -109,10 +116,15 @@ shape plus a targets manifest, and the tools above work on it unchanged.
   top-level `model`; `agents.<role>` for every role the manifest declares (each
   row replaced whole); the top-level `permissions` entries whose `action` is
   `subagent`; and exactly one `instructions` entry, the absolute path of the
-  installed `model-routing.md`. Everything else is yours and is never reported.
+  installed `model-routing.md`. Everything else is yours and is never reported,
+  except that alignment reports DRIFT when the top-level entry deciding a
+  subagent call to Breakglass (the last `subagent` or `*` entry matching it) is
+  not a deny.
 - **Targets manifest**, format `opencode-v2-routing-targets/1`: `profile_id`,
   `default_model`, `agents.<role>` rows of `{providerID, model, variant, mode}`,
-  `breakglass: {agent, deny_as_subagent}`, `forbidden_model_references`, and
+  `breakglass: {agent, deny_as_subagent}` (`deny_as_subagent` must be `true`:
+  the tools always require the deny and never read it as permission to drop
+  it), `forbidden_model_references`, and
   `forbidden_effective_state`. A role's `mode` of `null` means the mode is not
   checked, for roles that keep whatever mode the server gives them.
 - **The prompt key is `system`.** `prompt` is the 1.x name: in a 2.x file it is

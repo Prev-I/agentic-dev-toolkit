@@ -90,9 +90,10 @@ guidance on hard problems but never writes code. Prompt and permissions are defi
 `.opencode/agents/expert.md`; model and variant are assigned by `opencode.jsonc`.
 
 ### breakglass
-Human-selected primary agent, never reachable through Task delegation. The `task` permission
-denies it explicitly, at the top level and on every agent that can delegate. `hidden` is not
-treated as a security property.
+Human-selected primary agent (primary-only), never reachable through subagent delegation. The
+`subagent` permission denies it explicitly, at the top level and on every agent that can
+delegate, and that deny stays the last matching entry. `hidden` is not treated as a security
+property.
 
 ## Superpowers Integration
 

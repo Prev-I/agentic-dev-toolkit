@@ -1,13 +1,24 @@
 #!/usr/bin/env bash
 # Authenticated, polled access to the OpenCode 2 HTTP API. Source this file.
 #
-#   v2_load_credentials FILE        set V2_PASSWORD from a dotenv file
-#   v2_api_get URL_BASE PATH        GET, body to stdout; 0 on HTTP 200, else 1
-#   v2_agent_get URL_BASE ROLE DIR  poll until the agent resolves; print .data
+#   v2_load_credentials FILE        set V2_PASSWORD from a dotenv file; 2 when
+#                                   absent, empty, or holding " or \
+#   v2_api_get URL_BASE PATH        GET, body to stdout; 0 on HTTP 200, 1 on any
+#                                   other outcome, 2 when the password or URL is
+#                                   unsafe to pass to curl
+#   v2_agent_get URL_BASE ROLE DIR  poll until the agent resolves; print .data;
+#                                   0 resolved, 1 refused/unreachable/timed out,
+#                                   2 unsafe password or URL
 #
 # The password reaches curl only through a config on stdin (`curl -K -`), never
-# in argv, where `ps` would show it. A password containing a double quote or a
-# backslash would break that config, so such a password is refused.
+# in argv, where `ps` would show it. A password or URL containing a double
+# quote, a backslash, a CR or a LF would break that config, so it is refused
+# (return 2) before curl runs.
+#
+# Every request sets V2_LAST_STATUS (the HTTP code, or curl:<exit>) and
+# V2_LAST_BODY. They are shell variables: a call inside `$(...)` sets them in
+# that subshell only, and the caller's copies keep their earlier values. Call
+# with output redirected to a file when the caller needs them.
 set -Eeuo pipefail
 
 V2_PASSWORD=${V2_PASSWORD:-}

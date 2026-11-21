@@ -373,12 +373,12 @@ opencode_config_shape() {
   fi
 
   if command -v jq >/dev/null 2>&1 && jq empty "$file" >/dev/null 2>&1; then
-    jq -r '
-      . as $doc |
-      if ($doc | type) != "object" then "unparseable"
-      elif (["agent", "provider", "permission", "plugin", "disabled_providers", "autoupdate", "server"]
+    jq -rs '
+      if length != 1 or (.[0] | type) != "object" then "unparseable"
+      elif (.[0] as $doc
+            | ["agent", "provider", "permission", "plugin", "disabled_providers", "autoupdate", "server"]
             | any(. as $key | $doc | has($key)))
-        or (($doc.mcp | type) == "object" and ($doc.mcp | has("servers") | not)) then "v1"
+        or ((.[0].mcp | type) == "object" and (.[0].mcp | has("servers") | not)) then "v1"
       else "v2" end
     ' "$file"
     return
@@ -389,7 +389,7 @@ opencode_config_shape() {
     return
   fi
 
-  python3 - "$file" <<'PYTHON_SHAPE'
+  python3 -I - "$file" <<'PYTHON_SHAPE'
 import json
 import sys
 
@@ -477,6 +477,10 @@ else:
 PYTHON_SHAPE
 }
 
+die_opencode_unparseable_config() {
+  die "$OPENCODE_CONFIG could not be parsed as an OpenCode config; the installer did not change the file. Fix the file, or use --skip-superpowers"
+}
+
 die_opencode_v1_config() {
   die "$OPENCODE_CONFIG is an OpenCode 1.x config (V1 top-level keys); the installer did not change the file. Convert it first with $OPENCODE_V1_CONVERTER in the agentic-dev-toolkit repository, or use --skip-superpowers"
 }
@@ -507,11 +511,18 @@ opencode_superpowers_configured() {
 preflight_opencode_superpowers() {
   (( SKIP_SUPERPOWERS == 0 )) || return 0
   [[ -s "$OPENCODE_CONFIG" ]] || return 0
-  [[ "$(opencode_config_shape "$OPENCODE_CONFIG")" != v1 ]] || die_opencode_v1_config
+  local shape
+  shape="$(opencode_config_shape "$OPENCODE_CONFIG")"
+  [[ "$shape" != v1 ]] || die_opencode_v1_config
   if ! command -v jq >/dev/null 2>&1; then
     (( VERIFY_ONLY == 0 )) || die "jq is required to verify OpenCode Superpowers configuration"
+    # jq may still be installed later in this run; configure re-checks the shape.
     return 0
   fi
+  case "$shape" in
+    empty | v2) ;;
+    *) die_opencode_unparseable_config ;;
+  esac
   jq empty "$OPENCODE_CONFIG" >/dev/null 2>&1 && return 0
   opencode_superpowers_configured && return 0
   die "Could not confirm Superpowers $SUPERPOWERS_REF as a standalone plugin entry in $OPENCODE_CONFIG; put the entry on its own line without a trailing comment, or use --skip-superpowers"
@@ -520,7 +531,13 @@ preflight_opencode_superpowers() {
 verify_opencode_superpowers() {
   (( SKIP_SUPERPOWERS == 0 && DRY_RUN == 0 )) || return 0
   [[ -s "$OPENCODE_CONFIG" ]] || return 0
-  [[ "$(opencode_config_shape "$OPENCODE_CONFIG")" != v1 ]] || die_opencode_v1_config
+  local shape
+  shape="$(opencode_config_shape "$OPENCODE_CONFIG")"
+  case "$shape" in
+    empty | v2) ;;
+    v1) die_opencode_v1_config ;;
+    *) die_opencode_unparseable_config ;;
+  esac
   opencode_superpowers_configured || \
     die "Superpowers $SUPERPOWERS_REF is not configured in $OPENCODE_CONFIG"
 }
@@ -1662,7 +1679,11 @@ configure_opencode_superpowers() {
 
   local shape
   shape="$(opencode_config_shape "$OPENCODE_CONFIG")"
-  [[ "$shape" != v1 ]] || die_opencode_v1_config
+  case "$shape" in
+    empty | v2) ;;
+    v1) die_opencode_v1_config ;;
+    *) die_opencode_unparseable_config ;;
+  esac
 
   if [[ "$shape" == empty ]]; then
     jq -n --arg plugin "$plugin" '{

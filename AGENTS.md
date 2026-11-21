@@ -250,6 +250,15 @@ requires a manual edit or `--skip-superpowers`. Unlike strict JSON, JSONC is not
 normalized, so the operator must also remove any stale additional Superpowers
 entries manually.
 
+The installer writes the OpenCode 2.x `plugins` key, not the 1.x `plugin`, and
+creates a fresh config with `"update": "disable"`. It refuses a 1.x-shaped config
+(any of `agent`, `provider`, `permission`, `plugin`, `disabled_providers`,
+`autoupdate`, `server`, or an `mcp` object without `servers`) and an unparseable
+one, leaving the file unchanged: a file mixing both shapes silently loses
+settings upstream. The refusal names
+`models/routing/opencode/eval/runtime/opencode-v2-adapter/convert-v1-config.sh`
+as the converter.
+
 ## Repository policy
 
 `repository-policy/` defines `.repository-policy.yaml`, a small versioned format

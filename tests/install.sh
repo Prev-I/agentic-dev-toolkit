@@ -92,7 +92,7 @@ test_opencode_superpowers_uses_the_selected_config() {
     jq -e --arg plugin "$plugin" '.plugins == [$plugin]' \
       "$XDG_CONFIG_HOME/opencode/opencode.jsonc" >/dev/null \
       || fail "fresh JSONC config must contain the pinned Superpowers plugin"
-    jq -e '.update == "disable" and (has("plugin") | not) and .["$schema"] == "https://opencode.ai/config.json"' \
+    jq -e --arg plugin "$plugin" '. == {"$schema": "https://opencode.ai/config.json", "update": "disable", "plugins": [$plugin]}' \
       "$XDG_CONFIG_HOME/opencode/opencode.jsonc" >/dev/null \
       || fail "fresh config must be the OpenCode 2 shape: update disable, plugins, no plugin"
   )
@@ -279,7 +279,7 @@ EOF
   # Preflight and verification refuse it as well.
   status=0
   output="$( (
-    OPENCODE_CONFIG="$root/jsonc/opencode.jsonc"
+    OPENCODE_CONFIG="$root/strict/opencode.json"
     SKIP_SUPERPOWERS=0
     DRY_RUN=0
     VERIFY_ONLY=0
@@ -289,7 +289,7 @@ EOF
   assert_contains "$output" "convert-v1-config" "the preflight V1 refusal must name the converter"
   status=0
   output="$( (
-    OPENCODE_CONFIG="$root/strict/opencode.json"
+    OPENCODE_CONFIG="$root/jsonc/opencode.jsonc"
     SKIP_SUPERPOWERS=0
     DRY_RUN=0
     verify_opencode_superpowers
@@ -320,6 +320,14 @@ test_opencode_config_shape_rule() {
   assert_equal "$(opencode_config_shape "$root/bom.jsonc")" "v2" "a BOM and trailing commas are tolerated"
   printf '%s\n' '{"update":"http://x/*not a comment*/y", /* c */ "plugin":[]}' > "$root/str.jsonc"
   assert_equal "$(opencode_config_shape "$root/str.jsonc")" "v1" "comment markers inside strings are kept"
+  printf '%s\n' '// c' '{"mcp":{"a":{}}}' > "$root/pymcp.jsonc"
+  assert_equal "$(opencode_config_shape "$root/pymcp.jsonc")" "v1" "the python branch must apply the mcp rule"
+  printf '%s\n' '// c' '{"mcp":{"servers":{}}}' > "$root/pymcp2.jsonc"
+  assert_equal "$(opencode_config_shape "$root/pymcp2.jsonc")" "v2" "the python branch must accept mcp.servers"
+  printf '%s' '{"agent":{}}{}' > "$root/multi.json"
+  assert_equal "$(opencode_config_shape "$root/multi.json")" "unparseable" "a multi-document file is unparseable"
+  printf ' \n' > "$root/blank.json"
+  assert_equal "$(opencode_config_shape "$root/blank.json")" "unparseable" "a whitespace-only file is unparseable"
   local key
   for key in agent provider permission plugin disabled_providers autoupdate server; do
     printf '%s' "{\"$key\":1}" > "$root/key.json"
@@ -355,6 +363,80 @@ EOF
     verify_opencode_superpowers
   )
   assert_equal "$(sha256sum "$root/opencode.jsonc")" "$before" "V2 JSONC with the pinned line must stay byte-identical"
+}
+
+# PATH is narrowed inside subshells on purpose, to hide python3 from one call.
+# shellcheck disable=SC2030,SC2031
+test_opencode_superpowers_refuses_unparseable_configs() {
+  local root="$TEMP_DIR/opencode-superpowers-unparseable"
+  local plugin="$SUPERPOWERS_PLUGIN_BASE#$SUPERPOWERS_REF"
+  local name output status before
+
+  mkdir -p "$root" "$root/nopy"
+  printf '%s' '[1]' > "$root/array.json"
+  printf '%s' '{"agent":{}}{}' > "$root/multi.json"
+  printf ' \n' > "$root/blank.json"
+  cat > "$root/hand.jsonc" <<EOF
+// mine
+{
+  "agent": {},
+  "plugin": [
+    "$plugin"
+  ]
+}
+EOF
+  for name in array.json multi.json blank.json; do
+    before="$(sha256sum "$root/$name")"
+    status=0
+    output="$( (
+      OPENCODE_CONFIG="$root/$name"
+      SKIP_SUPERPOWERS=0
+      DRY_RUN=0
+      configure_opencode_superpowers
+    ) 2>&1)" || status=$?
+    assert_equal "$status" "1" "$name must make configure die"
+    assert_contains "$output" "could not be parsed" "$name refusal must say it is unparseable"
+    assert_equal "$(sha256sum "$root/$name")" "$before" "$name must stay unchanged"
+    [[ ! -e "$root/$name.pre-agentic-dev-toolkit" ]] || fail "$name must not be backed up"
+    status=0
+    output="$( (
+      OPENCODE_CONFIG="$root/$name"
+      SKIP_SUPERPOWERS=0
+      DRY_RUN=0
+      # Read indirectly by preflight_opencode_superpowers from the sourced installer.
+      # shellcheck disable=SC2034
+      VERIFY_ONLY=0
+      preflight_opencode_superpowers
+    ) 2>&1)" || status=$?
+    assert_equal "$status" "1" "$name must make preflight die"
+    status=0
+    ( OPENCODE_CONFIG="$root/$name"; SKIP_SUPERPOWERS=0; DRY_RUN=0; verify_opencode_superpowers ) \
+      >/dev/null 2>&1 || status=$?
+    assert_equal "$status" "1" "$name must make verify die"
+  done
+
+  # No python3: a non-strict file cannot be shaped, so it is refused even when
+  # the pinned plugin line is present (it could be a V1 file).
+  ln -s "$(command -v jq)" "$root/nopy/jq"
+  ln -s "$(command -v mkdir)" "$root/nopy/mkdir"
+  ln -s "$(command -v awk)" "$root/nopy/awk"
+  before="$(sha256sum "$root/hand.jsonc")"
+  status=0
+  output="$( (
+    export PATH="$root/nopy"
+    OPENCODE_CONFIG="$root/hand.jsonc"
+    SKIP_SUPERPOWERS=0
+    DRY_RUN=0
+    ! command -v python3 >/dev/null || fail "python3 must be hidden for this case"
+    configure_opencode_superpowers
+  ) 2>&1)" || status=$?
+  assert_equal "$status" "1" "non-strict JSONC without python3 must make configure die"
+  assert_contains "$output" "could not be parsed" "the no-python3 refusal must say it is unparseable"
+  assert_equal "$(sha256sum "$root/hand.jsonc")" "$before" "the file must stay unchanged without python3"
+  status=0
+  ( export PATH="$root/nopy"; OPENCODE_CONFIG="$root/hand.jsonc"; SKIP_SUPERPOWERS=0; DRY_RUN=0
+    verify_opencode_superpowers ) >/dev/null 2>&1 || status=$?
+  assert_equal "$status" "1" "verify must die on a non-strict file without python3"
 }
 
 test_installer_script_version_is_0_5_0() {
@@ -1634,6 +1716,7 @@ setup_az_sandbox() {
   # ~/.local/bin -- which on a machine that has already run the installer holds
   # exactly this shim. Left alone, every case in this block would report a
   # shadowing that only the host, not the behaviour, produced.
+  # shellcheck disable=SC2031
   AZ_SANDBOX_ORIGINAL_PATH="$PATH"
   PATH="$HOME/.local/bin:/usr/bin:/bin"
 
@@ -3321,6 +3404,7 @@ test_opencode_superpowers_preflight_and_verification
 test_opencode_superpowers_refuses_the_v1_shape
 test_opencode_config_shape_rule
 test_opencode_superpowers_accepts_v2_jsonc_unchanged
+test_opencode_superpowers_refuses_unparseable_configs
 test_installer_script_version_is_0_5_0
 
 test_lttng_selector_prefers_time64_package_when_available

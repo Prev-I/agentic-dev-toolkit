@@ -2,6 +2,7 @@
 # Shared run helpers for the OpenCode 2 verifiers. Source this file.
 #
 #   v2_run_isolated COLLECTOR [ARGS...]   run COLLECTOR WORKDIR ARGS... isolated
+#   v2_stop_pid PID                       stop the process group PID leads
 #   v2_auth_refused                       true when the last request got 401/403
 #   v2_call_role URL ROLE WORKDIR         one `opencode run` of ROLE; writes
 #                                         WORKDIR/calls/ROLE{.jsonl,.err,.json,.assistant.json}
@@ -12,7 +13,9 @@
 # subshell's status. The collector receives a fresh temp directory as its first
 # argument; that directory and the ones v2_call_role creates are removed on
 # exit and on INT/TERM. A watchdog ends the subshell if the caller dies by a
-# signal it has no handler for, and stops as soon as the subshell is gone. Its
+# signal it has no handler for, and stops as soon as the subshell is gone.
+# Process groups whose leader pids the collector appends to _V2_PIDS are stopped
+# (v2_stop_pid) before the directories are removed. The watchdog's
 # command line carries `_vr_watchdog PARENT INNER` (the name is relied on by the
 # verifier's test).
 set -Eeuo pipefail
@@ -20,8 +23,38 @@ set -Eeuo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/v2-http.sh"
 
 _V2_TMPDIRS=()
+# Process-group leaders (started with setsid) to stop before the temp dirs go.
+_V2_PIDS=()
+
+# v2_stop_pid PID: TERM the process group led by PID (and PID), wait up to 5 s,
+# then KILL; reaps it when it is this shell's child.
+v2_stop_pid() {
+  local pid=$1 state
+  [[ -n "$pid" ]] || return 0
+  kill -s TERM -- "-$pid" 2>/dev/null || kill -s TERM "$pid" 2>/dev/null || true
+  for _ in $(seq 1 50); do
+    kill -0 "$pid" 2>/dev/null || break
+    state=$(ps -o stat= -p "$pid" 2>/dev/null || true)
+    [[ "$state" != Z* ]] || break
+    sleep 0.1
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -s KILL -- "-$pid" 2>/dev/null || kill -s KILL "$pid" 2>/dev/null || true
+  fi
+  wait "$pid" 2>/dev/null || true
+  # Forget it, so a reused pid is never signalled later.
+  local kept=() p
+  for p in "${_V2_PIDS[@]}"; do
+    [[ "$p" == "$pid" ]] || kept+=("$p")
+  done
+  _V2_PIDS=("${kept[@]}")
+}
+
 _v2_cleanup() {
-  local d
+  local d p
+  for p in "${_V2_PIDS[@]}"; do
+    v2_stop_pid "$p"
+  done
   for d in "${_V2_TMPDIRS[@]}"; do
     [[ -z "$d" ]] || rm -rf "${d:?}"
   done

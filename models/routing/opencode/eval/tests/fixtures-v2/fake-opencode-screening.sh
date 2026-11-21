@@ -35,6 +35,11 @@
 #                                  omits every step_finish (unknown cost);
 #                                  observed_model defaults to the agent's
 #                                  fixture model, or to the --model value.
+#                                  For --agent A, a key "A@P/M#V" (the agent's
+#                                  fixture model) is tried before "A". When the
+#                                  prompt is the capability probe's ("Reply with
+#                                  exactly: CAPABILITY_OK"), a scenario's
+#                                  `probe` object overrides its fields.
 # Serve's layers are the config document ($XDG_CONFIG_HOME/opencode/opencode.json)
 # and the working directory; the first GET /api/config answers 404, as a server
 # still loading would. Fixtures are written under $XDG_CACHE_HOME, inside the
@@ -103,7 +108,7 @@ PY
 }
 
 run() {
-  local agent='' model='' key n sid fixtures i steps cost sleep_s text code message
+  local agent='' model='' key n sid fixtures i steps cost sleep_s text code message prompt='' fixture_use=''
   local observed write_path write_content
   local stdout_file
   stdout_file=$(readlink "/proc/$$/fd/1" || true)
@@ -123,7 +128,7 @@ run() {
       --format) shift 2 ;;
       --archived|--auto) shift ;;
       -*) printf 'fake-opencode-screening: unknown run flag %s\n' "$1" >&2; exit 2 ;;
-      *) shift ;;
+      *) prompt=$1; shift ;;
     esac
   done
   key=${agent:-$model}
@@ -133,8 +138,15 @@ run() {
   printf '%s\n' "$n" >"$state/session-counter"
   sid="ses_$n"
 
+  if [[ -n "$agent" && -f "$fixtures/api_agent_$agent.json" ]]; then
+    fixture_use=$(jq -r --arg a "$agent" '.data.model | "\($a)@\(.providerID)/\(.id)#\(.variant)"' \
+      "$fixtures/api_agent_$agent.json")
+  fi
   local sc='{}'
-  [[ ! -f "$state/scenario.json" ]] || sc=$(jq -c --arg k "$key" '.[$k] // {}' "$state/scenario.json")
+  [[ ! -f "$state/scenario.json" ]] || sc=$(jq -c --arg k "$key" --arg u "$fixture_use" \
+    --arg p "$prompt" '((if $u == "" then null else .[$u] end) // .[$k] // {})
+      | if $p == "Reply with exactly: CAPABILITY_OK" and has("probe") then . + .probe else . end' \
+    "$state/scenario.json")
   steps=$(jq -r '.steps // 1' <<<"$sc")
   cost=$(jq -r 'if has("cost_per_step") then .cost_per_step else 0 end' <<<"$sc")
   sleep_s=$(jq -r '.step_sleep // 0' <<<"$sc")

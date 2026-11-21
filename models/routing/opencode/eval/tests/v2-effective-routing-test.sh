@@ -356,4 +356,64 @@ assert_eq 'plan@github-copilot/claude-opus-5.5#xhigh' "$(jq -r '.roles.plan.call
 if grep -q Traceback "$workdir/callshape.log"; then fail "python traceback on odd messages"; fi
 stop_server
 
+# 15. a missing credentials file exits 2 and still removes a stale result.
+mkdir -p "$workdir/nocreds"
+printf '{"overall":"PASS"}\n' >"$workdir/nocreds/effective-routing.json"
+rc=0
+verify_effective_routing_v2 --server "http://127.0.0.1:1" --credentials "$workdir/absent.env" --targets "$targets" \
+  --outdir "$workdir/nocreds" --neutral-cwd "$workdir/neutral" >/dev/null 2>&1 || rc=$?
+assert_eq 2 "$rc"
+[[ ! -e "$workdir/nocreds/effective-routing.json" ]] || fail "stale file survived missing credentials"
+# the same for a missing targets file.
+printf '{"overall":"PASS"}\n' >"$workdir/nocreds/effective-routing.json"
+rc=0
+verify_effective_routing_v2 --server "http://127.0.0.1:1" --credentials "$workdir/ok.env" --targets "$workdir/none.json" \
+  --outdir "$workdir/nocreds" --neutral-cwd "$workdir/neutral" >/dev/null 2>&1 || rc=$?
+assert_eq 2 "$rc"
+[[ ! -e "$workdir/nocreds/effective-routing.json" ]] || fail "stale file survived a missing targets file"
+
+# 16. an unrelated later deny does not count: the last entry that can decide
+# subagent breakglass is still the allow.
+fx=$(fresh bgother)
+edit "$fx/api_agent_build.json" '.data.permissions += [{"action":"subagent","resource":"breakglass","effect":"allow"},{"action":"subagent","resource":"other-agent","effect":"deny"}]'
+serve "$fx"
+run_verify bgother
+assert_eq 1 "$rc"
+assert_eq MISMATCH "$(jq -r .overall "$out")"
+assert_eq MISMATCH "$(role_status build)"
+assert_eq allow "$(jq -r '.roles.build.neutral.subagent_breakglass.effect' "$out")"
+assert_contains "$(jq -r '.roles.build.neutral.mismatches | join(" ")' "$out")" "not a deny"
+stop_server
+
+# 17. TERM during a run: temp dirs go, the caller's own EXIT trap still runs, the
+# subshell dies of the signal (143) and this shell survives. The agent never
+# resolves, so the run is parked polling when the signal arrives.
+fx=$(fresh term)
+rm -f "${fx:?}/api_agent_plan.json"
+serve "$fx"
+marker="$workdir/parent-exit"
+tmpbase="$workdir/tmpbase"
+mkdir -p "$tmpbase"
+(
+  trap 'echo parent-exit >"$marker"' EXIT
+  export TMPDIR="$tmpbase"
+  V2_AGENT_POLL_TIMEOUT=60 verify_effective_routing_v2 --server "$base" --credentials "$workdir/ok.env" \
+    --targets "$targets" --outdir "$workdir/term" --neutral-cwd "$workdir/neutral"
+) >/dev/null 2>&1 &
+sub=$!
+for _ in $(seq 1 100); do
+  [[ -n "$(ls -A "$tmpbase" 2>/dev/null)" ]] && break
+  sleep 0.05
+done
+[[ -n "$(ls -A "$tmpbase")" ]] || fail "verifier never created its work directory"
+sleep 1
+kill -TERM "$sub"
+rc=0; wait "$sub" || rc=$?
+assert_eq 143 "$rc"
+assert_file "$marker"
+assert_eq parent-exit "$(<"$marker")"
+[[ -z "$(ls -A "$tmpbase")" ]] || fail "temp directories left behind: $(ls -A "$tmpbase")"
+kill -0 $$ || fail "the parent test shell died"
+stop_server
+
 printf 'PASS: v2-effective-routing-test\n'

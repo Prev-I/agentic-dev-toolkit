@@ -24,8 +24,9 @@ sleep 1
 
 # A wrapper per mode: records which variables the converter passed, then sets
 # the fake's own and runs it.
-for mode in normal differ leak nodoc lossy real; do
+for mode in normal differ leak nodoc lossy real nodenyall; do
   case $mode in
+    nodenyall) info="$T/canned-nodenyall.json" ;;
     lossy) info="$T/canned-lossy.json" ;;
     real) info="$fixtures/convert/real-2.3.0-info.json" ;;
     *) info="$T/canned-info.json" ;;
@@ -189,9 +190,11 @@ info["agents"]["planner"] = {"model": {"providerID": "gw", "model": "m1"}}
 info["commands"] = {}
 info["mcp"] = {"servers": {}}
 # An object-valued and a list-valued resource must not crash the check; the
-# list counts for each name in it. `nogo` has the wrong effect.
+# list counts for each name in it (the deny-all is written as ["*"]). `nogo`
+# has the wrong effect.
 info["policies"] = [
     {"action": "provider.use", "resource": {"odd": True}, "effect": "deny"},
+    {"action": "provider.use", "resource": ["*"], "effect": "deny"},
     {"action": "provider.use", "resource": ["legacy", "other"], "effect": "deny"},
     {"action": "provider.use", "resource": "gw", "effect": "allow"},
     {"action": "provider.use", "resource": "nogo", "effect": "deny"},
@@ -226,6 +229,24 @@ want = json.load(open(sys.argv[1]))
 del want["agents"]["writer"]["request"]
 sys.exit(0 if json.load(open(sys.argv[2])) == want else 1)
 PY
+
+# 3d. enabled_providers whose translation keeps the allows but lost the
+# `deny *` that makes them restrictive; a dict effect must not crash.
+python3 -B - "$fixtures/convert/real-2.3.0-info.json" "$T/canned-nodenyall.json" <<'PY'
+import json, sys
+info = json.load(open(sys.argv[1]))
+info["policies"] = [p for p in info["policies"] if p["resource"] != "*"]
+info["policies"].append({"action": "provider.use", "resource": "gw", "effect": {"odd": True}})
+json.dump(info, open(sys.argv[2], "w"))
+PY
+run nodenyall nodenyall --input "$fixtures/convert/v1-all-kinds.jsonc" --output "$T/nodenyall-out.json" --backup-root "$T/bk"
+(( rc == 0 )) || fail "no-deny-all conversion exited $rc: $err"
+assert_eq "dropped: agents.writer.request.body.temperature
+dropped: enabled_providers (deny *)
+dropped: provider.gw.blacklist
+dropped: provider.openai.blacklist
+dropped: provider.openai.whitelist
+dropped: server" "$(grep '^dropped: ' <<<"$out" | sort)"
 
 # 4. A V2 input is refused with 2, and nothing is written.
 run v2in normal --input "$T/out.json" --output "$T/v2-out.json" --backup-root "$T/bk"
@@ -293,8 +314,8 @@ rc=0
   sleep 0.3
   start=$SECONDS
   v2_stop_pid "$leader"
-  (( SECONDS - start < 10 )) || exit 3
-  ! kill -0 -- "-$leader" 2>/dev/null || exit 4
+  (( SECONDS - start < 10 )) || { kill -s KILL -- "-$leader" 2>/dev/null; exit 3; }
+  ! kill -0 -- "-$leader" 2>/dev/null || { kill -s KILL -- "-$leader" 2>/dev/null; exit 4; }
 ) || rc=$?
 assert_eq 0 "$rc"
 

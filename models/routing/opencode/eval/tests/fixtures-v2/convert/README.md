@@ -1,0 +1,1 @@
+`real-2.3.0-info.json` is the `document` layer `info` that `opencode serve` 2.3.0 (`~/.opencode/bin/opencode`, `opencode v2.3.0`) reported under `GET /api/config` for `v1-all-kinds.jsonc` (without its two header comment lines), captured on 2026-11-21 through `convert-v1-config.sh`'s own `_cv_serve` in a sandbox (`env -i`, sandbox `HOME`/`XDG_*`, no credentials), then `jq -S`.

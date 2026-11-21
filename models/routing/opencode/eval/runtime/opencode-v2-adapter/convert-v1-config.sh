@@ -34,7 +34,9 @@
 # missing from its target map (`agents`, `providers`, `commands`,
 # `mcp.servers`); and each provider listed in `disabled_providers` (or
 # `enabled_providers`) without a `provider.use` policy naming it, as the
-# resource or within a list-valued resource, with effect deny (or allow).
+# resource or within a list-valued resource, with effect deny (or allow);
+# a non-empty `enabled_providers` also needs a `provider.use` deny on `*`
+# (`dropped: enabled_providers (deny *)` otherwise).
 #
 # Isolation: HOME and XDG_* alone do not isolate a 2.x server (it also loads
 # the account's ~/.opencode and its working directory's config). Each server
@@ -202,14 +204,22 @@ if cmd == "finalize":
                 continue
             resource = policy.get("resource")
             names = resource if isinstance(resource, list) else [resource]
+            effect = policy.get("effect")
+            if not isinstance(effect, str):
+                continue
             for name in names:
                 if isinstance(name, str):
-                    granted.add((name, policy.get("effect")))
+                    granted.add((name, effect))
         for key, effect in wanted.items():
             listed = v1.get(key)
             for name in listed if isinstance(listed, list) else []:
                 if not isinstance(name, str) or (name, effect) not in granted:
                     dropped.append("%s.%s" % (key, name))
+        # The allows only matter behind the deny-all that makes the list
+        # restrictive (2.3.0 emits `provider.use * deny` first).
+        enabled = v1.get("enabled_providers")
+        if isinstance(enabled, list) and enabled and ("*", "deny") not in granted:
+            dropped.append("enabled_providers (deny *)")
     left = [k for k in v2config.V1_KEYS if k in result]
     mcp = result.get("mcp")
     if isinstance(mcp, dict) and "servers" not in mcp:

@@ -219,6 +219,8 @@ user state outside the repository, includes Task children, separates eval
 dispatchers from production sessions, and requires human confirmation before
 applying trigger thresholds. Its README defines the weekly review and privacy
 boundary.
+OpenCode 2 support (schema detection, 2.x mapping, unavailable signals) is
+described in its [OpenCode 2 section](observe/README.md#opencode-2).
 
 ### Agent interaction
 

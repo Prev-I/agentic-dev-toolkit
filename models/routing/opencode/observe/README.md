@@ -30,15 +30,22 @@ checkpoint progress and the pending review list; dispatcher findings are
 informational and never inherit human review decisions.
 
 The default `--since` uses the mtime of the local active configuration when all
-manifest agent models/variants match and that mtime falls on the alignment
-record date. `profile_boundary.source` is then `aligned_config_mtime`. This is
-evidence of configuration writing, not proof of a running session's reload.
-If it cannot be validated, the alignment record date is a day-precision proxy
-(UTC midnight), disclosed as `alignment_record_date`. `--activation-config`
-selects the local file (an empty value disables this evidence), and
-`--profile-effective` supplies an explicit timestamp. Use an earlier `--since` to count
-historical populations; historical activity in a resumed session is excluded
-from current-profile counters.
+manifest agent models/variants match the live config and, if the manifest
+carries a `decision_reference`, that mtime falls on the alignment record date.
+`profile_boundary.source` is then `aligned_config_mtime`. This is evidence of
+configuration writing, not proof of a running session's reload. Without a
+`decision_reference` (the toolkit's OpenCode 2 manifest has none), an aligned
+config's mtime is the boundary, and it moves on any later edit of the aligned
+config. If the config is not aligned, cannot be read, or (with a
+`decision_reference`) is aligned but its mtime falls on a different day than the
+reference's date: with a `decision_reference` the alignment record date is a
+day-precision proxy (UTC midnight), disclosed as
+`alignment_record_date`; without one the report stops with
+`profile_effective_required` and `--profile-effective` must be supplied.
+`--activation-config` selects the local file (an empty value disables this
+evidence), and `--profile-effective` supplies an explicit timestamp. Use an
+earlier `--since` to count historical populations; historical activity in a
+resumed session is excluded from current-profile counters.
 
 Routing audit metadata uses the actual message/stream timestamp and contains
 expected/observed models and an activation class. `PRE_ACTIVATION` requests
@@ -180,7 +187,102 @@ Negated authorization is rejected. Each brainstorming episode ends when the
 next one starts. Task counts use distinct child session IDs per agent;
 continuations of an existing child and bare agent mentions do not inflate them.
 
-## Storage discovery
+## OpenCode 2
+
+`observe` reads both the 1.x and the 2.x database. Everything above describes
+the 1.x behaviour, which is unchanged; this section covers what differs on 2.x.
+
+### Schema detection
+
+- `v2` when `session_v2` and `session_message` (including `seq`) have the
+  required columns.
+- A database that has `session_v2` but fails that check is refused with
+  `unsupported_session_schema`. It is never read through the frozen 1.x tables.
+- Otherwise `v1`, when the 1.x tables qualify.
+
+The report discloses `coverage.session_schema`.
+
+### Measured 2.x layout (2.3.0)
+
+- The 1.x tables (`session`, `message`, `part`) are frozen at the migration.
+  Reading them would miss every session created afterwards.
+- `session_v2` holds every session, migrated and new. `session_message` holds
+  all messages, with a `type` and a JSON `data` column. `session_part` exists
+  and is empty.
+- Messages are ordered by `(time_created, seq, id)`: many messages share one
+  millisecond, so time and id alone can reorder them.
+
+### Mapping
+
+- Assistant messages carry `agent` and `model` in `data`. Their `content` items
+  are `text`, `tool` (the tool name is `name`) and `reasoning`, which is ignored.
+- Delegations come from the `task` tool (`subagent_type`) and the new `subagent`
+  tool (`agent`). `apply_patch`, `edit`, `write`, `question` and `skill` map as
+  on 1.x (`edit`, `write` and `question` not observed on 2.3.0).
+- `user` messages are user text; `system` and `synthetic` messages are not
+  counted as user text.
+- Session attribution: a NULL session `agent` comes from the session's first
+  assistant message and is counted as `coverage.sessions_agent_from_messages`.
+  That counter covers the whole database, not only the selected window. Agents
+  are filled first. Then a NULL session `model` (as on sessions created on 2.x)
+  comes from the first assistant message of the session's own agent; with no
+  assistant message from that agent, or no session agent (no assistant message
+  carries one), the model stays NULL. On 2.x `root_model_differs` is derived
+  from the session agent's first assistant message, so it always co-occurs with
+  that message's `request_route_differs`.
+
+### Source coverage
+
+On 2.x the database is the only request source: `coverage.stream_source` is
+`database`, and requests come from the assistant messages. These signals have no
+2.x source and are listed in `coverage.unavailable_signals`:
+
+- `snapshot_edits`: no `patch` part is stored;
+- `log_stream_signals`: the stream-derived `request_model_differs` and
+  `provider_retries` (the retry loss lives here). The 2.x log has no per-session `stream` line, and the
+  database already yields the route difference for every assistant message, so a
+  second derivation would only double-count;
+- `title_requests`: automatic title generation is not stored per session on
+  2.3.0 (measured). `routing_requests` can still contain `title` entries from
+  stored title messages, for example from direct runs.
+
+Also not applicable on 2.x: the 1.18.32 compaction `KNOWN_DEVIATION` check, and
+database-sourced provider errors. Provider errors still come from the log's
+`stream error` lines.
+
+Migrated sessions keep their 1.x `version` (e.g. `1.18.32`; measured on 2.3.0),
+but a v2 read has no parent link, so the check never matches. A compaction
+variant mismatch that a v1 read classified as informational `KNOWN_DEVIATION` is
+classified by activation class instead, and at or after the profile boundary it
+is an ordinary routing flag. This matters only when `--profile-effective` puts
+the boundary before such activity; an earlier `--since` alone does not, because
+flags start at the later of the two.
+
+### Manifests and boundary
+
+Both targets formats are accepted: the 1.x one and
+`opencode-v2-routing-targets/1`
+(`agents.<role>` with `providerID`, `model`, `variant`, `mode`, and
+`default_model`). The default `--manifest` follows the detected schema:
+`eval/manifests/current-routing-targets.json` for `v1`,
+`v2/manifests/current-routing-targets.json` for `v2`. A sqlite error while
+choosing the default fails the run instead of guessing, and a defaulted manifest
+whose schema differs from the detected one raises `manifest_schema_mismatch`;
+`coverage.manifest_format` (`v1` or `opencode-v2-routing-targets/1`) names the
+manifest used. A 2.x manifest row without a non-empty string `providerID` and
+`model` raises `unsupported_manifest_format`. That 2.x manifest has no
+`decision_reference`, so the boundary is the aligned config's mtime
+(`aligned_config_mtime`) or, when the config is not aligned,
+`profile_effective_required`: pass `--profile-effective`.
+
+A manifest with a `decision_reference`, such as a private one passed with
+`--manifest`, uses the aligned config's mtime only when it falls on that
+reference's date. Otherwise the reference, resolved from the directory three levels
+above the manifest, must be an existing file with a date in its name. If it is
+not, the report stops with `profile_alignment_record_missing` (or
+`profile_activation_date_unavailable`); pass `--profile-effective`.
+
+## Storage discovery (1.x; see OpenCode 2)
 
 Discovery was performed against OpenCode **1.18.32**:
 
@@ -217,12 +319,14 @@ key and database can resolve it. State directory and key modes are `0700` and
 
 ## Heuristic limits
 
+The retry and snapshot `patch` bullets below are 1.x only (see OpenCode 2).
+
 - Storage cannot prove whether a root-model difference came from config drift
   or an intentional TUI selection; review is mandatory.
 - Eval dispatcher recognition uses retained record IDs and experiment-agent or
   temporary-worktree evidence. Unknown external harnesses may need dismissal.
-- Log rotation limits Title and stream-error coverage. Reports disclose how
-  many log files were read.
+- Log rotation limits Title (1.x only; on 2.x `title_requests` is unavailable)
+  and stream-error coverage. Reports disclose how many log files were read.
 - A retry is inferred from a later stream for the same session and agent; it is
   not an HTTP-level SDK retry audit.
 - Approval detection recognizes explicit English and Italian confirmation plus
@@ -233,9 +337,10 @@ key and database can resolve it. State directory and key modes are `0700` and
   text. Declared paths are extracted from backtick-delimited artifact paths.
 - Rework means overlapping paths across a user turn. It does not prove the
   first implementation was wrong.
-- The default profile boundary is derived from the alignment record, not an
-  attested machine activation time. Override it with `--profile-effective` when
-  local activation evidence gives a more precise boundary.
+- The default profile boundary is derived from the aligned config's mtime or the
+  alignment record, not an attested machine activation time. Override it with
+  `--profile-effective` when local activation evidence gives a more precise
+  boundary.
 
 ## Tests
 

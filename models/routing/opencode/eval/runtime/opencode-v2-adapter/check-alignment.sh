@@ -151,18 +151,21 @@ if live_shape != "v1":
                       "actual": render(subagent_entries(live)),
                       "detail": "top-level subagent rules, in order (the Breakglass containment control)"})
 
-    # Activation owns every entry whose basename is model-routing.md, so an
-    # extra one besides the expected path is drift too.
+    # Ownership is decided exactly as activation does: by the raw basename. A
+    # variant such as a trailing-slash path has an empty basename, so it is
+    # user-owned and ignored. The expected entry is the installed absolute path
+    # verbatim (activation writes it as given); any other owned entry is extra.
     instructions = live.get("instructions")
     entries = instructions if isinstance(instructions, list) else []
-    matches = [i for i in entries if isinstance(i, str) and os.path.normpath(i) == installed_routing]
-    extras = [i for i in entries if isinstance(i, str) and os.path.normpath(i) != installed_routing
-              and os.path.basename(os.path.normpath(i)) == "model-routing.md"]
+    owned = [i for i in entries if isinstance(i, str) and os.path.basename(i) == "model-routing.md"]
+    matches = [i for i in owned if i == installed_routing]
+    extras = [i for i in owned if i != installed_routing]
     if len(matches) != 1 or extras:
+        problem = "extra model-routing.md entry" if extras else "expected model-routing.md entry missing"
         drift.append({"kind": "config", "key": "instructions",
                       "expected": f"exactly one model-routing.md entry, equal to {installed_routing}",
                       "actual": render(instructions),
-                      "detail": "the installed model-routing.md instruction"})
+                      "detail": f"the installed model-routing.md instruction: {problem}"})
 
 # --- support files ----------------------------------------------------------
 
@@ -279,7 +282,9 @@ for name in live_agent_files:
     label = f"agents/{name}.md"
     text = read_text(os.path.join(live_support, "agents", f"{name}.md"))
     try:
-        if text is UNDECODABLE or text is None:
+        if text is None:
+            raise ValueError("cannot be read")
+        if text is UNDECODABLE:
             raise ValueError("not valid UTF-8")
         front = front_of_text(text)
     except PARSE_ERRORS as error:

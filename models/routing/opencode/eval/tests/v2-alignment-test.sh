@@ -99,11 +99,16 @@ grep -q 'instructions' "$workdir/out.txt" || fail "drift must name instructions"
 setup_aligned
 edit_config 'd["instructions"].append("/elsewhere/model-routing.md")'
 run_check && fail "an extra model-routing.md instruction must be DRIFT"
-grep -q 'exactly one model-routing.md entry' "$workdir/out.txt" || fail "drift must describe the instruction rule"
+grep -q 'extra model-routing.md entry' "$workdir/out.txt" || fail "drift must say the entry is extra"
 
 setup_aligned
 edit_config 'd["instructions"] = [e + "/" for e in d["instructions"]]'
-run_check || fail "a trailing slash on the instruction path must not be DRIFT"
+run_check && fail "a trailing-slash instruction is user-owned, so the expected entry is missing: DRIFT"
+grep -q 'expected model-routing.md entry missing' "$workdir/out.txt" || fail "drift must say the entry is missing"
+
+setup_aligned
+edit_config 'd["instructions"].append("docs/model-routing.md/")'
+run_check || fail "a trailing-slash instruction beside the exact entry is user-owned and must be ignored"
 
 # --- agent markdown --------------------------------------------------------
 setup_aligned
@@ -170,6 +175,15 @@ run_check || fail "installed-only agent with only description/mode must not be D
 setup_aligned
 printf 'no frontmatter\n' >"$live/agents/build.md"
 run_check && fail "an unparseable installed-only routed agent must be DRIFT"
+setup_aligned
+ln -s "$workdir/nowhere.md" "$live/agents/build.md"
+run_check && fail "an unreadable installed-only routed agent must be DRIFT"
+grep -q 'cannot be read' "$workdir/out.txt" || fail "drift must say cannot be read"
+grep -q 'not valid UTF-8' "$workdir/out.txt" && fail "unreadable must not be reported as invalid UTF-8"
+setup_aligned
+mkdir "$live/agents/build.md"
+run_check && fail "a directory named build.md must be DRIFT"
+grep -q 'cannot be read' "$workdir/out.txt" || fail "directory case must say cannot be read"
 setup_aligned
 printf -- '---\ndescription: x\npermissions:\n  - action: edit\n    resource: "*"\n    effect: allow\n---\n' >"$live/agents/my-helper.md"
 run_check || fail "a non-role installed-only agent must not be reported"

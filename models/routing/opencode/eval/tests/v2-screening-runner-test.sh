@@ -112,7 +112,10 @@ assert_eq '"candidate_b"' "$(jq -c '.candidates[1].account' "$rec/protocol.json"
 assert_eq 50 "$(jq '.budget.per_candidate_cap' "$rec/protocol.json")"
 assert_eq "$(sha256sum "$work/creds.json" | cut -d' ' -f1)" "$(jq -r .credentials_sha256 "$rec/protocol.json")"
 assert_eq '[{"input":1,"output":2}]' "$(jq -c '.models["fakep/m1"].cost' "$rec/catalog-snapshot.json")"
+assert_eq '"models/routing/opencode/v2/.opencode"' "$(jq -c .opencode_dir "$rec/protocol.json")"
 for p in record:protocol.json record:catalog-snapshot.json \
+    models/routing/opencode/v2/.opencode/model-routing.md \
+    models/routing/opencode/v2/.opencode/agents/reviewer.md \
     models/routing/opencode/eval/runtime/opencode-v2-adapter/roles/reviewer.json \
     models/routing/opencode/eval/runtime/opencode-v2-adapter/run-screening.sh \
     models/routing/opencode/eval/runtime/opencode-v2-adapter/v2config.py \
@@ -200,6 +203,52 @@ assert_eq '"INCOMPLETE"' "$(jq -c .state "$rec/status.json")"
 assert_eq 01-clean-r1-a "$(ls "$rec/runs")"
 assert_eq '"BUDGET_STOP"' "$(jq -c .classification "$rec/runs/01-clean-r1-a/dispatch/dispatch.json")"
 
+# score_refuses_a_frozen_mismatch: a record file changed after dispatch.
+printf '\n' >>"$rec/catalog-snapshot.json"
+rc=0
+bash "$runner" score --out "$rec" >/dev/null 2>"$work/score.err" || rc=$?
+assert_eq 1 "$rc"
+assert_contains "$(<"$work/score.err")" "freeze digest mismatch: record:catalog-snapshot.json"
+[[ ! -e "$rec/result.md" && ! -e "$rec/scores" ]] || fail "score wrote output for a mismatched record"
+
+# unknown_cost_halts_screening: a step_start with no reported cost.
+scenario '{"screening-reviewer":{"text":"{\"findings\":[]}","cost_per_step":null,
+  "probe":{"text":"CAPABILITY_OK","cost_per_step":0}}}'
+rec="$work/v2-unknown"
+prepare "$rec" reviewer 100 a=model:fakep/m1#high || fail "prepare failed"
+approve "$rec"
+rc=0
+dispatch "$rec" 2>/dev/null || rc=$?
+assert_eq 1 "$rc"
+assert_eq '"INCOMPLETE"' "$(jq -c .state "$rec/status.json")"
+assert_eq '"UNKNOWN_COST"' "$(jq -c .halted.reason "$rec/status.json")"
+assert_eq 01-clean-r1-a "$(ls "$rec/runs")"
+
+# all_candidates_stopped_halts: no live candidate after the probes.
+scenario '{"screening-reviewer":{"exit":1,"error_message":"Model not found"}}'
+rec="$work/v2-nolive"
+prepare "$rec" reviewer 100 a=model:fakep/m1#high || fail "prepare failed"
+approve "$rec"
+rc=0
+dispatch "$rec" 2>/dev/null || rc=$?
+assert_eq 1 "$rc"
+assert_eq '"INCOMPLETE"' "$(jq -c .state "$rec/status.json")"
+assert_eq '"NO_LIVE_CANDIDATE"' "$(jq -c .halted.reason "$rec/status.json")"
+assert_eq '"STOPPED_CAPABILITY"' "$(jq -c .stopped.a "$rec/status.json")"
+assert_eq '' "$(ls -A "$rec/runs")"
+
+# probe_invalid_environment_halts
+scenario '{"screening-reviewer":{"exit":1,"error_message":"socket closed unexpectedly"}}'
+rec="$work/v2-invalid"
+prepare "$rec" reviewer 100 a=model:fakep/m1#high b=model:fakep/m2#high || fail "prepare failed"
+approve "$rec"
+rc=0
+dispatch "$rec" 2>/dev/null || rc=$?
+assert_eq 1 "$rc"
+assert_eq '"INVALID_ENVIRONMENT"' "$(jq -c .classification "$rec/capability/a/probe.json")"
+assert_eq '"INVALID_ENVIRONMENT"' "$(jq -c .halted.reason "$rec/status.json")"
+[[ ! -e "$rec/capability/b" ]] || fail "the screening went on after an invalid environment"
+
 # freeze_mismatch_refuses
 scenario "$reviewer_ok"
 rec="$work/v2-freeze"
@@ -265,6 +314,13 @@ patch=$(find "$rec/runs" -path '*-gate-r1-a/work-product.patch')
 [[ -n "$patch" ]] || fail "no work-product.patch for the gate run"
 assert_contains "$(<"$patch")" "lib/strings.sh"
 assert_file "$(find "$rec/runs" -maxdepth 1 -name '*-coding-r1-a')/work-product.patch"
+# record_scorer_failure_surfaces: the build scorer refuses an existing output.
+mkdir "$rec/post-run-diagnostic"
+rc=0
+bash "$runner" score --out "$rec" >/dev/null 2>"$work/score.err" || rc=$?
+assert_eq 1 "$rc"
+assert_contains "$(<"$work/score.err")" "SCORE_FAILED"
+assert_contains "$(<"$rec/result.md")" "SCORE_FAILED"
 
 # agent_candidate_uses_profile
 cat >"$work/profile.jsonc" <<'EOF'
@@ -276,9 +332,14 @@ cat >"$work/profile.jsonc" <<'EOF'
 EOF
 scenario '{"build":{"text":"done","cost_per_step":0.01,"probe":{"text":"CAPABILITY_OK"}}}'
 rec="$work/v2-agent"
+cp -r "$root/../v2/.opencode" "$work/ocdir"
 quiet bash "$runner" prepare --role build --out "$rec" --candidate p=agent:build --runs 1 --budget 100 \
-  --providers "$work/fragment.json" --credentials "$work/creds.json" \
+  --providers "$work/fragment.json" --credentials "$work/creds.json" --opencode-dir "$work/ocdir" \
   --profile "$work/profile.jsonc" --profile-id prof-7 >"$rec.approval" || fail "agent prepare failed"
+# An --opencode-dir outside the toolkit is frozen as the record's own copy.
+assert_eq "\"$work/ocdir\"" "$(jq -c .opencode_dir "$rec/protocol.json")"
+jq -e 'any(.files[]; .path == "record:opencode-dir/model-routing.md")' "$rec/freeze-manifest.json" >/dev/null \
+  || fail "the outside --opencode-dir is not frozen"
 assert_eq '"build@fakep/m2#high"' "$(jq -c '.candidates[0].expect' "$rec/protocol.json")"
 assert_eq "$(sha256sum "$work/profile.jsonc" | cut -d' ' -f1)" "$(jq -r .profile_digest "$rec/protocol.json")"
 approve "$rec"

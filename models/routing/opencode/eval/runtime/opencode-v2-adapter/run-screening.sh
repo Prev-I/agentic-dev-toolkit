@@ -19,7 +19,11 @@
 # of one sandboxed server, no model call) and DIR/freeze-manifest.json, and
 # prints on stdout the approval.json the operator must write into DIR. It
 # refuses (1) a model the catalog does not list, a variant it does not offer,
-# and a model whose cost is [] (no cap could hold); DIR is then removed.
+# and a model whose cost is [] (no cap could hold); DIR is then removed. The
+# freeze also covers --opencode-dir's model-routing.md and agents/*.md: in place
+# when the directory is inside the toolkit (protocol opencode_dir is then
+# toolkit-relative), else as a copy in DIR/opencode-dir/ that dispatch uses
+# (opencode_dir is then absolute).
 #
 # dispatch exits 3 unless DIR/approval.json is exactly that object and the
 # providers, credentials and profile digests match the protocol; 2 when runs/ or
@@ -32,7 +36,9 @@
 # runs as the role's agent with its model (routing expected AGENT@P/M#V); an
 # agent candidate runs the profile alone. Stops (Ruling 5): a failed probe
 # (STOPPED_CAPABILITY) or CAPABILITY_REGRESSION stops the candidate;
-# BUDGET_STOP, a refused admission or an unknown cost halts the screening.
+# BUDGET_STOP, a refused admission, an unknown cost, a probe classified
+# INVALID_ENVIRONMENT, or no live candidate after the probes halts the
+# screening, as does an unexpected error (halted reason ERROR).
 # status.json is {state: COMPLETE|INCOMPLETE, stopped: {KEY: REASON}, halted};
 # exit 0 when COMPLETE, 1 when INCOMPLETE. The budget (Ruling 6) is one account
 # candidate_KEY per candidate with cap = budget / candidates, admission per call
@@ -42,14 +48,16 @@
 # under its own name; oracle files (ground-truth.json, oracle.json) are never
 # copied in. The patch compares that workspace with what the call left.
 #
-# score runs the role's normalise and score argv (placeholders {eval} {repo}
+# score verifies the freeze manifest first (1 on a mismatch, nothing written),
+# then runs the role's normalise and score argv (placeholders {eval} {repo}
 # {record} {fixture} {key} {rep}) and writes DIR/result.md. A candidate-run
 # whose normaliser reports "clean control missing" (exit 3) is NOT_SCORABLE;
 # any other scorer failure is listed in result.md and makes score exit 1. It
 # never writes adjudication.json.
 #
-# TMPDIR is DIR/.work and sandboxes live under it; an EXIT, INT and TERM trap
-# removes it. Calls run one at a time, each in its own session, and a signal
+# The runner's own TMPDIR is DIR/.work and sandboxes live under it; an EXIT,
+# INT, TERM and HUP trap removes it, after stopping by recorded pid any sandbox
+# server still running there. Calls run one at a time, each in its own session, and a signal
 # stops the running call's process group before the runner exits. The record
 # holds only the sha256 of the provider fragment, credentials and profile.
 set -Eeuo pipefail
@@ -71,6 +79,7 @@ child=''
 created_out=false
 prepared=false
 phase=''
+status_written=false
 declare -A stopped=()
 halted_reason=''
 halted_label=''
@@ -104,9 +113,29 @@ stop_child() {
   kill -s KILL -- "-$pid" 2>/dev/null || true
 }
 
+# Stop every sandbox server under .work that is still running, by the pid its
+# sandbox recorded: covers a call whose own cleanup never ran.
+stop_sandbox_servers() {
+  local f pid
+  [[ -n "$work" && -d "$work" ]] || return 0
+  for f in "$work"/sandbox.*/pid; do
+    [[ -f "$f" ]] || continue
+    pid=$(<"$f")
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]] || continue
+    if kill -0 "$pid" 2>/dev/null; then
+      v2_stop_pid "$pid"
+    fi
+  done
+}
+
 on_exit() {
   local rc=$?
   stop_child
+  if [[ "$phase" == dispatch && "$rc" != 0 && "$status_written" == false ]]; then
+    halted_reason=ERROR
+    write_status || true
+  fi
+  stop_sandbox_servers
   if [[ -n "$catalog_sb" ]]; then
     v2_sandbox_destroy "$catalog_sb" || true
     catalog_sb=''
@@ -119,7 +148,7 @@ on_exit() {
 }
 
 on_signal() {
-  trap - INT TERM
+  trap - INT TERM HUP
   stop_child
   if [[ "$phase" == dispatch ]]; then
     halted_reason=INTERRUPTED
@@ -131,6 +160,7 @@ on_signal() {
 trap on_exit EXIT
 trap 'on_signal 143' TERM
 trap 'on_signal 130' INT
+trap 'on_signal 129' HUP
 
 # Run "$@" in a new session (its pid leads the group) and wait for it in a way a
 # trapped signal interrupts; the status is the command's.
@@ -295,7 +325,7 @@ prepare() {
     ROLE_DEFINITION="${role_file#"$repo"/}" RUNS="$runs" BUDGET="$budget" TIMEOUT="$timeout" \
     PROVIDERS_SHA="$(sha256 "$providers")" CREDENTIALS_SHA="$(sha256 "$creds")" \
     PROFILE_ID="$profile_id" PROFILE_SHA="$([[ -z "$profile" ]] || sha256 "$profile")" \
-    RUNTIME="$version" COMMIT="$commit" OPENCODE_DIR="$ocdir" WORKLOADS="$(jq '.workloads | length' "$role_file")" \
+    RUNTIME="$version" COMMIT="$commit" OPENCODE_DIR="${ocdir#"$repo"/}" WORKLOADS="$(jq '.workloads | length' "$role_file")" \
     python3 -I -B - "$work/candidates.json" "$work/models.json" "$out" <<'PY' || die 1 "the catalog refuses a candidate"
 import datetime
 import json
@@ -387,6 +417,22 @@ PY
       files+=("$p")
     fi
   done < <(jq -r '.frozen[]' "$role_file")
+  # The files every sandbox installs from --opencode-dir. Outside the toolkit
+  # they cannot be frozen in place, so the record keeps a copy that dispatch uses.
+  local src=$ocdir
+  if [[ "$ocdir" != "$repo"/* ]]; then
+    src="$out/opencode-dir"
+    mkdir -p "$src/agents"
+    cp -- "$ocdir/model-routing.md" "$src/" || die 1 "no model-routing.md in $ocdir"
+    for p in "$ocdir"/agents/*.md; do
+      [[ ! -f "$p" ]] || cp -- "$p" "$src/agents/"
+    done
+  fi
+  [[ -f "$src/model-routing.md" ]] || die 1 "no model-routing.md in $ocdir"
+  files+=("$src/model-routing.md")
+  for p in "$src"/agents/*.md; do
+    [[ ! -f "$p" ]] || files+=("$p")
+  done
   files+=("$out/protocol.json" "$out/catalog-snapshot.json")
   local id
   id=$(jq -r .experiment_id "$out/protocol.json")
@@ -410,6 +456,7 @@ write_status() {
   jq -n --arg st "$state" --argjson s "$s" --arg r "$halted_reason" --arg l "$halted_label" \
     '{state: $st, stopped: $s, halted: (if $r == "" then null else {reason: $r, label: (if $l == "" then null else $l end)} end)}' \
     >"$out/status.json"
+  status_written=true
 }
 
 # halt REASON [LABEL]: the screening stops here, INCOMPLETE.
@@ -555,7 +602,10 @@ PY
   mkdir -- "$work"
   export TMPDIR="$work"
   load_role "$repo/$(jq -r .role_definition "$protocol")"
+  # A repo-relative opencode_dir is used in place; an absolute one through the
+  # record's frozen copy.
   ocdir=$(jq -r .opencode_dir "$protocol")
+  if [[ "$ocdir" == /* ]]; then ocdir="$out/opencode-dir"; else ocdir="$repo/$ocdir"; fi
   admission=$(jq -r .budget.admission_per_call "$protocol")
   local runs timeout extract capture
   runs=$(jq -r .runs "$protocol")
@@ -631,10 +681,18 @@ PY
     (( rc != 2 )) || halt DISPATCH_REFUSED "capability-$key"
     after_call "$key" "capability-$key" "$out/capability/$key/dispatch"
     if (( rc != 0 )); then
+      if [[ "$(jq -r .classification "$out/capability/$key/probe.json")" == INVALID_ENVIRONMENT ]]; then
+        halt INVALID_ENVIRONMENT "capability-$key"
+      fi
       stopped[$key]=STOPPED_CAPABILITY
       err "candidate $key stopped: capability probe $(jq -r .classification "$out/capability/$key/probe.json")"
     fi
   done
+  local live=0
+  for key in "${keys[@]}"; do
+    [[ -n "${stopped[$key]:-}" ]] || live=$((live + 1))
+  done
+  (( live > 0 )) || halt NO_LIVE_CANDIDATE
 
   local rep w wid label seq=0 ws wout prompt
   local -a order
@@ -719,6 +777,7 @@ score() {
   done
   [[ -n "$out" && -f "$out/protocol.json" && -f "$out/status.json" ]] || die 2 "not a dispatched record: $out"
   out=$(cd "$out" && pwd -P)
+  verify_freeze || die 1 "the record does not match its freeze manifest; nothing scored"
   work="$out/.work"
   rm -rf -- "$work"
   mkdir -- "$work"

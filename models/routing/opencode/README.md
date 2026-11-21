@@ -173,8 +173,11 @@ The record holds only the sha256 of each of these files, never their content.
 scratch `HOME` and `XDG_*` directories, `env -i` with an allowlist, a server on
 a spare loopback port with a throwaway password, and the call made with
 `opencode run --server`. The sandbox, with the credentials copy in it, is
-deleted when the call ends, on success, failure or a signal. `TMPDIR` points
-into `.work/`, which is removed when the runner exits. A record inside a real
+deleted when the call ends, on success, failure or a signal (`INT`, `TERM` or
+`HUP`). The runner's own processes get a `TMPDIR` inside `.work/`; the sandboxed
+server and client do not inherit it, since their environment is the allowlist
+alone. `.work/` is removed when the runner exits, after any sandbox server still
+running there is stopped by its recorded pid. A record inside a real
 OpenCode directory is refused. Because `HOME` and `XDG_*` alone do not isolate,
 each server's `GET /api/config` layers are checked before the call (with and
 without `?directory=`): every layer must be inside the sandbox, or be the
@@ -188,7 +191,9 @@ must start with `v2-`.
 ```text
 protocol.json          experiment id, role, candidates, budget, digests, runtime
 catalog-snapshot.json  the catalog's variants and cost for the candidates' providers
-freeze-manifest.json   digests of the role, the adapter, the frozen paths and the two files above
+freeze-manifest.json   digests of the role, the adapter, the frozen paths, the --opencode-dir
+                       files (model-routing.md, agents/*.md) and the two files above
+opencode-dir/          a frozen copy of --opencode-dir, only when it is outside the toolkit
 approval.json          written by the operator
 ledger.json            one account per candidate, with every call's credits
 status.json            {state: COMPLETE|INCOMPLETE, stopped: {key: reason}, halted}
@@ -207,7 +212,9 @@ result.md              the skeleton the operator completes
 - A `BUDGET_STOP`, a refused admission, or a call whose cost is unknown (it
   started a step and reported no cost) halts the whole screening: the record is
   `INCOMPLETE` and `dispatch` exits `1`. Every other failed run is recorded and
-  its candidate continues.
+  its candidate continues. A probe classified `INVALID_ENVIRONMENT`, no live
+  candidate after the probes, or an unexpected error also halts it.
+- `score` verifies the freeze manifest first and writes nothing on a mismatch.
 - `--budget` is split equally into one account per candidate,
   `candidate_KEY`. Each call is admitted only if the account can still afford
   `cap / (runs × workloads + 1)` (the `+ 1` is the probe), and a running call is

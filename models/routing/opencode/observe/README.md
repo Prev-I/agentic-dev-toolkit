@@ -36,7 +36,8 @@ manifest agent models/variants match the live config and, if the manifest carrie
 configuration writing, not proof of a running session's reload. Without a
 `decision_reference` (the toolkit's OpenCode 2 manifest has none), an aligned
 config's mtime is the boundary, and it moves on any later edit of the aligned
-config. If the config is not aligned or cannot be read: with a `decision_reference`
+config. If the config is not aligned, cannot be read, or (with a `decision_reference`)
+is aligned but its mtime falls on a different day than the reference's date: with a `decision_reference`
 the alignment record date is a day-precision proxy (UTC midnight), disclosed as
 `alignment_record_date`; without one the report stops with
 `profile_effective_required` and `--profile-effective` must be supplied.
@@ -215,11 +216,12 @@ The report discloses `coverage.session_schema`.
 - Assistant messages carry `agent` and `model` in `data`. Their `content` items
   are `text`, `tool` (the tool name is `name`) and `reasoning`, which is ignored.
 - Delegations come from the `task` tool (`subagent_type`) and the new `subagent`
-  tool (`agent`). `apply_patch`, `edit`, `write` and `skill` map as on 1.x.
+  tool (`agent`). `apply_patch`, `edit`, `write` (`edit` and `write` not observed on 2.3.0), `question` and `skill` map as on 1.x.
 - `user` messages are user text; `system` and `synthetic` messages are not
   counted as user text.
 - Session attribution: a NULL session `model` (as on sessions created on 2.x)
-  comes from the first assistant message of the session's own agent. A NULL
+  comes from the first assistant message of the session's own agent; with no assistant
+  message from that agent, or no session agent, the model stays NULL. A NULL
   session `agent` comes from the session's first assistant message and is counted
   as `coverage.sessions_agent_from_messages`. That counter covers the whole
   database, not only the selected window.
@@ -243,6 +245,10 @@ Also not applicable on 2.x: the 1.18.32 compaction `KNOWN_DEVIATION` check, and
 database-sourced provider errors. Provider errors still come from the log's
 `stream error` lines.
 
+On a 2.x database, migrated sessions keep `version = 1.18.32`. Read through v2 with
+an earlier `--since`, a compaction variant mismatch that a v1 read classified as an
+informational `KNOWN_DEVIATION` appears as an ordinary routing flag.
+
 ### Manifests and boundary
 
 Both targets formats are accepted: the 1.x one and `opencode-v2-routing-targets/1`
@@ -254,7 +260,14 @@ Both targets formats are accepted: the 1.x one and `opencode-v2-routing-targets/
 (`aligned_config_mtime`) or, when the config is not aligned,
 `profile_effective_required`: pass `--profile-effective`.
 
-## Storage discovery
+A manifest with a `decision_reference`, such as a private one passed with
+`--manifest`, uses the aligned config's mtime only when it falls on that
+reference's date. Otherwise the reference must name a dated file that exists three
+directories above the manifest. If it does not, the report stops with
+`profile_alignment_record_missing` (or `profile_activation_date_unavailable`); pass
+`--profile-effective`.
+
+## Storage discovery (1.x; see OpenCode 2)
 
 Discovery was performed against OpenCode **1.18.32**:
 
@@ -290,6 +303,8 @@ key and database can resolve it. State directory and key modes are `0700` and
 `0600` respectively.
 
 ## Heuristic limits
+
+The retry and snapshot `patch` bullets below are 1.x only (see OpenCode 2).
 
 - Storage cannot prove whether a root-model difference came from config drift
   or an intentional TUI selection; review is mandatory.

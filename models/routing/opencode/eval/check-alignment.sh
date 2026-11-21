@@ -8,12 +8,15 @@ IFS=$'\n\t'
 #   bash models/routing/opencode/eval/check-alignment.sh
 #   bash models/routing/opencode/eval/check-alignment.sh --json /tmp/report.json
 #
+# Checks against the OpenCode 2 bundle under v2/.
+#
 # Exits 0 when aligned (or only prose is stale), 1 on drift, 2 on usage or a
 # missing installation. Makes no model calls and changes nothing.
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 bundle=$(cd "$root/.." && pwd)
-source "$root/runtime/opencode-v1-adapter/check-alignment.sh"
+source "$root/runtime/opencode-v2-adapter/check-alignment.sh"
+# The target selector is shared with 1.x: both versions use the same filenames.
 source "$root/runtime/opencode-v1-adapter/select-activation-target.sh"
 
 # The installed configuration lives wherever OpenCode reads its user-global
@@ -31,10 +34,10 @@ if ! live_config=$(select_activation_target "$live_root"); then
   exit 2
 fi
 
-check_alignment \
-  --profile "$bundle/opencode.jsonc" \
-  --targets "$root/manifests/current-routing-targets.json" \
-  --bundle-root "$bundle/.opencode" \
+check_alignment_v2 \
+  --profile "$bundle/v2/opencode.jsonc" \
+  --targets "$bundle/v2/manifests/current-routing-targets.json" \
+  --bundle-root "$bundle/v2/.opencode" \
   --live-config "$live_config" \
   --live-support-root "$live_root" \
   "$@"

@@ -25,6 +25,7 @@ FILES = ['environments/linux/install.sh', 'tests/install.sh',
 REFERENCE = '55da937fb7233717c9924aa59c1e36773afbde29'
 BROKEN = '7605022b86dd9f4040f272cca59224f2e568a943'
 REPO = None
+RUN_NAME = re.compile(r'^\d+-(coding|gate)-r\d+-(.+)$')
 
 
 def snapshot(commit, target):
@@ -105,6 +106,31 @@ def classify_gate(run):
     return 'AMBIGUOUS'
 
 
+def plan_runs(record):
+    """Every run directory, parsed by name; anything unreadable or unmatched exits 1."""
+    runs = record / 'runs'
+    dirs = sorted(p for p in runs.iterdir()) if runs.is_dir() else []
+    if not dirs:
+        raise SystemExit(f'no runs to score under {runs}')
+    plan = []
+    for run_dir in dirs:
+        match = RUN_NAME.match(run_dir.name)
+        if not run_dir.is_dir() or not match:
+            raise SystemExit(f'unrecognised run entry: {run_dir.name}')
+        kind = match.group(1)
+        try:
+            classification = json.loads((run_dir / 'dispatch/dispatch.json').read_text(encoding='utf-8'))['classification']
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            raise SystemExit(f'unreadable dispatch record for {run_dir.name}: {error}')
+        if classification == 'OK':
+            needed = ['work-product.patch'] + (['dispatch/response.txt'] if kind == 'gate' else [])
+            for name in needed:
+                if not (run_dir / name).is_file():
+                    raise SystemExit(f'{run_dir.name} is OK but has no {name}')
+        plan.append((run_dir, kind, classification))
+    return plan
+
+
 def commit_available(commit):
     probe = subprocess.run(['git', 'cat-file', '-e', f'{commit}^{{commit}}'], cwd=REPO,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -124,6 +150,7 @@ def main():
     for commit in (REFERENCE, BROKEN):
         if not commit_available(commit):
             raise SystemExit(f'reference commit not available: {commit}')
+    plan = plan_runs(record)
     if out.exists():
         raise SystemExit('Refusing to overwrite diagnostic output')
     out.mkdir(parents=True)
@@ -139,26 +166,33 @@ def main():
     (out / 'summary.json').write_text(json.dumps(doc, indent=2) + '\n')
     if not doc['controls_passed']:
         raise SystemExit('Positive/negative control failed; no retained patch evaluated')
-    for patch in sorted((record / 'runs').glob('*-coding-*/work-product.patch')):
-        with tempfile.TemporaryDirectory(prefix='verifier-v2-candidate-') as tmp:
-            work = Path(tmp)
-            shutil.copytree(BASE, work, dirs_exist_ok=True)
-            output = out / patch.parent.name
-            output.mkdir()
-            status = run(['patch', '--batch', '-p1', '-i', str(patch)], work, output / 'patch-apply.log')
-            result = {'classification': 'POST_RUN_DIAGNOSTIC', 'label': patch.parent.name,
-                      'patch_sha256': hashlib.sha256(patch.read_bytes()).hexdigest(), 'patch_apply': status}
-            if status == 0:
-                result.update(evaluate(work, output / 'checks'))
-            doc['attempts'].append(result)
+    coding, gate = [], []
+    for run_dir, kind, classification in plan:
+        if classification != 'OK':
+            entry = {'label': run_dir.name, 'verdict': 'NOT_SCORED', 'classification': classification}
+            (coding if kind == 'coding' else gate).append(entry)
+        elif kind == 'gate':
+            gate.append({'label': run_dir.name, 'verdict': classify_gate(run_dir)})
+        else:
+            patch = run_dir / 'work-product.patch'
+            with tempfile.TemporaryDirectory(prefix='verifier-v2-candidate-') as tmp:
+                work = Path(tmp)
+                shutil.copytree(BASE, work, dirs_exist_ok=True)
+                output = out / run_dir.name
+                output.mkdir()
+                status = run(['patch', '--batch', '-p1', '-i', str(patch)], work, output / 'patch-apply.log')
+                result = {'classification': 'POST_RUN_DIAGNOSTIC', 'label': run_dir.name,
+                          'patch_sha256': hashlib.sha256(patch.read_bytes()).hexdigest(), 'patch_apply': status}
+                if status == 0:
+                    result.update(evaluate(work, output / 'checks'))
+                coding.append(result)
+    doc['attempts'] = coding
     (out / 'summary.json').write_text(json.dumps(doc, indent=2) + '\n')
-    gate = [{'label': run_dir.name, 'verdict': classify_gate(run_dir)}
-            for run_dir in sorted((record / 'runs').glob('*-gate-*')) if run_dir.is_dir()]
     scores = record / 'scores'
     scores.mkdir(exist_ok=True)
     (scores / 'build-quality.json').write_text(json.dumps({
         'classification': 'POST_RUN_DIAGNOSTIC', 'adjudicates': False,
-        'controls_passed': doc['controls_passed'], 'coding': doc['attempts'], 'gate': gate}, indent=2) + '\n')
+        'controls_passed': doc['controls_passed'], 'coding': coding, 'gate': gate}, indent=2) + '\n')
 
 
 if __name__ == '__main__':

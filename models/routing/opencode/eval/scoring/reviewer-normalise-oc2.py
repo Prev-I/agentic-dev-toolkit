@@ -19,10 +19,18 @@ RANK = {'blocking': 3, 'material': 2, 'suggestion': 1}
 
 def load_report(record, case, key, rep):
     paths = sorted(glob.glob(f'{glob.escape(record)}/runs/[0-9]*-{glob.escape(case)}-r{rep}-{glob.escape(key)}/reported.json'))
+    if len(paths) > 1:
+        raise SystemExit(f'more than one run matches {case}/{key}/r{rep}')
     if not paths:
         return None
-    payload = json.loads(Path(paths[0]).read_text(encoding='utf-8'))
-    return [item for item in payload.get('findings', []) if isinstance(item, dict)]
+    try:
+        payload = json.loads(Path(paths[0]).read_text(encoding='utf-8'))
+    except ValueError as error:
+        raise SystemExit(f'malformed report for {case}: {error}')
+    findings = payload.get('findings') if isinstance(payload, dict) else None
+    if not isinstance(findings, list):
+        raise SystemExit(f'malformed report for {case}: findings is not a list')
+    return [item for item in findings if isinstance(item, dict)]
 
 
 def normalise(record, fixture, key, rep):
@@ -33,6 +41,9 @@ def normalise(record, fixture, key, rep):
         if found is None:
             missing.append(case)
         reports[case] = found or []
+    if 'clean' in missing:
+        sys.stderr.write('clean control missing\n')
+        sys.exit(3)
     seeded = []
     for case in ids[1:]:
         truth = json.loads(Path(f'{fixture}/cases/{case}/ground-truth.json').read_text(encoding='utf-8'))

@@ -1,6 +1,5 @@
 {
   "role": "build",
-  "fixture": "models/routing/opencode/eval/fixtures/build-workloads/build-feature",
   "agent": {
     "name": "screening-build",
     "markdown": null,

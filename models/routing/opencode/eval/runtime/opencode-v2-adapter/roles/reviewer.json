@@ -97,6 +97,8 @@
   "frozen": [
     "{fixture}",
     "{eval}/scoring/reviewer-v2.py",
-    "{eval}/scoring/reviewer-normalise-oc2.py"
+    "{eval}/scoring/reviewer-normalise-oc2.py",
+    "{eval}/runtime/opencode-v2-adapter/roles/reviewer/request.txt",
+    "models/routing/opencode/v2/.opencode/agents/reviewer.md"
   ]
 }

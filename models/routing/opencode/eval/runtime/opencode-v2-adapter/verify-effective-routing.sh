@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 v2_verify_root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-# shellcheck source=./v2-run.sh disable=SC1091
+# shellcheck source=models/routing/opencode/eval/runtime/opencode-v2-adapter/v2-run.sh disable=SC1091 # path built from the script's own directory at run time
 source "$v2_verify_root/v2-run.sh"
 
 # Effective-routing verifier (OpenCode 2): ask the RUNNING server what each role

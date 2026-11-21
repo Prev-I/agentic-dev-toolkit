@@ -1401,7 +1401,8 @@ with a 2.x `version` and the unit's `MainPID` as `pid` (see
 backup's `session` table holds, and one old session's `/api/session/<id>/message`
 answers 200; and `opencode service get` shows `disabled true` with `remote`
 unset. Then check that each role your routing declares resolves and answers
-against its provider, whatever that provider is:
+against its provider, whatever that provider is. Run this from the root of
+the toolkit checkout:
 
 ```bash
 work=$(mktemp -d)

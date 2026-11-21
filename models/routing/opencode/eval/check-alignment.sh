@@ -15,10 +15,10 @@ IFS=$'\n\t'
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 bundle=$(cd "$root/.." && pwd)
-# shellcheck source=./runtime/opencode-v2-adapter/check-alignment.sh disable=SC1091
+# shellcheck source=models/routing/opencode/eval/runtime/opencode-v2-adapter/check-alignment.sh disable=SC1091 # path built from the script's own directory at run time
 source "$root/runtime/opencode-v2-adapter/check-alignment.sh"
 # The target selector is shared with 1.x: both versions use the same filenames.
-# shellcheck source=./runtime/opencode-v1-adapter/select-activation-target.sh disable=SC1091
+# shellcheck source=models/routing/opencode/eval/runtime/opencode-v1-adapter/select-activation-target.sh disable=SC1091 # path built from the script's own directory at run time
 source "$root/runtime/opencode-v1-adapter/select-activation-target.sh"
 
 # The installed configuration lives wherever OpenCode reads its user-global

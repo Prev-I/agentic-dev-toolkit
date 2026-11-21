@@ -2,9 +2,9 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-# shellcheck source=./test-lib.sh disable=SC1091
+# shellcheck source=models/routing/opencode/eval/tests/test-lib.sh disable=SC1091 # path built from the script's own directory at run time
 source "$root/tests/test-lib.sh"
-# shellcheck source=../runtime/opencode-v2-adapter/v2-http.sh disable=SC1091
+# shellcheck source=models/routing/opencode/eval/runtime/opencode-v2-adapter/v2-http.sh disable=SC1091 # path built from the script's own directory at run time
 source "$root/runtime/opencode-v2-adapter/v2-http.sh"
 
 # v2-http.sh: authenticated, polled access to the OpenCode 2 HTTP API, tested

@@ -1,11 +1,11 @@
 # OpenCode multi-model routing starter
 
-This bundle uses OpenCode's built-in agents for normal work and adds only two custom subagents: `reviewer` and `expert`.
+This bundle routes OpenCode's built-in agents through one configuration file and adds three custom agents: `reviewer`, `expert` and `scout`. It targets OpenCode 2.x; the OpenCode 1.x bundle is kept as history (see "OpenCode 1.x (history)" below).
 
 Routing is split deliberately into two layers:
 
-- `opencode.jsonc`: deterministic model/variant assignment per agent.
-- `.opencode/model-routing.md`: semantic rules telling the controller when Superpowers work should go to `general`, `reviewer`, or `expert`.
+- `v2/opencode.jsonc`: deterministic model, variant and mode assignment per agent, and the permission rules.
+- `v2/.opencode/model-routing.md`: semantic rules telling the controller when Superpowers work should go to `general`, `reviewer`, `expert` or `scout`.
 
 The routing policy is loaded through OpenCode's `instructions` setting; it does not need to be merged into the project's `AGENTS.md`.
 
@@ -482,7 +482,7 @@ cites a URL for every claim. Build uses Copilot GPT-6.1 Sol/high; Breakglass use
 direct OpenAI GPT-6.1 Sol/max as a human-selected primary.
 
 These are copies. After installing them — and after any later change to
-either side — [the alignment check](#alignment-check--is-the-installed-configuration-still-this-bundle)
+either side — [the alignment check](#alignment-check-1x-historical)
 tells you whether they still match this bundle.
 
 ### 4. Merge the OpenCode configuration

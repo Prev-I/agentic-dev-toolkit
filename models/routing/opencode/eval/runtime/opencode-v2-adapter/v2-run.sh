@@ -20,7 +20,7 @@
 # verifier's test).
 set -Eeuo pipefail
 
-# shellcheck source=./v2-http.sh disable=SC1091
+# shellcheck source=models/routing/opencode/eval/runtime/opencode-v2-adapter/v2-http.sh disable=SC1091 # path built from the script's own directory at run time
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/v2-http.sh"
 
 _V2_TMPDIRS=()

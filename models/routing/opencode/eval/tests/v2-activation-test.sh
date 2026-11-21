@@ -77,7 +77,8 @@ cat >"$main_root/opencode.jsonc" <<'JSONC'
   ],
   "agents": {
     "build": {"model": {"providerID": "some-vendor", "model": "old-model"}, "note": "stale"},
-    "custom-agent": {"model": {"providerID": "some-vendor", "model": "some-model"}, "note": "user-owned"}
+    "custom-agent": {"model": {"providerID": "some-vendor", "model": "some-model"}, "note": "user-owned",
+                     "system": "Rispondi in italiano — perché sì ✓"}
   }
 }
 JSONC
@@ -86,7 +87,7 @@ cp "$main_root/opencode.jsonc" "$workspace/main-original.jsonc"
 inode_before=$(stat -c %i "$main_root/opencode.jsonc")
 
 rm -f "$workspace/mv.log"
-activate "$main_root" "$workspace/main/backups" >"$workspace/out.txt"
+activate "$main_root" "$workspace/main/backups" >"$workspace/out.txt" 2>"$workspace/main.err"
 out=$(<"$workspace/out.txt")
 assert_contains "$out" "target=$main_root/opencode.jsonc"
 assert_contains "$out" "before_sha256=$(sha256sum "$workspace/main-original.jsonc" | cut -d' ' -f1)"
@@ -176,8 +177,18 @@ PY
 python3 -c 'import json,sys,hashlib; m=json.load(open(sys.argv[1])); assert m["source_profile_sha256"]==sys.argv[2], m' \
   "$backup_dir/manifest.json" "$profile_sha" || fail "manifest digest"
 
-# Re-activation is idempotent on content (header aside).
-activate "$main_root" "$workspace/main/backups" >/dev/null
+# Non-ASCII user text survives byte-equal, not as \u escapes.
+grep -qF '"system": "Rispondi in italiano — perché sì ✓"' "$main_root/opencode.jsonc" \
+  || fail "non-ASCII user text not preserved byte-equal"
+
+# The dropped user comment is reported once, naming the backup.
+assert_contains "$(<"$workspace/main.err")" "user comments in $main_root/opencode.jsonc were dropped"
+assert_contains "$(<"$workspace/main.err")" "$backup_dir"
+
+# Re-activation is idempotent on content (header aside), and a file whose only
+# comments are the generated header reports no dropped comments.
+activate "$main_root" "$workspace/main/backups" >/dev/null 2>"$workspace/main2.err"
+[[ "$(<"$workspace/main2.err")" != *"comments"* ]] || fail "generated header reported as user comments: $(<"$workspace/main2.err")"
 python3 "$helper" load "$main_root/opencode.jsonc" >"$workspace/after2.json"
 cmp -s "$workspace/after.json" "$workspace/after2.json" || fail "second activation changed content"
 
@@ -193,6 +204,121 @@ assert_contains "$(<"$workspace/v1.err")" convert-v1-config
 assert_eq "$v1_before" "$(sha256sum "$v1_root/opencode.json")"
 [[ ! -e "$workspace/v1/backups" ]] || fail "refused activation left a backup"
 assert_eq "opencode.json" "$(ls -A "$v1_root")"
+
+# --- Symlinked targets are refused, dangling ones included ----------------
+link_root="$workspace/link/config"
+mkdir -p "$link_root" "$workspace/link/dotfiles"
+cp "$workspace/main-original.jsonc" "$workspace/link/dotfiles/opencode.jsonc"
+ln -s "$workspace/link/dotfiles/opencode.jsonc" "$link_root/opencode.jsonc"
+link_before=$(sha256sum "$workspace/link/dotfiles/opencode.jsonc")
+rc=0
+activate "$link_root" "$workspace/link/backups" >/dev/null 2>"$workspace/link.err" || rc=$?
+assert_eq 1 "$rc"
+assert_contains "$(<"$workspace/link.err")" "$link_root/opencode.jsonc is a symlink"
+[[ -L "$link_root/opencode.jsonc" ]] || fail "symlink replaced"
+assert_eq "$link_before" "$(sha256sum "$workspace/link/dotfiles/opencode.jsonc")"
+[[ ! -e "$workspace/link/backups" ]] || fail "refused activation left a backup"
+
+dangle_root="$workspace/dangle/config"
+mkdir -p "$dangle_root"
+cp "$workspace/main-original.jsonc" "$dangle_root/opencode.jsonc"
+ln -s "$workspace/nowhere/opencode.json" "$dangle_root/opencode.json"
+dangle_before=$(sha256sum "$dangle_root/opencode.jsonc")
+rc=0
+activate "$dangle_root" "$workspace/dangle/backups" >/dev/null 2>"$workspace/dangle.err" || rc=$?
+assert_eq 1 "$rc"
+assert_contains "$(<"$workspace/dangle.err")" "$dangle_root/opencode.json is a symlink"
+[[ -L "$dangle_root/opencode.json" ]] || fail "dangling symlink removed"
+assert_eq "$dangle_before" "$(sha256sum "$dangle_root/opencode.jsonc")"
+
+# --- Backup-integrity refusals ----------------------------------------------
+# A backup root that cannot be created: refused, nothing left behind.
+broot="$workspace/broot/config"
+mkdir -p "$broot"
+cp "$workspace/main-original.jsonc" "$broot/opencode.jsonc"
+: >"$workspace/broot/not-a-dir"
+broot_before=$(sha256sum "$broot/opencode.jsonc")
+rc=0
+activate "$broot" "$workspace/broot/not-a-dir" >/dev/null 2>&1 || rc=$?
+assert_eq 1 "$rc"
+assert_eq "$broot_before" "$(sha256sum "$broot/opencode.jsonc")"
+assert_eq "opencode.jsonc" "$(ls -A "$broot")"
+
+# The target changes between the merge's read and the backup copy: a cp shim
+# edits the target first. The copy no longer matches the digest, so the
+# activation is refused, the edited target is left as it is, and the fresh
+# backup directory is removed.
+race_shim="$workspace/race-shim"
+mkdir -p "$race_shim"
+real_cp=$(command -v cp)
+cat >"$race_shim/cp" <<SH
+#!/usr/bin/env bash
+for arg in "\$@"; do
+  [[ "\$arg" != */race/config/opencode.jsonc ]] || printf '// concurrent edit\n' >>"\$arg"
+done
+exec "$real_cp" "\$@"
+SH
+chmod +x "$race_shim/cp"
+race_root="$workspace/race/config"
+mkdir -p "$race_root"
+"$real_cp" "$workspace/main-original.jsonc" "$race_root/opencode.jsonc"
+rc=0
+PATH="$race_shim:$PATH" activate "$race_root" "$workspace/race/backups" >/dev/null 2>"$workspace/race.err" || rc=$?
+assert_eq 1 "$rc"
+assert_contains "$(<"$workspace/race.err")" "the backup copy does not match the target the merge read"
+assert_eq "$(sha256sum <"$workspace/main-original.jsonc")" "$(head -c -19 "$race_root/opencode.jsonc" | sha256sum)"
+assert_eq '// concurrent edit' "$(tail -n1 "$race_root/opencode.jsonc")"
+assert_eq "opencode.jsonc" "$(ls -A "$race_root")"
+assert_eq "" "$(ls -A "$workspace/race/backups")"
+
+# The target changes after the backup is complete (a python3 shim edits it
+# when the manifest is written): the last check before the replace refuses.
+real_python=$(command -v python3)
+late_shim="$workspace/late-shim"
+mkdir -p "$late_shim"
+cat >"$late_shim/python3" <<SH
+#!/usr/bin/env bash
+if [[ "\${!#}" == */late/backups/*/manifest.json ]]; then
+  printf '// late edit\n' >>"$workspace/late/config/opencode.jsonc"
+fi
+exec "$real_python" "\$@"
+SH
+chmod +x "$late_shim/python3"
+late_root="$workspace/late/config"
+mkdir -p "$late_root"
+cp "$workspace/main-original.jsonc" "$late_root/opencode.jsonc"
+rc=0
+PATH="$late_shim:$PATH" activate "$late_root" "$workspace/late/backups" >/dev/null 2>"$workspace/late.err" || rc=$?
+assert_eq 1 "$rc"
+assert_contains "$(<"$workspace/late.err")" "the target changed after it was backed up"
+assert_eq '// late edit' "$(tail -n1 "$late_root/opencode.jsonc")"
+assert_eq "opencode.jsonc" "$(ls -A "$late_root")"
+assert_eq "" "$(ls -A "$workspace/late/backups")"
+
+# An interrupt mid-activation removes the temp file, leaves the target alone
+# and re-raises the signal: a python3 shim sends TERM to the activating shell
+# while the manifest is written.
+term_shim="$workspace/term-shim"
+mkdir -p "$term_shim"
+cat >"$term_shim/python3" <<SH
+#!/usr/bin/env bash
+if [[ "\${!#}" == */term/backups/*/manifest.json ]]; then
+  kill -TERM "\$PPID"
+fi
+exec "$real_python" "\$@"
+SH
+chmod +x "$term_shim/python3"
+term_root="$workspace/term/config"
+mkdir -p "$term_root"
+cp "$workspace/main-original.jsonc" "$term_root/opencode.jsonc"
+# The outer subshell absorbs bash's "Terminated" job report.
+rc=$( (PATH="$term_shim:$PATH" bash -c 'source "$1"; shift; activate_profile_v2 "$@"' _ \
+  "$adapter/activate-profile.sh" --profile "$profile" --targets "$targets" \
+  --config-root "$term_root" --backup-root "$workspace/term/backups" \
+  --model-routing "$routing_md" >/dev/null 2>&1; printf '%s' "$?") 2>/dev/null )
+assert_eq 143 "$rc"
+cmp -s "$term_root/opencode.jsonc" "$workspace/main-original.jsonc" || fail "interrupted activation changed the target"
+assert_eq "opencode.jsonc" "$(ls -A "$term_root")"
 
 # --- Unparseable target is refused and left untouched ----------------------
 bad_root="$workspace/bad/config"

@@ -43,6 +43,24 @@ python3 "$helper" load "$workspace/url.jsonc" >"$workspace/url.out"
 assert_contains "$(<"$workspace/url.out")" '"https://example.invalid//x"'
 assert_contains "$(<"$workspace/url.out")" '"a,]b"'
 
+# md-frontmatter fails closed on YAML outside its subset, and parses plain floats.
+mdcase() { printf -- '---\n%s\n---\nbody\n' "$1" >"$workspace/case.md"; }
+mdcase 'temperature: 0.1'
+assert_eq 0.1 "$(python3 "$helper" md-frontmatter "$workspace/case.md" | python3 -c 'import json,sys; print(json.load(sys.stdin)["temperature"])')"
+mdcase 'hidden: true'
+python3 "$helper" md-frontmatter "$workspace/case.md" >/dev/null
+for bad in 'mode: subagent # primary-only' 'description: a: b' 'hidden: True' 'hidden: TRUE' \
+           'x: Null' 'x: ~' 'x: 1e3' 'x: 1.2.3' 'x: "a" # c' 'x: [a, b]'; do
+  mdcase "$bad"
+  rc=0
+  python3 "$helper" md-frontmatter "$workspace/case.md" >/dev/null 2>&1 || rc=$?
+  assert_eq 2 "$rc"
+done
+printf -- '---\npermission:\n  bash:\n    "git status*": allow  # read-only\n---\n' >"$workspace/case.md"
+rc=0
+python3 "$helper" md-frontmatter "$workspace/case.md" >/dev/null 2>&1 || rc=$?
+assert_eq 2 "$rc"
+
 if grep -q '"temperature"' "$bundle/opencode.jsonc"; then fail "temperature in V2 opencode.jsonc"; fi
 if grep -rqi 'temperature' "$bundle/.opencode/agents"; then fail "temperature in V2 agent markdown"; fi
 

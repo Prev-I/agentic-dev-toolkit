@@ -104,24 +104,37 @@ class FrontmatterError(Exception):
 
 
 def scalar(text):
+    """Parse one scalar; refuse anything a real YAML parser would read differently."""
     text = text.strip()
-    if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'":
-        if text[0] == '"':
-            try:
-                return json.loads(text)
-            except ValueError:
-                raise FrontmatterError("bad quoted scalar: " + text)
-        return text[1:-1]
     if text == "":
         raise FrontmatterError("empty scalar")
+    if text[0] == '"':
+        if len(text) < 2 or text[-1] != '"':
+            raise FrontmatterError("unsupported quoted scalar: " + text)
+        try:
+            return json.loads(text)
+        except ValueError:
+            raise FrontmatterError("bad quoted scalar: " + text)
+    if text[0] == "'":
+        if len(text) < 2 or text[-1] != "'" or "'" in text[1:-1]:
+            raise FrontmatterError("unsupported quoted scalar: " + text)
+        return text[1:-1]
+    if text[0] in "[{&*!|>%@`#":
+        raise FrontmatterError("unsupported scalar: " + text)
+    if " #" in text or ": " in text or text.endswith(":"):
+        raise FrontmatterError("ambiguous unquoted scalar: " + text)
     if text in ("true", "false"):
         return text == "true"
     if text == "null":
         return None
+    if text.lower() in ("true", "false", "null", "yes", "no", "on", "off", "~") \
+            or re.fullmatch(r"[-+.\d][\w.+-]*", text) and re.search(r"\d", text) \
+            and not re.fullmatch(r"-?\d+(\.\d+)?", text):
+        raise FrontmatterError("unsupported scalar spelling: " + text)
     if re.fullmatch(r"-?\d+", text):
         return int(text)
-    if text[0] in "[{&*!|>%@`":
-        raise FrontmatterError("unsupported scalar: " + text)
+    if re.fullmatch(r"-?\d+\.\d+", text):
+        return float(text)
     return text
 
 

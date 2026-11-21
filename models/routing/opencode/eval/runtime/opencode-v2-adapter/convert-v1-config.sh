@@ -81,7 +81,6 @@ _cv_py() {
   python3 -I -B - "$v2_convert_root" "$@" <<'PY'
 import json
 import os
-import pwd
 import secrets
 import socket
 import string
@@ -92,11 +91,6 @@ sys.path.insert(0, sys.argv[1])
 import v2config  # noqa: E402
 
 cmd, args = sys.argv[2], sys.argv[3:]
-
-
-def inside(path, root):
-    real = os.path.realpath(path)
-    return real == root or real.startswith(root + os.sep)
 
 
 if cmd == "document":
@@ -114,21 +108,7 @@ if cmd == "document":
            and isinstance(l.get("path"), str) and os.path.realpath(l["path"]) == cfg]
     if not doc or not isinstance(doc[0].get("info"), dict):
         sys.exit(3)
-    account = os.path.realpath(os.path.join(pwd.getpwuid(os.getuid()).pw_dir, ".opencode"))
-    forbidden = ("opencode.json", "opencode.jsonc", "agents", "agent", "command", "plugins")
-    bad = []
-    for layer in layers:
-        path = layer.get("path") if isinstance(layer, dict) else None
-        if not isinstance(path, str) or not path:
-            bad.append("a layer with no path: %s" % json.dumps(layer)[:200])
-        elif inside(path, sandbox):
-            continue
-        elif os.path.realpath(path) == account:
-            held = [n for n in forbidden if os.path.lexists(os.path.join(account, n))]
-            if held:
-                bad.append("%s holds %s" % (path, ", ".join(held)))
-        else:
-            bad.append("%s (%s) is outside the sandbox" % (path, layer.get("type")))
+    bad = v2config.check_layers(layers, sandbox)
     if bad:
         sys.stderr.write("convert_v1_config: refusing the server's config layers; it did not load"
                          " only the sandbox:\n" + "".join("  - %s\n" % b for b in bad))

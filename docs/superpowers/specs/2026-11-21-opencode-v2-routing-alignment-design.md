@@ -530,6 +530,10 @@ The sandbox config is **built in full**, never overlaid on the user's:
 *Unmeasured, measure first:* the cleanest way to give a fresh 2.x data
 directory credentials. Phase 0 showed that a 1.x-format `auth.json` in the data
 directory is imported on first start.
+Measured 2026-11-21: on 2.3.0, a 1.x-format `auth.json` placed in a fresh
+`XDG_DATA_HOME/opencode/` is imported into the database's `credential` table on
+the server's first start. The screening runner relies on exactly that: each
+sandbox gets a mode-600 copy of the operator's credentials file there.
 
 **One sandbox server per dispatch.** *(Builder-check call)* Generation runs
 inside the server, so killing only the client would not stop spending. On a

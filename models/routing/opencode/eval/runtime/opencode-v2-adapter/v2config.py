@@ -2,11 +2,33 @@
 """Shared OpenCode 2.x config helper.
 
 Usage: v2config.py load FILE | shape FILE | md-frontmatter FILE
+       v2config.py layers API_CONFIG_JSON SANDBOX
+       v2config.py build-config BASE_JSON_OR_- FRAGMENT AGENT_ROW_JSON_OR_- OUT
+       v2config.py real-dirs
+       v2config.py redact SOURCE... -- PATH...
 Exit codes: 0 success, 1 finding, 2 usage or unparseable input.
+
+layers: 0 when every layer of a GET /api/config answer passes check_layers;
+  1 with one "  - <problem>" line per problem on stderr.
+build-config: BASE (a profile file, or - for a minimal config), FRAGMENT (a
+  file holding only `providers` and `policies`; any other key exits 2) and
+  AGENT_ROW (a file holding {"name": N, "row": {...}}, or -) are merged into
+  OUT as strict JSON, always with "update": "disable".
+real-dirs: the OpenCode directories a sandbox must not resolve inside.
+redact: every string value of 12 or more characters anywhere in each SOURCE
+  (JSON or JSONC, read recursively; a SOURCE that does not parse contributes
+  each whitespace-separated token of that length) is searched for, verbatim and
+  JSON-escaped, in every regular file under each PATH (a file or a directory;
+  symlinks are not followed, a missing PATH is skipped), and each occurrence is
+  replaced in place with [REDACTED]. 0 when nothing was found; 1 when something
+  was redacted, with one "redact: a credential was redacted in FILE" line per
+  file on stdout; 2 when a SOURCE cannot be read or the scan fails in any other
+  way. No secret is ever printed.
 """
 import fnmatch
 import json
 import os
+import pwd
 import re
 import sys
 
@@ -276,12 +298,241 @@ def breakglass_decision(permissions, agent_name="breakglass"):
     return deciding
 
 
+# What the account's ~/.opencode may not hold for a sandboxed server to count
+# as loading only its sandbox.
+ACCOUNT_OPENCODE_FORBIDDEN = ("opencode.json", "opencode.jsonc", "agents", "agent",
+                              "command", "plugins")
+
+
+def _inside(path, root):
+    real = os.path.realpath(path)
+    return real == root or real.startswith(root + os.sep)
+
+
+def check_layers(layers, sandbox):
+    """The problems with a server's config layers, empty when clean: each layer
+    must be inside SANDBOX, or be the account's ~/.opencode holding none of
+    ACCOUNT_OPENCODE_FORBIDDEN."""
+    sandbox = os.path.realpath(sandbox)
+    account = os.path.realpath(os.path.join(pwd.getpwuid(os.getuid()).pw_dir, ".opencode"))
+    bad = []
+    for layer in layers:
+        path = layer.get("path") if isinstance(layer, dict) else None
+        if not isinstance(path, str) or not path:
+            # Never the layer itself: its `info` is the effective config,
+            # provider settings and keys included.
+            if isinstance(layer, dict):
+                kind = layer.get("type")
+                kind = kind[:40] if isinstance(kind, str) else type(kind).__name__
+                bad.append("a layer with no path (type %s, keys %s)" % (kind, sorted(layer)))
+            else:
+                bad.append("a layer with no path (a %s, not an object)" % type(layer).__name__)
+        elif _inside(path, sandbox):
+            continue
+        elif os.path.realpath(path) == account:
+            held = [n for n in ACCOUNT_OPENCODE_FORBIDDEN
+                    if os.path.lexists(os.path.join(account, n))]
+            if held:
+                bad.append("%s holds %s" % (path, ", ".join(held)))
+        else:
+            bad.append("%s (%s) is outside the sandbox" % (path, layer.get("type")))
+    return bad
+
+
+FRAGMENT_KEYS = ("providers", "policies")
+
+
+def build_config(base, fragment, agent_row):
+    """BASE (a dict, or None for the minimal config) with FRAGMENT's providers
+    merged over its own and its policies appended, and AGENT_ROW placed at
+    agents.<name>. Raises ValueError on a malformed input."""
+    if base is None:
+        base = {"$schema": "https://opencode.ai/config.json", "update": "disable"}
+    if not isinstance(base, dict):
+        raise ValueError("the base is not a JSON object")
+    if not isinstance(fragment, dict):
+        raise ValueError("the fragment is not a JSON object")
+    extra = sorted(set(fragment) - set(FRAGMENT_KEYS))
+    if extra:
+        raise ValueError("the fragment may hold only %s; it also holds %s"
+                         % (", ".join(FRAGMENT_KEYS), ", ".join(extra)))
+    result = json.loads(json.dumps(base))
+    providers = fragment.get("providers", {})
+    if not isinstance(providers, dict):
+        raise ValueError("the fragment's providers is not an object")
+    if providers:
+        merged = result.get("providers")
+        merged = dict(merged) if isinstance(merged, dict) else {}
+        merged.update(providers)
+        result["providers"] = merged
+    policies = fragment.get("policies", [])
+    if not isinstance(policies, list):
+        raise ValueError("the fragment's policies is not a list")
+    if policies:
+        existing = result.get("policies")
+        result["policies"] = (list(existing) if isinstance(existing, list) else []) + policies
+    if agent_row is not None:
+        if (not isinstance(agent_row, dict) or set(agent_row) != {"name", "row"}
+                or not isinstance(agent_row["name"], str) or not agent_row["name"]
+                or not isinstance(agent_row["row"], dict)):
+            raise ValueError('the agent row must be {"name": N, "row": {...}}')
+        agents = result.get("agents")
+        agents = dict(agents) if isinstance(agents, dict) else {}
+        agents[agent_row["name"]] = agent_row["row"]
+        result["agents"] = agents
+    result["update"] = "disable"
+    return result
+
+
+def real_dirs():
+    """The account's OpenCode directories, and the XDG ones when set."""
+    home = pwd.getpwuid(os.getuid()).pw_dir
+    dirs = [os.path.join(home, ".config", "opencode"),
+            os.path.join(home, ".local", "share", "opencode"),
+            os.path.join(home, ".local", "state", "opencode"),
+            os.path.join(home, ".opencode")]
+    for name in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"):
+        value = os.environ.get(name)
+        if value:
+            dirs.append(os.path.join(value, "opencode"))
+    return dirs
+
+
+def _layers_command(api_path, sandbox):
+    try:
+        with open(api_path) as handle:
+            layers = json.load(handle)
+    except (OSError, ValueError) as error:
+        sys.stderr.write("layers: %s\n" % error)
+        return 2
+    if not isinstance(layers, list):
+        sys.stderr.write("layers: %s is not a list of layers\n" % api_path)
+        return 2
+    bad = check_layers(layers, sandbox)
+    sys.stderr.write("".join("  - %s\n" % b for b in bad))
+    return 1 if bad else 0
+
+
+def _build_config_command(base_path, fragment_path, row_path, out):
+    try:
+        base = None if base_path == "-" else load(base_path)
+        fragment = load(fragment_path)
+        row = None if row_path == "-" else load(row_path)
+        result = build_config(base, fragment, row)
+    except (OSError, ValueError) as error:
+        sys.stderr.write("build-config: %s\n" % error)
+        return 2
+    with open(out, "w") as handle:
+        json.dump(result, handle, indent=2)
+        handle.write("\n")
+    return 0
+
+
+REDACT_MIN = 12
+REDACTED = b"[REDACTED]"
+
+
+def _secret_strings(value, found):
+    if isinstance(value, str):
+        if len(value) >= REDACT_MIN:
+            found.add(value)
+    elif isinstance(value, dict):
+        for item in value.values():
+            _secret_strings(item, found)
+    elif isinstance(value, list):
+        for item in value:
+            _secret_strings(item, found)
+
+
+def secret_needles(sources):
+    """The byte strings to redact: each secret verbatim and JSON-escaped
+    (ASCII-only and not), longest first. Raises OSError on an unreadable
+    source."""
+    secrets = set()
+    for source in sources:
+        with open(source, encoding="utf-8-sig", errors="replace") as handle:
+            text = handle.read()
+        try:
+            _secret_strings(json.loads(strip_jsonc(text)), secrets)
+        except ValueError:
+            secrets.update(t for t in text.split() if len(t) >= REDACT_MIN)
+    needles = set()
+    for secret in secrets:
+        needles.add(secret.encode("utf-8"))
+        for ascii_only in (True, False):
+            needles.add(json.dumps(secret, ensure_ascii=ascii_only)[1:-1].encode("utf-8"))
+    return sorted(needles, key=len, reverse=True)
+
+
+def _files_under(path):
+    if os.path.islink(path):
+        return
+    if os.path.isfile(path):
+        yield path
+        return
+    for directory, dirs, files in os.walk(path):
+        dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(directory, d))]
+        for name in sorted(files):
+            full = os.path.join(directory, name)
+            if os.path.isfile(full) and not os.path.islink(full):
+                yield full
+
+
+def redact(sources, paths):
+    """Redact SOURCES' secrets in place under PATHS; the files changed."""
+    needles = secret_needles(sources)
+    changed = []
+    for path in paths:
+        for name in _files_under(path):
+            with open(name, "rb") as handle:
+                data = handle.read()
+            new = data
+            for needle in needles:
+                new = new.replace(needle, REDACTED)
+            if new != data:
+                with open(name, "r+b") as handle:
+                    handle.write(new)
+                    handle.truncate()
+                changed.append(name)
+    return changed
+
+
+def _redact_command(args):
+    if "--" not in args:
+        return usage()
+    split = args.index("--")
+    sources, paths = args[:split], args[split + 1:]
+    if not sources:
+        return usage()
+    try:
+        changed = redact(sources, paths)
+    except OSError as error:
+        sys.stderr.write("redact: cannot read a source or a file (%s)\n" % error.strerror)
+        return 2
+    except Exception as error:  # noqa: BLE001 - any failure is a failed scan, never a hit
+        sys.stderr.write("redact: the scan failed (%s)\n" % type(error).__name__)
+        return 2
+    for name in changed:
+        print("redact: a credential was redacted in %s" % name)
+    return 1 if changed else 0
+
+
 def usage():
     sys.stderr.write(__doc__)
     return 2
 
 
 def main(argv):
+    if len(argv) == 4 and argv[1] == "layers":
+        return _layers_command(argv[2], argv[3])
+    if len(argv) == 6 and argv[1] == "build-config":
+        return _build_config_command(*argv[2:])
+    if len(argv) >= 2 and argv[1] == "redact":
+        return _redact_command(argv[2:])
+    if len(argv) == 2 and argv[1] == "real-dirs":
+        for path in real_dirs():
+            print(path)
+        return 0
     if len(argv) != 3 or argv[1] not in ("load", "shape", "md-frontmatter"):
         return usage()
     command, path = argv[1], argv[2]

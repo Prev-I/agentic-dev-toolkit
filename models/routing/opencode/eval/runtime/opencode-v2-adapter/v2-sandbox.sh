@@ -20,6 +20,11 @@
 #                                   message
 #   v2_sandbox_destroy SANDBOX      stop the server and remove SANDBOX;
 #                                   idempotent
+#   v2_close_extra_fds              close every descriptor above 2 in the
+#                                   calling (sub)shell, so that what it starts
+#                                   next inherits none of them (a record's lock
+#                                   above all: a server that outlives its
+#                                   runner must not keep the record locked)
 #
 # v2_sandbox_serve runs `( cd SANDBOX/work; exec setsid env -i … ) &`, so `$!`
 # is the server's pid (a `cd D && env …` subshell would leave `$!` naming the
@@ -37,7 +42,8 @@
 # A server that exits early is reported on stderr, but the last lines of its
 # own log go to file descriptor V2_SERVER_LOG_FD (default 2): a caller that
 # keeps stderr in a record points it at the terminal, so no server output (it
-# may echo provider settings) is kept.
+# may echo provider settings) is kept. The server inherits no descriptor above
+# 2 (v2_close_extra_fds).
 #
 # Call v2_sandbox_serve in the shell that will destroy the sandbox, not inside
 # `$(...)`: the server must be that shell's child for _V2_PIDS and wait to work.
@@ -145,8 +151,9 @@ s.close()') && [[ -n "$port" ]] || { _sb_err "cannot pick a free loopback port";
   [[ "${V2_SERVER_LOG_FD:-2}" =~ ^[0-9]+$ ]] || { _sb_err "V2_SERVER_LOG_FD is not a file descriptor"; return 1; }
   (
     cd "$sb/work"
-    # The server never holds the caller's log descriptor.
-    [[ "${V2_SERVER_LOG_FD:-2}" == 2 ]] || exec {V2_SERVER_LOG_FD}>&-
+    # The server holds no descriptor of its caller's: not the log descriptor,
+    # not a record's lock.
+    v2_close_extra_fds
     exec setsid env -i PATH=/usr/bin:/bin HOME="$sb/home" \
       XDG_CONFIG_HOME="$sb/config" XDG_DATA_HOME="$sb/data" \
       XDG_STATE_HOME="$sb/state" XDG_CACHE_HOME="$sb/cache" \
@@ -220,6 +227,17 @@ s.close()') && [[ -n "$port" ]] || { _sb_err "cannot pick a free loopback port";
     printf 'unknown\n' >"$sb/version"
   fi
   rm -f "$sb/info.json"
+}
+
+v2_close_extra_fds() {
+  local f n
+  # The glob is read by this shell itself, so /proc/self is this (sub)shell.
+  for f in /proc/self/fd/*; do
+    n=${f##*/}
+    [[ "$n" =~ ^[0-9]+$ ]] || continue
+    (( n > 2 )) || continue
+    { exec {n}>&-; } 2>/dev/null || true
+  done
 }
 
 v2_sandbox_destroy() {

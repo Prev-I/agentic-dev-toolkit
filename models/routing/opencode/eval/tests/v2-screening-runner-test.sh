@@ -14,11 +14,14 @@ work=$(mktemp -d)
 work=$(cd "$work" && pwd -P)
 runner_pid=''
 extra_pids=()
-# Every pid a fake logged, a runner left running, and the test's own stand-ins;
-# stopped by pid only.
+orphan_session=''
+# Every pid a fake logged, a runner left running, the test's own stand-ins and
+# the session an orphaned call runs in; stopped by pid (or that session's
+# process group id) only.
 cleanup() {
   local p
   [[ -z "$runner_pid" ]] || kill -s KILL "$runner_pid" 2>/dev/null || true
+  [[ -z "$orphan_session" ]] || kill -s KILL -- "-$orphan_session" 2>/dev/null || true
   for p in "${extra_pids[@]}"; do kill -s KILL "$p" 2>/dev/null || true; done
   for p in $(sed -n 's/^\(serve\|run\) pid=\([0-9]*\) .*/\2/p' "$work/state/log" 2>/dev/null || true); do
     kill -s KILL "$p" 2>/dev/null || true
@@ -424,6 +427,94 @@ while IFS= read -r p; do
 done < <(sed -n 's/^\(serve\|run\) pid=\([0-9]*\) .*/\2/p' "$state/log")
 [[ ! -e "$rec/.work" ]] || fail ".work survived the interrupt"
 assert_eq '"INTERRUPTED"' "$(jq -c .halted.reason "$rec/status.json")"
+
+# record_lock_refuses_a_second_runner: score and a second dispatch on a record
+# whose dispatch is running exit 2 and touch nothing; the live run completes.
+scenario '{"screening-reviewer":{"text":"{\"findings\":[]}","cost_per_step":0.01,"steps":2,"step_sleep":0.4,
+  "probe":{"text":"CAPABILITY_OK"}}}'
+rec="$work/v2-locked"
+prepare "$rec" reviewer 100 a=model:fakep/m1#high || fail "prepare failed"
+approve "$rec"
+runs=$(log_count run)
+bash "$runner" dispatch --out "$rec" --providers "$work/fragment.json" --credentials "$work/creds.json" 2>/dev/null &
+runner_pid=$!
+for _ in $(seq 1 200); do
+  (( $(log_count run) > runs )) && break
+  sleep 0.1
+done
+(( $(log_count run) > runs )) || fail "the dispatch never started a call"
+rc=0
+bash "$runner" score --out "$rec" >/dev/null 2>"$work/lock.err" || rc=$?
+assert_eq 2 "$rc"
+assert_contains "$(<"$work/lock.err")" "another runner holds this record"
+rc=0
+bash "$runner" dispatch --out "$rec" --providers "$work/fragment.json" --credentials "$work/creds.json" \
+  2>"$work/lock.err" || rc=$?
+assert_eq 2 "$rc"
+assert_contains "$(<"$work/lock.err")" "another runner holds this record"
+rc=0
+wait "$runner_pid" || rc=$?
+runner_pid=''
+assert_eq 0 "$rc"
+assert_eq '"COMPLETE"' "$(jq -c .state "$rec/status.json")"
+assert_eq 6 "$(find "$rec/runs" -mindepth 1 -maxdepth 1 -type d | wc -l)"
+assert_eq 600 "$(stat -c %a "$rec/.lock")"
+
+# orphan_after_sigkill: a runner killed with SIGKILL mid-call leaves its call's
+# session, server and .work behind, but not the lock; score takes it, stops the
+# orphaned server by its recorded pid and removes .work.
+scenario '{"screening-reviewer":{"text":"{\"findings\":[]}","cost_per_step":0.01,"steps":40,"step_sleep":0.5}}'
+rec="$work/v2-orphan"
+prepare "$rec" reviewer 100 a=model:fakep/m1#high || fail "prepare failed"
+approve "$rec"
+runs=$(log_count run)
+bash "$runner" dispatch --out "$rec" --providers "$work/fragment.json" --credentials "$work/creds.json" 2>/dev/null &
+runner_pid=$!
+for _ in $(seq 1 200); do
+  (( $(log_count run) > runs )) && break
+  sleep 0.1
+done
+(( $(log_count run) > runs )) || fail "the dispatch never started a call"
+server=$(sed -n 's/^serve pid=\([0-9]*\) .*/\1/p' "$state/log" | tail -n 1)
+client=$(sed -n 's/^run pid=\([0-9]*\) .*/\1/p' "$state/log" | tail -n 1)
+orphan_session=$(ps -o sid= -p "$client" | tr -d ' ')
+[[ "$orphan_session" =~ ^[1-9][0-9]*$ ]] || fail "no session for the call's client"
+kill -s KILL "$runner_pid"
+wait "$runner_pid" 2>/dev/null || true
+runner_pid=''
+kill -0 "$server" 2>/dev/null || fail "the orphaned server is already gone; the test proves nothing"
+flock -n "$rec/.lock" true || fail "a survivor of the SIGKILL still holds the record's lock"
+rc=0
+bash "$runner" score --out "$rec" >/dev/null 2>"$work/orphan.err" || rc=$?
+assert_eq 2 "$rc"
+assert_contains "$(<"$work/orphan.err")" "stale scratch area"
+[[ "$(<"$work/orphan.err")" != *"another runner"* ]] || fail "an orphan kept the record locked"
+[[ ! -e "$rec/.work" ]] || fail ".work survived the orphan cleanup"
+gone "$server" || fail "the orphaned server $server survived"
+kill -s KILL -- "-$orphan_session" 2>/dev/null || true
+orphan_session=''
+
+# build_binary_credential_never_encoded: a binary file holding the credential
+# is redacted before the patch is taken, so not even the decoded patch has it.
+scenario '{"screening-build":{"text":"done","cost_per_step":0.01,
+  "write_binary":{"path":"data.bin","text":"tok-SECRET-123"},
+  "probe":{"text":"CAPABILITY_OK","write_binary":null}}}'
+rec="$work/v2-binary"
+prepare "$rec" build 100 a=model:fakep/m1#high || fail "prepare failed"
+approve "$rec"
+rc=0
+dispatch "$rec" 2>/dev/null || rc=$?
+assert_eq 1 "$rc"
+assert_eq '"CREDENTIAL_EXPOSED"' "$(jq -c .halted.reason "$rec/status.json")"
+no_secret_in "$rec"
+patch=$(find "$rec/runs" -name work-product.patch)
+[[ -n "$patch" ]] || fail "no work-product.patch for the exposed run"
+assert_contains "$(<"$patch")" "GIT binary patch"
+mkdir -p "$work/applied"
+cp -a "$root/records/astra-build-followup/base-snapshot/." "$work/applied/"
+(cd "$work/applied" && git apply "$patch") || fail "the work-product patch does not apply"
+grep -q 'REDACTED' "$work/applied/data.bin" || fail "the patch does not carry the redacted file"
+! grep -rqa tok-SECRET-123 "$work/applied" || fail "the decoded patch holds the credential"
 
 # build_role_captures_patch
 scenario '{"screening-build":{"text":"done","cost_per_step":0.01,

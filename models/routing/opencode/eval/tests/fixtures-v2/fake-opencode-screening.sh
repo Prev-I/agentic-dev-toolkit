@@ -35,7 +35,9 @@
 #   FAKE_SCREEN_STATE/scenario.json  read by run: {KEY: {text, cost_per_step,
 #                                  steps, step_sleep, exit, error_message,
 #                                  partial, observed_model: {providerID, id,
-#                                  variant}, write_file: {path, content}}}.
+#                                  variant}, write_file: {path, content},
+#                                  write_binary: {path, text}}}; write_binary
+#                                  writes NUL, text, NUL (a binary file).
 #                                  Defaults: text "", cost_per_step 0, steps 1,
 #                                  step_sleep 0, exit 0, partial false;
 #                                  cost_per_step null omits every step_finish
@@ -130,7 +132,7 @@ PY
 
 run() {
   local agent='' model='' key n sid fixtures i steps cost sleep_s text code message prompt='' fixture_use=''
-  local observed write_path write_content partial
+  local observed write_path write_content partial binary_path binary_text
   local stdout_file
   stdout_file=$(readlink "/proc/$$/fd/1" || true)
   {
@@ -177,6 +179,8 @@ run() {
   partial=$(jq -r '.partial // false' <<<"$sc")
   write_path=$(jq -r '.write_file.path // ""' <<<"$sc")
   write_content=$(jq -r '.write_file.content // ""' <<<"$sc")
+  binary_path=$(jq -r '.write_binary.path // ""' <<<"$sc")
+  binary_text=$(jq -r '.write_binary.text // ""' <<<"$sc")
   observed=$(jq -c '.observed_model // empty' <<<"$sc")
   if [[ -z "$observed" && -n "$agent" && -f "$fixtures/api_agent_$agent.json" ]]; then
     observed=$(jq -c '.data.model' "$fixtures/api_agent_$agent.json")
@@ -216,6 +220,10 @@ run() {
   if [[ -n "$write_path" ]]; then
     mkdir -p "$(dirname "$write_path")"
     printf '%s' "$write_content" >"$write_path"
+  fi
+  if [[ -n "$binary_path" ]]; then
+    mkdir -p "$(dirname "$binary_path")"
+    printf '\0%s\0' "$binary_text" >"$binary_path"
   fi
   jq -cn --arg s "$sid" --arg t "$text" '{type: "text", sessionID: $s, part: {text: $t}}'
 }

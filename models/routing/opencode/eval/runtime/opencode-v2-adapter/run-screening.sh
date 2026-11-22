@@ -47,11 +47,14 @@
 #
 # The model's tools run with the operator's uid, so after every call (probes
 # included) each string value of 12 or more characters in the credentials file
-# and in the provider fragment is searched for in the call's output directory
-# and, for the build role, in the workspace copy and work-product.patch. Every
-# occurrence is replaced in place with [REDACTED], the call's dispatch.json is
-# classified CREDENTIAL_EXPOSED, and the screening halts. Nothing found is
-# printed except the names of the files changed.
+# and in the provider fragment is searched for and replaced in place with
+# [REDACTED]: for the build role first in the workspace copy, before
+# work-product.patch is taken from it (a binary file would otherwise reach the
+# patch encoded, where no search can see it), then in the call's output
+# directory, patch included. A hit in either pass classifies the call's
+# dispatch.json CREDENTIAL_EXPOSED and halts the screening; a scan that fails
+# halts it CREDENTIAL_SCAN_FAILED. Nothing found is printed except the names of
+# the files changed.
 # status.json is {state: COMPLETE|INCOMPLETE, stopped: {KEY: REASON}, halted};
 # exit 0 when COMPLETE, 1 when INCOMPLETE. The budget (Ruling 6) is one account
 # candidate_KEY per candidate with cap = budget / candidates, admission per call
@@ -75,7 +78,12 @@
 # INT, TERM and HUP trap removes it, after stopping by recorded pid any sandbox
 # server still running there. Calls run one at a time, each in its own session,
 # and a signal stops the running call's process group before the runner exits.
-# A .work that an abnormal end (SIGKILL, OOM, a shutdown) left behind is
+# Every phase holds an exclusive lock (flock -n) on DIR/.lock for its whole run:
+# prepare once it has created DIR, dispatch and score from the start when DIR is
+# a record. A phase that cannot take it exits 2 ("another runner holds this
+# record") before anything else. No child inherits the lock's descriptor, so a
+# call or server that survives a SIGKILL of its runner does not hold it.
+# A .work that an abnormal end (SIGKILL, OOM, a shutdown) left behind is then
 # removed when dispatch or score starts, before any refusal, after stopping each
 # recorded pid that is alive and whose working directory is its sandbox's work/;
 # one line on stderr says so. The runner's files are created under umask 077.
@@ -102,6 +110,7 @@ created_out=false
 prepared=false
 phase=''
 status_written=false
+lock_fd=''
 declare -A stopped=()
 halted_reason=''
 halted_label=''
@@ -148,6 +157,13 @@ stop_sandbox_servers() {
       v2_stop_pid "$pid"
     fi
   done
+}
+
+# lock_record: an exclusive lock on the record for the rest of this run, or
+# exit 2. A runner killed with SIGKILL releases it with its descriptor.
+lock_record() {
+  exec {lock_fd}>>"$out/.lock" || die 2 "cannot open $out/.lock"
+  flock -n "$lock_fd" || die 2 "another runner holds this record: $out"
 }
 
 # A .work an abnormal end left in the record: it may hold sandbox credentials,
@@ -209,7 +225,8 @@ trap 'on_signal 129' HUP
 # trapped signal interrupts; the status is the command's.
 run_child() {
   local rc=0
-  setsid "$@" &
+  # The call inherits no descriptor above 2: not the record's lock.
+  ( v2_close_extra_fds; exec setsid "$@" ) &
   child=$!
   wait "$child" || rc=$?
   child=''
@@ -334,6 +351,7 @@ prepare() {
   mkdir -p -- "$(dirname -- "$out")"
   mkdir -- "$out" || die 2 "cannot create the record $out"
   created_out=true
+  lock_record
   work="$out/.work"
   mkdir -- "$work"
   export TMPDIR="$work"
@@ -554,15 +572,25 @@ before_call() {
   fi
 }
 
-# exposure_check KEY LABEL DISPATCH_JSON PATH...: the credential backstop. Any
-# string of 12 or more characters from the credentials file or the provider
-# fragment found under PATH... is redacted in place, and the screening halts.
-exposure_check() {
-  local key=$1 label=$2 json=$3 rc=0
-  shift 3
-  python3 -I -B "$adapter/v2config.py" redact "$creds" "$providers" -- "$@" >&2 || rc=$?
+# redact_scan LABEL PATH...: the credential backstop. Any string of 12 or more
+# characters from the credentials file or the provider fragment found under
+# PATH... is redacted in place; 1 when something was, 0 when nothing was. A scan
+# that fails (any exit but 0, or 1 without a redaction line) halts the screening.
+redact_scan() {
+  local label=$1 rc=0
+  shift
+  python3 -I -B "$adapter/v2config.py" redact "$creds" "$providers" -- "$@" >"$work/redact.out" || rc=$?
+  cat -- "$work/redact.out" >&2
   (( rc != 0 )) || return 0
-  (( rc == 1 )) || halt CREDENTIAL_SCAN_FAILED "$label"
+  if (( rc == 1 )) && grep -q '^redact: a credential was redacted in ' "$work/redact.out"; then
+    return 1
+  fi
+  halt CREDENTIAL_SCAN_FAILED "$label"
+}
+
+# exposed KEY LABEL DISPATCH_JSON: a call exposed a credential; the screening halts.
+exposed() {
+  local key=$1 label=$2 json=$3
   if [[ -f "$json" ]]; then
     jq '.classification_before_redaction = .classification | .classification = "CREDENTIAL_EXPOSED"' \
       "$json" >"$work/exposed.json" && mv -- "$work/exposed.json" "$json"
@@ -626,6 +654,7 @@ dispatch() {
     esac
     shift 2
   done
+  if [[ -n "$out" && -f "$out/protocol.json" ]]; then lock_record; fi
   clear_stale_work
   [[ -n "$out" ]] || die 2 "--out is required"
   need_file --providers "$providers"
@@ -769,7 +798,8 @@ PY
     # shellcheck disable=SC2016 # expanded by the child shell
     run_child "${BASH:-bash}" -c 'source "$1"; shift; v2_capability_probe "$@"' _ \
       "$adapter/capability-probe.sh" "$out/capability/$key" "$key" "${call_opts[@]}" || rc=$?
-    exposure_check "$key" "capability-$key" "$out/capability/$key/dispatch/dispatch.json" "$out/capability/$key"
+    redact_scan "capability-$key" "$out/capability/$key" \
+      || exposed "$key" "capability-$key" "$out/capability/$key/dispatch/dispatch.json"
     (( rc != 2 )) || halt DISPATCH_REFUSED "capability-$key"
     after_call "$key" "capability-$key" "$out/capability/$key/dispatch"
     if (( rc != 0 )); then
@@ -786,7 +816,7 @@ PY
   done
   (( live > 0 )) || halt NO_LIVE_CANDIDATE
 
-  local rep w wid label seq=0 ws wout prompt
+  local rep w wid label seq=0 ws wout prompt hit
   local -a order
   local workloads
   workloads=$(jq '.workloads | length' "$role_file")
@@ -824,11 +854,15 @@ PY
             rm -f "$out/runs/$label/extract-error.txt"
           fi
         fi
+        # The workspace copy is redacted before the patch is taken from it.
+        hit=false
+        redact_scan "$label" "$wout" || hit=true
         if [[ "$capture" == true && -d "$wout" ]]; then
           bash "$adapter/capture-tree-patch.sh" "$ws" "$wout" "$out/runs/$label/work-product.patch" \
             || err "cannot capture the work product of $label"
         fi
-        exposure_check "$key" "$label" "$out/runs/$label/dispatch/dispatch.json" "$out/runs/$label" "$wout"
+        redact_scan "$label" "$out/runs/$label" || hit=true
+        [[ "$hit" == false ]] || exposed "$key" "$label" "$out/runs/$label/dispatch/dispatch.json"
         rm -rf -- "$ws" "$wout"
         after_call "$key" "$label" "$out/runs/$label/dispatch"
       done
@@ -851,10 +885,10 @@ run_argv() {
   if [[ -n "$dest" ]]; then
     dest="$out/$(expand "$dest" "$key" "$rep")"
     mkdir -p -- "$(dirname -- "$dest")"
-    (cd "$repo" && "${argv[@]}") </dev/null >"$dest" 2>"$work/stderr" || rc=$?
+    (v2_close_extra_fds; cd "$repo" && "${argv[@]}") </dev/null >"$dest" 2>"$work/stderr" || rc=$?
     (( rc == 0 )) || rm -f -- "$dest"
   else
-    (cd "$repo" && "${argv[@]}") </dev/null >&2 2>"$work/stderr" || rc=$?
+    (v2_close_extra_fds; cd "$repo" && "${argv[@]}") </dev/null >&2 2>"$work/stderr" || rc=$?
   fi
   return "$rc"
 }
@@ -868,6 +902,7 @@ score() {
     esac
     shift 2
   done
+  if [[ -n "$out" && -f "$out/protocol.json" ]]; then lock_record; fi
   clear_stale_work
   [[ -n "$out" && -f "$out/protocol.json" && -f "$out/status.json" ]] || die 2 "not a dispatched record: $out"
   out=$(cd "$out" && pwd -P)

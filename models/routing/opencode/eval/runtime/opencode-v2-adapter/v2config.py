@@ -22,7 +22,8 @@ redact: every string value of 12 or more characters anywhere in each SOURCE
   symlinks are not followed, a missing PATH is skipped), and each occurrence is
   replaced in place with [REDACTED]. 0 when nothing was found; 1 when something
   was redacted, with one "redact: a credential was redacted in FILE" line per
-  file on stdout; 2 when a SOURCE cannot be read. No secret is ever printed.
+  file on stdout; 2 when a SOURCE cannot be read or the scan fails in any other
+  way. No secret is ever printed.
 """
 import fnmatch
 import json
@@ -507,6 +508,9 @@ def _redact_command(args):
         changed = redact(sources, paths)
     except OSError as error:
         sys.stderr.write("redact: cannot read a source or a file (%s)\n" % error.strerror)
+        return 2
+    except Exception as error:  # noqa: BLE001 - any failure is a failed scan, never a hit
+        sys.stderr.write("redact: the scan failed (%s)\n" % type(error).__name__)
         return 2
     for name in changed:
         print("redact: a credential was redacted in %s" % name)

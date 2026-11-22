@@ -219,6 +219,7 @@ print("%s@%s/%s#%s" % (sys.argv[1], m.get("providerID"), m.get("id"), m.get("var
     cmd+=(--format json --archived --auto "$prompt")
     (
       cd "$sb/work" || exit 1
+      v2_close_extra_fds
       # Only the allowlist reaches the client: every inherited variable is
       # unexported, then the few it needs are exported (never put in argv).
       # shellcheck disable=SC2163 # the variable named by $name is unexported

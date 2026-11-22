@@ -129,8 +129,9 @@ approves a frozen protocol.
 1. **`prepare`** writes the protocol, a catalog snapshot (`GET /api/model` from
    one sandboxed server, with no model call) and a freeze manifest, then prints
    the exact `approval.json` to write. It refuses a model the catalog does not
-   list, a variant it does not offer, and a model whose `cost` is `[]`: no
-   budget cap could hold for an unpriced model.
+   list, a variant it does not offer, and a model whose `cost` is `[]` or
+   `null`: no budget cap could hold for an unpriced model, unless its provider
+   is named with `--provider-priced PROVIDER` (see *Unpriced models* below).
 2. **The operator reads the protocol and writes `approval.json`** into the
    record, exactly as printed. It names the ceiling and the freeze manifest's
    digest, so approving one protocol cannot release another.
@@ -252,8 +253,9 @@ result.md              the skeleton the operator completes
 - A `BUDGET_STOP`, a refused admission, a call whose cost is unknown (it
   started a step and reported no cost, `UNKNOWN_COST`), a call cut off
   mid-step (a step started and never finished, `INCOMPLETE_COST`; its finished
-  steps are still ledgered), or an exposed credential (`CREDENTIAL_EXPOSED`)
-  halts the whole screening: the record is `INCOMPLETE` and `dispatch` exits
+  steps are still ledgered), a `provider_reported` call that started a step
+  and reported a cost of `0` (`UNREPORTED_COST`, see *Unpriced models*), or an
+  exposed credential (`CREDENTIAL_EXPOSED`) halts the whole screening: the record is `INCOMPLETE` and `dispatch` exits
   `1`. `result.md` marks the total spend a lower bound only when a call's cost
   was unknown or cut off mid-step. Every other failed run is recorded and
   its candidate continues. A probe classified `INVALID_ENVIRONMENT`, no live
@@ -265,6 +267,32 @@ result.md              the skeleton the operator completes
   `cap / (runs × workloads + 1)` (the `+ 1` is the probe), and a running call is
   stopped once its own cost reaches what the account has left. Credits are the
   reported cost × 100, for any provider.
+
+**Unpriced models.** A provider can report a real cost per call without
+declaring prices in the catalog. Measured on OpenCode 2.3.0:
+
+- **a gateway that reports cost per call** (an OpenAI-compatible one) lists
+  every model with `cost` `null` and reports a non-zero cost for each call;
+- **a subscription sign-in** lists every model with `cost` `[]` and reports
+  cost `0` for every call.
+
+`prepare --provider-priced PROVIDER` (repeatable) accepts an unpriced model of
+that provider (PROVIDER has no `/`, `#`, whitespace or control character);
+name only providers of the first kind. Each candidate in
+`protocol.json` carries `pricing`: `declared` (the catalog lists a cost) or
+`provider_reported` (unpriced, accepted through the flag; an `agent:` candidate
+is judged by the model its `expect` names), and `protocol.json`'s
+`provider_priced` lists the providers named (`[]` without the flag). With
+`provider_reported` pricing the cap acts only on the cost the provider actually
+reports, that is on completed steps, and the ledger is the provider's figure,
+not one derived from a declared price. A `provider_reported` call that started
+a step (`steps_started` in its `dispatch.json`) and reported a cost of `0`
+halts the whole screening `UNREPORTED_COST`, not just that candidate, probes
+included, so a subscription named by mistake fails safe at its first call (a
+step with no reported cost at all is `UNKNOWN_COST`, checked first). `prepare`
+prints one line naming the `provider_reported` candidates, so the operator sees
+them before approving, and `result.md`'s Candidates table shows each
+candidate's pricing.
 
 ## V2 profile format
 

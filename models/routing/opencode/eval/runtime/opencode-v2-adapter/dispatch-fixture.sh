@@ -50,10 +50,11 @@
 # Credits are reported cost * 100. A stream with no step_start costs 0; one
 # with a step_start and no reported cost is unknown (derived_credits null,
 # cost_known false). A known non-zero cost of a started call is appended to
-# --ledger under --account even when the call failed. unfinished_steps is the
-# number of step_start events beyond the step_finish events (a call cut off
-# mid-step, whose last step's cost was never reported); cost_complete is false
-# when it is above 0, and the cost of the finished steps is still ledgered.
+# --ledger under --account even when the call failed. steps_started is the
+# number of step_start events; unfinished_steps the number of them beyond the
+# step_finish events (a call cut off mid-step, whose last step's cost was
+# never reported); cost_complete is false when it is above 0, and the cost of
+# the finished steps is still ledgered.
 set -Eeuo pipefail
 IFS=$'\n\t'
 dispatch_root=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -296,7 +297,7 @@ with open(parsed, "w", encoding="utf-8") as handle:
     json.dump({"cost": cost, "tokens": tokens, "error_text": error_message or None,
                "status_code": error_status, "session": session, "step_started": started,
                "cost_known": (not started) or cost is not None,
-               "unfinished_steps": max(starts - finishes, 0)}, handle)
+               "steps_started": starts, "unfinished_steps": max(starts - finishes, 0)}, handle)
 PY
 
   local sid body tries=1 i
@@ -470,6 +471,7 @@ document = {
     "observed_cost": parsed.get("cost"),
     "derived_credits": None if credits == "null" else float(credits),
     "cost_known": bool(parsed.get("cost_known")),
+    "steps_started": parsed.get("steps_started", 0),
     "unfinished_steps": parsed.get("unfinished_steps", 0),
     "cost_complete": parsed.get("unfinished_steps", 0) == 0,
     "normalized_steady_state_cost": None,

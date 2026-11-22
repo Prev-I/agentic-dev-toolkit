@@ -5,6 +5,7 @@
 #   run-screening.sh prepare --role ROLE --out DIR --candidate KEY=SPEC [--candidate KEY=SPEC]...
 #       --runs N --budget CREDITS --providers FILE --credentials FILE
 #       [--profile FILE --profile-id ID] [--opencode-dir DIR] [--timeout S]
+#       [--provider-priced PROVIDER]...
 #   run-screening.sh dispatch --out DIR --providers FILE --credentials FILE [--profile FILE]
 #   run-screening.sh score --out DIR
 #
@@ -19,7 +20,17 @@
 # of one sandboxed server, no model call) and DIR/freeze-manifest.json, and
 # prints on stdout the approval.json the operator must write into DIR. It
 # refuses (1) a model the catalog does not list, a variant it does not offer,
-# and a model whose cost is [] (no cap could hold); DIR is then removed. The
+# and a model whose cost is [] or null (no cap could hold), unless its provider
+# is named by --provider-priced (PROVIDER matches [^/#]+, else 2); DIR is then
+# removed. Each protocol candidate (an agent candidate by the model its expect
+# names) has pricing "declared" (a non-empty cost list) or "provider_reported"
+# (unpriced, from a --provider-priced provider), and protocol provider_priced is
+# the sorted list of those providers ([] without the flag). Measured on OpenCode
+# 2.3.0: a gateway that reports cost per call can list every model with cost
+# null; a subscription sign-in lists every model with cost [] and reports cost 0
+# per call. Name only the first kind. With provider_reported pricing the cap acts
+# only on the cost the provider actually reports (completed steps), and the
+# ledger is the provider's figure. The
 # freeze also covers --opencode-dir's model-routing.md and agents/*.md: in place
 # when the directory is inside the toolkit (protocol opencode_dir is then
 # toolkit-relative), else as a copy in DIR/opencode-dir/ that dispatch uses
@@ -41,7 +52,10 @@
 # (Ruling 5): a failed probe (STOPPED_CAPABILITY) or CAPABILITY_REGRESSION
 # stops the candidate; BUDGET_STOP, a refused admission, an unknown cost
 # (UNKNOWN_COST), a call cut off mid-step (cost_complete false: INCOMPLETE_COST),
-# an exposed credential (CREDENTIAL_EXPOSED), a probe classified
+# a provider_reported candidate's call that started a step (dispatch.json
+# steps_started > 0) and reported a cost of 0 or none (UNREPORTED_COST, so a
+# subscription's zero cost fails safe), an exposed credential
+# (CREDENTIAL_EXPOSED), a probe classified
 # INVALID_ENVIRONMENT, or no live candidate after the probes halts the
 # screening, as does an unexpected error (halted reason ERROR).
 #
@@ -71,8 +85,8 @@
 # any other scorer failure is listed in result.md and makes score exit 1. Its
 # Spend total is marked a lower bound when any call's cost is unknown or
 # incomplete; a per-run score row shows the findings' missing_runs count, and a
-# role scored per record names its score.file in every row. It never writes
-# adjudication.json.
+# role scored per record names its score.file in every row. Its Candidates
+# table shows each candidate's pricing. It never writes adjudication.json.
 #
 # The runner's own TMPDIR is DIR/.work and sandboxes live under it; an EXIT,
 # INT, TERM and HUP trap removes it, after stopping by recorded pid any sandbox
@@ -290,11 +304,12 @@ need_file() {
 prepare() {
   local role='' runs='' budget='' providers='' creds='' profile='' profile_id='' timeout=''
   local ocdir="$repo/models/routing/opencode/v2/.opencode"
-  local -a cands=()
+  local -a cands=() priced=()
   while (( $# )); do
     (( $# >= 2 )) || die 2 "option $1 needs a value"
     case "$1" in
       --role) role=$2 ;;
+      --provider-priced) priced+=("$2") ;;
       --out) out=$2 ;;
       --candidate) cands+=("$2") ;;
       --runs) runs=$2 ;;
@@ -315,6 +330,10 @@ prepare() {
   [[ "$runs" =~ ^[1-9][0-9]*$ ]] || die 2 "--runs takes a positive integer"
   [[ "$budget" =~ ^[0-9]+([.][0-9]+)?$ && ! "$budget" =~ ^0+([.]0+)?$ ]] || die 2 "--budget takes a positive number"
   [[ -z "$timeout" || "$timeout" =~ ^[1-9][0-9]*$ ]] || die 2 "--timeout takes a positive integer"
+  local pp
+  for pp in "${priced[@]}"; do
+    [[ "$pp" =~ ^[^/#]+$ ]] || die 2 "--provider-priced takes a PROVIDER (no / or #): $pp"
+  done
   need_file --providers "$providers"
   need_file --credentials "$creds"
   if [[ -n "$profile" || -n "$profile_id" ]]; then
@@ -384,12 +403,18 @@ prepare() {
   local commit
   commit=$(git -C "$repo" rev-parse HEAD 2>/dev/null || printf unknown)
   printf '%s' "$candidates" >"$work/candidates.json"
+  if (( ${#priced[@]} )); then
+    printf '%s\n' "${priced[@]}" | jq -R . | jq -s 'unique' >"$work/provider-priced.json"
+  else
+    printf '[]\n' >"$work/provider-priced.json"
+  fi
   EXPERIMENT_ID="$(basename -- "$out")-$(date -u +%Y%m%d)" ROLE="$role" \
     ROLE_DEFINITION="${role_file#"$repo"/}" RUNS="$runs" BUDGET="$budget" TIMEOUT="$timeout" \
     PROVIDERS_SHA="$(sha256 "$providers")" CREDENTIALS_SHA="$(sha256 "$creds")" \
     PROFILE_ID="$profile_id" PROFILE_SHA="$([[ -z "$profile" ]] || sha256 "$profile")" \
     RUNTIME="$version" COMMIT="$commit" OPENCODE_DIR="${ocdir#"$repo"/}" WORKLOADS="$(jq '.workloads | length' "$role_file")" \
-    python3 -I -B - "$work/candidates.json" "$work/models.json" "$out" <<'PY' || die 1 "the catalog refuses a candidate"
+    python3 -I -B - "$work/candidates.json" "$work/models.json" "$out" "$work/provider-priced.json" <<'PY' \
+    || die 1 "the catalog refuses a candidate"
 import datetime
 import json
 import os
@@ -399,6 +424,7 @@ env = os.environ
 candidates = json.load(open(sys.argv[1], encoding="utf-8"))
 models = json.load(open(sys.argv[2], encoding="utf-8")).get("data", [])
 out = sys.argv[3]
+provider_priced = json.load(open(sys.argv[4], encoding="utf-8"))
 listed = {(m.get("providerID"), m.get("id")): m for m in models if isinstance(m, dict)}
 problems = []
 for c in candidates:
@@ -412,7 +438,11 @@ for c in candidates:
         problems.append("%s: variant %r is not offered for %s (offered: %s)"
                         % (c["key"], c["variant"], name, offered))
     cost = entry.get("cost")
-    if not isinstance(cost, list) or not cost:
+    if isinstance(cost, list) and cost:
+        c["pricing"] = "declared"
+    elif c["providerID"] in provider_priced:
+        c["pricing"] = "provider_reported"
+    else:
         problems.append("%s: %s has no reported cost (cost %s); no budget cap could hold"
                         % (c["key"], name, json.dumps(cost)))
 if problems:
@@ -444,8 +474,10 @@ protocol = {
     "role": env["ROLE"],
     "role_definition": env["ROLE_DEFINITION"],
     "candidates": [{"key": c["key"], "spec": c["spec"], "account": "candidate_" + c["key"],
-                    "expect": "%s@%s/%s#%s" % (c["agent"], c["providerID"], c["model"], c["variant"])}
+                    "expect": "%s@%s/%s#%s" % (c["agent"], c["providerID"], c["model"], c["variant"]),
+                    "pricing": c["pricing"]}
                    for c in candidates],
+    "provider_priced": provider_priced,
     "runs": int(env["RUNS"]),
     "order": "rep 1..runs; workloads in definition order; live candidates in this order when "
              "(rep + workload_index) % 2 == 1 (workload_index from 0), else reversed; "
@@ -601,7 +633,7 @@ exposed() {
 
 # after_call KEY LABEL DIR: Ruling 5 on a finished call's dispatch.json.
 after_call() {
-  local key=$1 label=$2 dir=$3 classification known complete
+  local key=$1 label=$2 dir=$3 classification known complete unreported
   [[ -f "$dir/dispatch.json" ]] || halt DISPATCH_REFUSED "$label"
   classification=$(jq -r .classification "$dir/dispatch.json")
   known=$(jq -r .cost_known "$dir/dispatch.json")
@@ -619,6 +651,15 @@ after_call() {
   if [[ "$complete" != true ]]; then
     stopped[$key]=INCOMPLETE_COST
     halt INCOMPLETE_COST "$label"
+  fi
+  # A provider_reported candidate has no declared price: a call that started a
+  # step and reported no cost cannot be charged, so the cap would not hold.
+  if [[ "${pricings[$key]}" == provider_reported ]]; then
+    unreported=$(jq -r '(.steps_started // 0) > 0 and ((.observed_cost // 0) == 0)' "$dir/dispatch.json")
+    if [[ "$unreported" != false ]]; then
+      stopped[$key]=UNREPORTED_COST
+      halt UNREPORTED_COST "$label"
+    fi
   fi
   if [[ "$classification" == CAPABILITY_REGRESSION ]]; then
     stopped[$key]=CAPABILITY_REGRESSION
@@ -736,12 +777,13 @@ PY
   # Configs: a model candidate gets the role's agent row with its model; an
   # agent candidate the profile alone. Both get the provider fragment.
   local -a keys=()
-  declare -gA kinds=() agents=() expects=()
+  declare -gA kinds=() agents=() expects=() pricings=()
   local key spec n
   mapfile -t keys < <(jq -r '.candidates[].key' "$protocol")
   for key in "${keys[@]}"; do
     spec=$(jq -r --arg k "$key" '.candidates[] | select(.key == $k) | .spec' "$protocol")
     expects[$key]=$(jq -r --arg k "$key" '.candidates[] | select(.key == $k) | .expect' "$protocol")
+    pricings[$key]=$(jq -r --arg k "$key" '.candidates[] | select(.key == $k) | .pricing // "declared"' "$protocol")
     if [[ "$spec" == agent:* ]]; then
       kinds[$key]=agent
       agents[$key]=${spec#agent:}
@@ -985,9 +1027,10 @@ lines += ["## Protocol", "",
                                       "; halted: %s at %s" % (status["halted"]["reason"], status["halted"]["label"])
                                       if status.get("halted") else ""),
           ""]
-lines += ["## Candidates", "", "| Key | Spec | Expected use | Stopped |", "|---|---|---|---|"]
+lines += ["## Candidates", "", "| Key | Spec | Expected use | Pricing | Stopped |", "|---|---|---|---|---|"]
 for c in protocol["candidates"]:
-    lines.append("| %s | `%s` | `%s` | %s |" % (c["key"], c["spec"], c["expect"], stopped.get(c["key"], "no")))
+    lines.append("| %s | `%s` | `%s` | %s | %s |" % (c["key"], c["spec"], c["expect"], c.get("pricing", "declared"),
+                                              stopped.get(c["key"], "no")))
 lines += ["", "## Spend", "", "| Account | Cap | Spent |", "|---|---|---|"]
 for account, cap in ledger.get("caps", {}).items():
     spent = sum(e["credits"] for e in ledger.get("entries", []) if e["account"] == account)

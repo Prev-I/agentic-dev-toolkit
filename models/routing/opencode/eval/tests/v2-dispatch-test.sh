@@ -231,6 +231,7 @@ rc=0; dispatch "$work/partial" --agent screening-reviewer || rc=$?
 assert_eq 1 "$rc"
 assert_eq 1 "$(field "$work/partial" .unfinished_steps)"
 assert_eq false "$(field "$work/partial" .cost_complete)"
+assert_eq 3 "$(field "$work/partial" .steps_started)"
 assert_eq true "$(field "$work/partial" .cost_known)"
 assert_eq true "$(jq '([.entries[].credits] | add) == 2' "$work/ledger.json")"
 

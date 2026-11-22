@@ -398,14 +398,17 @@ done
 assert_eq "$runs_before" "$(log_count run)"
 
 # prepare_still_refuses_other_unpriced: --provider-priced names another
-# provider, so the unpriced m3 is still refused; a bad PROVIDER is a usage error.
+# provider, so the unpriced m3 is still refused, with no model call; a bad
+# PROVIDER is a usage error.
+runs_before=$(log_count run)
 rc=0
 quiet bash "$runner" prepare --role reviewer --out "$work/v2-refused" --candidate a=model:fakep/m3#high \
   --provider-priced other --runs 1 --budget 100 --providers "$work/fragment.json" \
   --credentials "$work/creds.json" >/dev/null 2>&1 || rc=$?
 assert_eq 1 "$rc"
 [[ ! -e "$work/v2-refused" ]] || fail "a refused prepare left its record behind (--provider-priced other)"
-for bad in 'fake/p' 'fake#p' ''; do
+assert_eq "$runs_before" "$(log_count run)"
+for bad in 'fake/p' 'fake#p' '' $'junk\nfakep' 'fake p' $'fake\tp'; do
   rc=0
   bash "$runner" prepare --role reviewer --out "$work/v2-refused" --candidate a=model:fakep/m3#high \
     --provider-priced "$bad" --runs 1 --budget 100 --providers "$work/fragment.json" \
@@ -430,6 +433,25 @@ rec="$work/v2-pp-prepare"
 pp_prepare "$rec" a=model:fakep/m3#high b=model:fakep/m1#high || fail "provider-priced prepare failed"
 assert_eq '["provider_reported","declared"]' "$(jq -c '[.candidates[].pricing]' "$rec/protocol.json")"
 assert_eq '["fakep"]' "$(jq -c .provider_priced "$rec/protocol.json")"
+# The approval-time notice names the provider_reported candidates only.
+assert_eq 1 "$(grep -c 'the budget cap acts only on cost these providers report' "$work/stderr")"
+assert_contains "$(grep 'the budget cap acts only' "$work/stderr")" "a (fakep/m3)"
+[[ "$(grep 'the budget cap acts only' "$work/stderr")" != *"b (fakep/m1)"* ]] \
+  || fail "the notice names a declared candidate"
+
+# provider_priced_unknown_cost_first: a provider-priced call that started a
+# step and reported no cost at all is UNKNOWN_COST, checked before UNREPORTED_COST.
+scenario '{"screening-reviewer":{"text":"{\"findings\":[]}","cost_per_step":null,
+  "probe":{"text":"CAPABILITY_OK","cost_per_step":0.01}}}'
+rec="$work/v2-pp-unknown"
+pp_prepare "$rec" a=model:fakep/m3#high || fail "provider-priced prepare failed"
+approve "$rec"
+rc=0
+dispatch "$rec" 2>/dev/null || rc=$?
+assert_eq 1 "$rc"
+assert_eq '"UNKNOWN_COST"' "$(jq -c .halted.reason "$rec/status.json")"
+assert_eq '"UNKNOWN_COST"' "$(jq -c .stopped.a "$rec/status.json")"
+assert_eq 01-clean-r1-a "$(ls "$rec/runs")"
 
 # provider_priced_zero_cost_halts: a provider-priced call that started steps
 # and reported no cost halts the screening, in a run and in a probe.

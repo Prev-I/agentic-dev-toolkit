@@ -253,8 +253,9 @@ result.md              the skeleton the operator completes
 - A `BUDGET_STOP`, a refused admission, a call whose cost is unknown (it
   started a step and reported no cost, `UNKNOWN_COST`), a call cut off
   mid-step (a step started and never finished, `INCOMPLETE_COST`; its finished
-  steps are still ledgered), or an exposed credential (`CREDENTIAL_EXPOSED`)
-  halts the whole screening: the record is `INCOMPLETE` and `dispatch` exits
+  steps are still ledgered), a `provider_reported` call that started a step
+  and reported a cost of `0` (`UNREPORTED_COST`, see *Unpriced models*), or an
+  exposed credential (`CREDENTIAL_EXPOSED`) halts the whole screening: the record is `INCOMPLETE` and `dispatch` exits
   `1`. `result.md` marks the total spend a lower bound only when a call's cost
   was unknown or cut off mid-step. Every other failed run is recorded and
   its candidate continues. A probe classified `INVALID_ENVIRONMENT`, no live
@@ -276,7 +277,8 @@ declaring prices in the catalog. Measured on OpenCode 2.3.0:
   cost `0` for every call.
 
 `prepare --provider-priced PROVIDER` (repeatable) accepts an unpriced model of
-that provider; name only providers of the first kind. Each candidate in
+that provider (PROVIDER has no `/`, `#`, whitespace or control character);
+name only providers of the first kind. Each candidate in
 `protocol.json` carries `pricing`: `declared` (the catalog lists a cost) or
 `provider_reported` (unpriced, accepted through the flag; an `agent:` candidate
 is judged by the model its `expect` names), and `protocol.json`'s
@@ -284,10 +286,13 @@ is judged by the model its `expect` names), and `protocol.json`'s
 `provider_reported` pricing the cap acts only on the cost the provider actually
 reports, that is on completed steps, and the ledger is the provider's figure,
 not one derived from a declared price. A `provider_reported` call that started
-a step (`steps_started` in its `dispatch.json`) and reported a cost of `0` or
-none halts the screening `UNREPORTED_COST`, probes included, so a subscription
-named by mistake fails safe at its first call. `result.md`'s Candidates table
-shows each candidate's pricing.
+a step (`steps_started` in its `dispatch.json`) and reported a cost of `0`
+halts the whole screening `UNREPORTED_COST`, not just that candidate, probes
+included, so a subscription named by mistake fails safe at its first call (a
+step with no reported cost at all is `UNKNOWN_COST`, checked first). `prepare`
+prints one line naming the `provider_reported` candidates, so the operator sees
+them before approving, and `result.md`'s Candidates table shows each
+candidate's pricing.
 
 ## V2 profile format
 

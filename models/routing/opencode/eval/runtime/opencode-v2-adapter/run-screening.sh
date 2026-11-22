@@ -21,16 +21,17 @@
 # prints on stdout the approval.json the operator must write into DIR. It
 # refuses (1) a model the catalog does not list, a variant it does not offer,
 # and a model whose cost is [] or null (no cap could hold), unless its provider
-# is named by --provider-priced (PROVIDER matches [^/#]+, else 2); DIR is then
-# removed. Each protocol candidate (an agent candidate by the model its expect
-# names) has pricing "declared" (a non-empty cost list) or "provider_reported"
-# (unpriced, from a --provider-priced provider), and protocol provider_priced is
-# the sorted list of those providers ([] without the flag). Measured on OpenCode
-# 2.3.0: a gateway that reports cost per call can list every model with cost
-# null; a subscription sign-in lists every model with cost [] and reports cost 0
-# per call. Name only the first kind. With provider_reported pricing the cap acts
-# only on the cost the provider actually reports (completed steps), and the
-# ledger is the provider's figure. The
+# is named by --provider-priced (PROVIDER: no /, #, whitespace or control
+# character, else 2); DIR is then removed. Each protocol candidate (an agent
+# candidate by the model its expect names) has pricing "declared" (a non-empty
+# cost list) or "provider_reported" (unpriced, from a --provider-priced
+# provider), and protocol provider_priced is the sorted list of those providers
+# ([] without the flag); one stderr line names the provider_reported candidates.
+# Measured on OpenCode 2.3.0: a gateway that reports cost per call can list
+# every model with cost null; a subscription sign-in lists every model with
+# cost [] and reports cost 0 per call. Name only the first kind. With
+# provider_reported pricing the cap acts only on the cost the provider actually
+# reports (completed steps), and the ledger is the provider's figure. The
 # freeze also covers --opencode-dir's model-routing.md and agents/*.md: in place
 # when the directory is inside the toolkit (protocol opencode_dir is then
 # toolkit-relative), else as a copy in DIR/opencode-dir/ that dispatch uses
@@ -332,7 +333,8 @@ prepare() {
   [[ -z "$timeout" || "$timeout" =~ ^[1-9][0-9]*$ ]] || die 2 "--timeout takes a positive integer"
   local pp
   for pp in "${priced[@]}"; do
-    [[ "$pp" =~ ^[^/#]+$ ]] || die 2 "--provider-priced takes a PROVIDER (no / or #): $pp"
+    [[ "$pp" =~ ^[^/#[:space:][:cntrl:]]+$ ]] \
+      || die 2 "--provider-priced takes a PROVIDER (no /, #, whitespace or control character): ${pp@Q}"
   done
   need_file --providers "$providers"
   need_file --credentials "$creds"
@@ -403,11 +405,7 @@ prepare() {
   local commit
   commit=$(git -C "$repo" rev-parse HEAD 2>/dev/null || printf unknown)
   printf '%s' "$candidates" >"$work/candidates.json"
-  if (( ${#priced[@]} )); then
-    printf '%s\n' "${priced[@]}" | jq -R . | jq -s 'unique' >"$work/provider-priced.json"
-  else
-    printf '[]\n' >"$work/provider-priced.json"
-  fi
+  jq -n '$ARGS.positional | unique' --args "${priced[@]}" >"$work/provider-priced.json"
   EXPERIMENT_ID="$(basename -- "$out")-$(date -u +%Y%m%d)" ROLE="$role" \
     ROLE_DEFINITION="${role_file#"$repo"/}" RUNS="$runs" BUDGET="$budget" TIMEOUT="$timeout" \
     PROVIDERS_SHA="$(sha256 "$providers")" CREDENTIALS_SHA="$(sha256 "$creds")" \
@@ -537,6 +535,11 @@ PY
   jq -n --arg id "$id" --argjson c "$(jq '.budget.ceiling_credits' "$out/protocol.json")" \
     --arg sha "$(sha256 "$out/freeze-manifest.json")" \
     '{experiment_id: $id, status: "APPROVED_FOR_DISPATCH", approved_ceiling_credits: $c, freeze_manifest_sha256: $sha}'
+  local reported
+  reported=$(jq -r '[.candidates[] | select(.pricing == "provider_reported")
+    | "\(.key) (\(.expect | sub("^[^@]*@"; "") | sub("#[^#]*$"; "")))"] | join(", ")' "$out/protocol.json")
+  [[ -z "$reported" ]] \
+    || err "provider_reported pricing for $reported: the budget cap acts only on cost these providers report"
   err "prepared $out; to approve, write the object above to $out/approval.json"
 }
 

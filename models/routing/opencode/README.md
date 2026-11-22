@@ -204,8 +204,9 @@ database next to the call's working directory. As a backstop, after every call
 (capability probes included) the runner searches the call's output, and for
 the build role its workspace copy and `work-product.patch`, for every string of
 12 or more characters in the credentials file and the provider fragment; each
-occurrence is replaced with `[REDACTED]` and the screening halts
-`CREDENTIAL_EXPOSED`. That limits what reaches the record, not what a tool can
+occurrence is replaced with `[REDACTED]` (in the workspace copy before the patch
+is taken, so a binary file never reaches the patch encoded) and the screening
+halts `CREDENTIAL_EXPOSED`. That limits what reaches the record, not what a tool can
 read or send while it runs. `score` for the build role also runs model-written
 code on the host, outside any sandbox: the candidate's `tests/install.sh` and
 installer checks, as the October verifier did. Run screenings on a machine and
@@ -216,7 +217,12 @@ skips the runner's cleanup, so `.work/` can stay in the record with sandbox
 credentials in it (the runner creates files with umask `077`). The next
 `dispatch` or `score` on that record removes it before anything else, stopping
 only a recorded server that is still running in its sandbox, and says so in one
-line.
+line. Each phase holds an exclusive lock on the record's `.lock` file for its
+whole run, so a `score` or a second `dispatch` started while a dispatch is still
+running exits `2` ("another runner holds this record") and touches nothing.
+Nothing the runner starts inherits that lock, and a runner killed with
+`SIGKILL` releases it with its file descriptor, so a call or server that
+outlived its runner never keeps the record locked.
 
 **The record.** `--out` may be anywhere outside those directories; its name
 must start with `v2-`.
@@ -228,6 +234,7 @@ freeze-manifest.json   digests of the role, the adapter, the frozen paths, the -
                        files (model-routing.md, agents/*.md) and the two files above
 opencode-dir/          a frozen copy of --opencode-dir, only when it is outside the toolkit
 approval.json          written by the operator
+.lock                  the runner's lock on the record (empty)
 ledger.json            one account per candidate, with every call's credits
 status.json            {state: COMPLETE|INCOMPLETE, stopped: {key: reason}, halted}
 capability/KEY/        the capability probe: probe.json and dispatch/
@@ -247,7 +254,8 @@ result.md              the skeleton the operator completes
   mid-step (a step started and never finished, `INCOMPLETE_COST`; its finished
   steps are still ledgered), or an exposed credential (`CREDENTIAL_EXPOSED`)
   halts the whole screening: the record is `INCOMPLETE` and `dispatch` exits
-  `1`. `result.md` then marks the total spend a lower bound. Every other failed run is recorded and
+  `1`. `result.md` marks the total spend a lower bound only when a call's cost
+  was unknown or cut off mid-step. Every other failed run is recorded and
   its candidate continues. A probe classified `INVALID_ENVIRONMENT`, no live
   candidate after the probes, or an unexpected error also halts it.
 - `score` verifies the freeze manifest and the approval's digest of it first,

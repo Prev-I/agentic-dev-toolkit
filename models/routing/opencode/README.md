@@ -151,6 +151,15 @@ approves a frozen protocol.
    says `Operator: not yet adjudicated`, and the runner never writes
    `adjudication.json`.
 
+**Sandboxes switch off title generation.** Every sandbox config the runner
+builds carries `agents.title.disabled: true`, merged over any `agents.title`
+row of the profile. OpenCode 2 otherwise runs a hidden title agent at the start
+of every session: one extra model request on the session's model that emits no
+`step_finish`, so the ledger never sees it. Measured on 2.3.0 through a counting
+proxy, that request cost exactly the gap between the provider's billed cost and
+the ledger (about 4.5 % of a 7-call screening, about 11 % of a one-step probe);
+with it disabled, one call made one request and the figures matched.
+
 ```bash
 adapter=models/routing/opencode/eval/runtime/opencode-v2-adapter
 bash "$adapter/run-screening.sh" prepare --role reviewer --out ~/screenings/v2-reviewer-a-b \

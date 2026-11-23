@@ -384,7 +384,11 @@ def build_config(base, fragment, agent_row, disable_title=False):
         result["agents"] = agents
     if disable_title:
         agents = result.get("agents")
-        agents = dict(agents) if isinstance(agents, dict) else {}
+        if agents is None:
+            agents = {}
+        elif not isinstance(agents, dict):
+            raise ValueError("the base's agents is not a JSON object")
+        agents = dict(agents)
         title = agents.get("title")
         title = dict(title) if isinstance(title, dict) else {}
         title["disabled"] = True

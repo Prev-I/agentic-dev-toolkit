@@ -69,6 +69,21 @@ rc=0; v2config build-config - "$work/fragment-bad.json" - "$work/bad.json" 2>/de
 assert_eq 2 "$rc"
 [[ ! -e "$work/bad.json" ]] || fail "output written for a refused fragment"
 
+# build_config_disable_title
+v2config build-config - "$work/fragment.json" - "$work/plain.json" || fail "plain build-config failed"
+assert_eq null "$(jq -c '.agents.title' "$work/plain.json")"
+v2config build-config - "$work/fragment.json" - "$work/t1.json" --disable-title || fail "--disable-title failed"
+assert_eq '{"title":{"disabled":true}}' "$(jq -c .agents "$work/t1.json")"
+printf '{"agents":{"title":{"mode":"subagent","disabled":false},"x":{"mode":"primary"}}}\n' >"$work/base-title.json"
+v2config build-config "$work/base-title.json" "$work/fragment.json" - "$work/t2.json" --disable-title \
+  || fail "--disable-title over a title row failed"
+assert_eq '{"mode":"subagent","disabled":true}' "$(jq -c .agents.title "$work/t2.json")"
+assert_eq '{"mode":"primary"}' "$(jq -c .agents.x "$work/t2.json")"
+printf '{"agents":["x"]}\n' >"$work/base-agents.json"
+rc=0; v2config build-config "$work/base-agents.json" "$work/fragment.json" - "$work/t3.json" --disable-title 2>/dev/null || rc=$?
+assert_eq 2 "$rc"
+[[ ! -e "$work/t3.json" ]] || fail "output written for a non-object agents"
+
 # real-dirs
 dirs=$(XDG_CONFIG_HOME="$work/xdg" v2config real-dirs)
 home=$(python3 -I -c 'import os, pwd; print(pwd.getpwuid(os.getuid()).pw_dir)')

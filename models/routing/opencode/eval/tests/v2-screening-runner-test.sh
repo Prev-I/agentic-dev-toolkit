@@ -705,19 +705,24 @@ cat >"$work/profile-title.jsonc" <<'EOF'
   }
 }
 EOF
-scenario '{"build":{"text":"done","cost_per_step":0.01,"probe":{"text":"CAPABILITY_OK"}}}'
+scenario '{"build":{"text":"done","cost_per_step":0.01,"probe":{"text":"CAPABILITY_OK"}},
+  "screening-build":{"text":"done","cost_per_step":0.01,"probe":{"text":"CAPABILITY_OK"}}}'
 rec="$work/v2-title"
+: >"$state/log"
 quiet bash "$runner" prepare --role build --out "$rec" --candidate p=agent:build --candidate q=model:fakep/m1#high \
   --runs 1 --budget 100 --providers "$work/fragment.json" --credentials "$work/creds.json" \
   --profile "$work/profile-title.jsonc" --profile-id prof-t >"$rec.approval" || fail "title prepare failed"
+# prepare's catalog server, built from the profile.
+assert_eq 1 "$(grep -c '^serve pid=' "$state/log" || true)"
+assert_eq 1 "$(grep -c '^serve-title disabled=true keys=disabled,mode$' "$state/log" || true)"
 approve "$rec"
 : >"$state/log"
 quiet bash "$runner" dispatch --out "$rec" --providers "$work/fragment.json" --credentials "$work/creds.json" \
   --profile "$work/profile-title.jsonc" || fail "title dispatch failed"
-serves=$(grep -c '^serve pid=' "$state/log" || true)
-(( serves >= 5 )) || fail "expected the runtime check, probes and runs to serve; got $serves"
-assert_eq "$serves" "$(grep -c '^serve-title disabled=true ' "$state/log" || true)"
-grep -q '^serve-title disabled=true keys=disabled,mode$' "$state/log" || fail "the profile's title row lost a key"
-grep -q '^serve-title disabled=true keys=disabled$' "$state/log" || fail "no serve without a profile title row"
+# Two workloads. Runtime check + the agent's probe and two runs carry the
+# profile's title row; the model candidate's probe and two runs only the flag.
+assert_eq 7 "$(grep -c '^serve pid=' "$state/log" || true)"
+assert_eq 4 "$(grep -c '^serve-title disabled=true keys=disabled,mode$' "$state/log" || true)"
+assert_eq 3 "$(grep -c '^serve-title disabled=true keys=disabled$' "$state/log" || true)"
 
 printf 'PASS: v2-screening-runner\n'

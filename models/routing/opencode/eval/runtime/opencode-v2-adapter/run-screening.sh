@@ -183,14 +183,14 @@ stop_sandbox_servers() {
   done
 }
 
-# lock_record: an exclusive lock on the record for the rest of this run, or
-# exit 2. A runner killed with SIGKILL releases it with its descriptor.
 # build_sandbox_config BASE FRAGMENT ROW OUT: v2config.py build-config for every
 # sandbox this runner serves, with title generation switched off.
 build_sandbox_config() {
   python3 -I -B "$adapter/v2config.py" build-config "$@" --disable-title
 }
 
+# lock_record: an exclusive lock on the record for the rest of this run, or
+# exit 2. A runner killed with SIGKILL releases it with its descriptor.
 lock_record() {
   exec {lock_fd}>>"$out/.lock" || die 2 "cannot open $out/.lock"
   flock -n "$lock_fd" || die 2 "another runner holds this record: $out"

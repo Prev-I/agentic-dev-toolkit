@@ -3,7 +3,7 @@
 
 Usage: v2config.py load FILE | shape FILE | md-frontmatter FILE
        v2config.py layers API_CONFIG_JSON SANDBOX
-       v2config.py build-config BASE_JSON_OR_- FRAGMENT AGENT_ROW_JSON_OR_- OUT
+       v2config.py build-config BASE_JSON_OR_- FRAGMENT AGENT_ROW_JSON_OR_- OUT [--disable-title]
        v2config.py real-dirs
        v2config.py redact SOURCE... -- PATH...
 Exit codes: 0 success, 1 finding, 2 usage or unparseable input.
@@ -13,7 +13,9 @@ layers: 0 when every layer of a GET /api/config answer passes check_layers;
 build-config: BASE (a profile file, or - for a minimal config), FRAGMENT (a
   file holding only `providers` and `policies`; any other key exits 2) and
   AGENT_ROW (a file holding {"name": N, "row": {...}}, or -) are merged into
-  OUT as strict JSON, always with "update": "disable".
+  OUT as strict JSON, always with "update": "disable". With --disable-title the
+  result also carries agents.title.disabled true (an existing agents.title row
+  keeps its other keys), which removes OpenCode 2's hidden title agent.
 real-dirs: the OpenCode directories a sandbox must not resolve inside.
 redact: every string value of 12 or more characters anywhere in each SOURCE
   (JSON or JSONC, read recursively; a SOURCE that does not parse contributes
@@ -342,7 +344,7 @@ def check_layers(layers, sandbox):
 FRAGMENT_KEYS = ("providers", "policies")
 
 
-def build_config(base, fragment, agent_row):
+def build_config(base, fragment, agent_row, disable_title=False):
     """BASE (a dict, or None for the minimal config) with FRAGMENT's providers
     merged over its own and its policies appended, and AGENT_ROW placed at
     agents.<name>. Raises ValueError on a malformed input."""
@@ -380,6 +382,18 @@ def build_config(base, fragment, agent_row):
         agents = dict(agents) if isinstance(agents, dict) else {}
         agents[agent_row["name"]] = agent_row["row"]
         result["agents"] = agents
+    if disable_title:
+        agents = result.get("agents")
+        if agents is None:
+            agents = {}
+        elif not isinstance(agents, dict):
+            raise ValueError("the base's agents is not a JSON object")
+        agents = dict(agents)
+        title = agents.get("title")
+        title = dict(title) if isinstance(title, dict) else {}
+        title["disabled"] = True
+        agents["title"] = title
+        result["agents"] = agents
     result["update"] = "disable"
     return result
 
@@ -413,12 +427,12 @@ def _layers_command(api_path, sandbox):
     return 1 if bad else 0
 
 
-def _build_config_command(base_path, fragment_path, row_path, out):
+def _build_config_command(base_path, fragment_path, row_path, out, disable_title=False):
     try:
         base = None if base_path == "-" else load(base_path)
         fragment = load(fragment_path)
         row = None if row_path == "-" else load(row_path)
-        result = build_config(base, fragment, row)
+        result = build_config(base, fragment, row, disable_title)
     except (OSError, ValueError) as error:
         sys.stderr.write("build-config: %s\n" % error)
         return 2
@@ -527,6 +541,8 @@ def main(argv):
         return _layers_command(argv[2], argv[3])
     if len(argv) == 6 and argv[1] == "build-config":
         return _build_config_command(*argv[2:])
+    if len(argv) == 7 and argv[1] == "build-config" and argv[6] == "--disable-title":
+        return _build_config_command(*argv[2:6], disable_title=True)
     if len(argv) >= 2 and argv[1] == "redact":
         return _redact_command(argv[2:])
     if len(argv) == 2 and argv[1] == "real-dirs":

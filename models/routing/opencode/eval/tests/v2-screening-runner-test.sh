@@ -693,4 +693,36 @@ d="$rec/capability/p/dispatch/dispatch.json"
 assert_eq '"build@fakep/m2#high"' "$(jq -c .routing_expected "$d")"
 assert_eq '"ROUTING_MISMATCH"' "$(jq -c .classification "$d")"
 
+# every_sandbox_switches_off_title_generation: each serve of a full dispatch
+# (runtime check, probes, runs; a model and an agent candidate) logged
+# agents.title.disabled true, and a profile's own title row keeps its other keys.
+cat >"$work/profile-title.jsonc" <<'EOF'
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agents": {
+    "build": {"mode": "primary", "model": {"providerID": "fakep", "model": "m2", "variant": "high"}},
+    "title": {"mode": "subagent", "disabled": false}
+  }
+}
+EOF
+scenario '{"build":{"text":"done","cost_per_step":0.01,"probe":{"text":"CAPABILITY_OK"}},
+  "screening-build":{"text":"done","cost_per_step":0.01,"probe":{"text":"CAPABILITY_OK"}}}'
+rec="$work/v2-title"
+: >"$state/log"
+quiet bash "$runner" prepare --role build --out "$rec" --candidate p=agent:build --candidate q=model:fakep/m1#high \
+  --runs 1 --budget 100 --providers "$work/fragment.json" --credentials "$work/creds.json" \
+  --profile "$work/profile-title.jsonc" --profile-id prof-t >"$rec.approval" || fail "title prepare failed"
+# prepare's catalog server, built from the profile.
+assert_eq 1 "$(grep -c '^serve pid=' "$state/log" || true)"
+assert_eq 1 "$(grep -c '^serve-title disabled=true keys=disabled,mode$' "$state/log" || true)"
+approve "$rec"
+: >"$state/log"
+quiet bash "$runner" dispatch --out "$rec" --providers "$work/fragment.json" --credentials "$work/creds.json" \
+  --profile "$work/profile-title.jsonc" || fail "title dispatch failed"
+# Two workloads. Runtime check + the agent's probe and two runs carry the
+# profile's title row; the model candidate's probe and two runs only the flag.
+assert_eq 7 "$(grep -c '^serve pid=' "$state/log" || true)"
+assert_eq 4 "$(grep -c '^serve-title disabled=true keys=disabled,mode$' "$state/log" || true)"
+assert_eq 3 "$(grep -c '^serve-title disabled=true keys=disabled$' "$state/log" || true)"
+
 printf 'PASS: v2-screening-runner\n'

@@ -89,6 +89,15 @@
 # role scored per record names its score.file in every row. Its Candidates
 # table shows each candidate's pricing. It never writes adjudication.json.
 #
+# Every sandbox config the runner builds (catalog, runtime check, probes, runs)
+# carries agents.title.disabled true, merged over any agents.title row of the
+# profile. OpenCode 2 otherwise runs a hidden title agent at the start of every
+# session: one extra model request on the session's model that emits no
+# step_finish, so the ledger never sees it. Measured on 2.3.0 through a
+# counting proxy, it cost exactly the gap between the provider's billed cost and
+# the ledger (about 4.5 % of a 7-call screening, about 11 % of a one-step probe);
+# with the agent disabled one call made one request and the two figures matched.
+#
 # The runner's own TMPDIR is DIR/.work and sandboxes live under it; an EXIT,
 # INT, TERM and HUP trap removes it, after stopping by recorded pid any sandbox
 # server still running there. Calls run one at a time, each in its own session,
@@ -172,6 +181,12 @@ stop_sandbox_servers() {
       v2_stop_pid "$pid"
     fi
   done
+}
+
+# build_sandbox_config BASE FRAGMENT ROW OUT: v2config.py build-config for every
+# sandbox this runner serves, with title generation switched off.
+build_sandbox_config() {
+  python3 -I -B "$adapter/v2config.py" build-config "$@" --disable-title
 }
 
 # lock_record: an exclusive lock on the record for the rest of this run, or
@@ -380,7 +395,7 @@ prepare() {
   # One sandboxed server for the catalog: no model call.
   local base=- sb url version
   [[ -z "$profile" ]] || base=$profile
-  python3 -I -B "$adapter/v2config.py" build-config "$base" "$providers" - "$work/catalog-config.json" \
+  build_sandbox_config "$base" "$providers" - "$work/catalog-config.json" \
     || die 1 "cannot build the catalog server's config"
   sb=$(v2_sandbox_create "$work") || die 1 "cannot create the catalog sandbox"
   catalog_sb=$sb
@@ -754,7 +769,7 @@ PY
   # sandboxed server with prepare's config, and no model call.
   local base=- sb version frozen_version
   [[ -z "$profile" ]] || base=$profile
-  python3 -I -B "$adapter/v2config.py" build-config "$base" "$providers" - "$work/catalog-config.json" \
+  build_sandbox_config "$base" "$providers" - "$work/catalog-config.json" \
     || die 1 "cannot build the runtime check's config"
   sb=$(v2_sandbox_create "$work") || die 1 "cannot create the runtime check's sandbox"
   catalog_sb=$sb
@@ -790,7 +805,7 @@ PY
     if [[ "$spec" == agent:* ]]; then
       kinds[$key]=agent
       agents[$key]=${spec#agent:}
-      python3 -I -B "$adapter/v2config.py" build-config "$profile" "$providers" - "$work/config-$key.json" \
+      build_sandbox_config "$profile" "$providers" - "$work/config-$key.json" \
         || die 1 "cannot build the config of $key"
     else
       kinds[$key]=model
@@ -827,7 +842,7 @@ row["permissions"] = permissions
 with open(out, "w", encoding="utf-8") as handle:
     json.dump({"name": agent["name"], "row": row}, handle, indent=2)
 PY
-      python3 -I -B "$adapter/v2config.py" build-config - "$providers" "$work/row-$key.json" "$work/config-$key.json" \
+      build_sandbox_config - "$providers" "$work/row-$key.json" "$work/config-$key.json" \
         || die 1 "cannot build the config of $key"
     fi
   done

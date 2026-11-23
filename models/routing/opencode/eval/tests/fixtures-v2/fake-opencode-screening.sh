@@ -15,6 +15,8 @@
 # exports FAKE_SCREEN_STATE=<dir> and execs this script:
 #   FAKE_SCREEN_STATE/log          receives, per serve:
 #                                    "serve pid=<pid> cwd=<cwd> home=<home>"
+#                                    "serve-title disabled=<true|false> keys=<sorted keys of the
+#                                      config's agents.title row, comma-separated>"
 #                                    "serve-env <sorted exported NAMES, comma-separated>"
 #                                    "serve-cwd-entries <its cwd's entries, comma-separated>"
 #                                  and per run:
@@ -80,6 +82,9 @@ serve() {
     exit 1
   fi
   {
+    printf 'serve-title disabled=%s keys=%s\n' \
+      "$(jq -r '(.agents.title.disabled // false) == true' "${XDG_CONFIG_HOME:?}/opencode/opencode.json")" \
+      "$(jq -r '(.agents.title // {}) | keys | join(",")' "${XDG_CONFIG_HOME:?}/opencode/opencode.json")"
     printf 'serve-env %s\n' "$(env_names)"
     printf 'serve-cwd-entries %s\n' "$(find . -mindepth 1 -maxdepth 1 -printf '%f\n' | sort | paste -sd, -)"
   } >>"$state/log"

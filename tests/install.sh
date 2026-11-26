@@ -1953,6 +1953,9 @@ test_az_shim_verification_rejects_a_shim_that_lost_its_allowlist() {
 }
 
 readonly CATALOG_FILE="$REPOSITORY_ROOT/catalog/software-catalog.env"
+# The OpenCode pin, read from the catalog so a version bump never edits this suite.
+OPENCODE_PIN="$(sed -n 's/^opencode=//p' "$CATALOG_FILE")"
+readonly OPENCODE_PIN
 
 kv_fixture() {
   # kv_fixture NAME CONTENT  -> prints the fixture path
@@ -2332,7 +2335,7 @@ test_opencode_install_refreshes_path_for_the_official_destination() {
         '#!/usr/bin/env bash' \
         'set -eu' \
         'mkdir -p "$HOME/.opencode/bin"' \
-        'printf '\''#!/usr/bin/env bash\nprintf "2.3.0\\n"\n'\'' > "$HOME/.opencode/bin/opencode"' \
+        'printf '\''#!/usr/bin/env bash\nprintf "'"$OPENCODE_PIN"'\\n"\n'\'' > "$HOME/.opencode/bin/opencode"' \
         'chmod 755 "$HOME/.opencode/bin/opencode"' \
         > "$DOWNLOADED_INSTALLER"
       chmod 755 "$DOWNLOADED_INSTALLER"
@@ -2360,7 +2363,7 @@ test_opencode_install_refreshes_path_for_the_official_destination() {
 #   OC_PATH_VERSION=V    put a binary reporting V on PATH, outside ~/.opencode/bin
 #   OC_PATH_FIRST=1      with OC_PATH_VERSION, put it ahead of ~/.opencode/bin
 #   OC_DB_ENV=PATH       export OPENCODE_DB=PATH
-#   OC_INSTALLED=V       what the stub installer installs (default 2.3.0)
+#   OC_INSTALLED=V       what the stub installer installs (default: the catalog pin)
 # shellcheck disable=SC2030,SC2031,SC2329
 run_install_opencode_case() {
   local sandbox="$TEMP_DIR/opencode-guard-$1"
@@ -2412,7 +2415,7 @@ run_install_opencode_case() {
         'set -eu' \
         'printf "%s\n" "$@" > "$(dirname "$0")/../installer-args"' \
         'mkdir -p "$HOME/.opencode/bin"' \
-        "printf '#!/usr/bin/env bash\\nprintf \"${OC_INSTALLED:-2.3.0}\\\\n\"\\n' > \"\$HOME/.opencode/bin/opencode\"" \
+        "printf '#!/usr/bin/env bash\\nprintf \"${OC_INSTALLED:-$OPENCODE_PIN}\\\\n\"\\n' > \"\$HOME/.opencode/bin/opencode\"" \
         'chmod 755 "$HOME/.opencode/bin/opencode"' \
         > "$DOWNLOADED_INSTALLER"
       chmod 755 "$DOWNLOADED_INSTALLER"
@@ -2431,7 +2434,7 @@ test_opencode_install_uses_the_pinned_2x_installer() {
   assert_equal "$OPENCODE_STATUS" "0" "a fresh install must succeed: $OPENCODE_OUTPUT"
   assert_equal "$(cat "$OPENCODE_SANDBOX/installer-url")" "https://opencode.ai/v2/install" \
     "OpenCode must come from the 2.x installer"
-  assert_contains "$(tr '\n' ' ' < "$OPENCODE_SANDBOX/installer-args")" "--version 2.3.0 " \
+  assert_contains "$(tr '\n' ' ' < "$OPENCODE_SANDBOX/installer-args")" "--version $OPENCODE_PIN " \
     "the installer must be given the catalog pin"
   assert_contains "$(tr '\n' ' ' < "$OPENCODE_SANDBOX/installer-args")" "--no-modify-path" \
     "the installer must not edit shell profiles"
@@ -2447,13 +2450,13 @@ test_opencode_version_override_replaces_the_catalog_pin() {
   # shellcheck disable=SC2016
   output="$(env -u ADT_OPENCODE_VERSION bash -c 'source "$1"; printf "%s\n" "$OPENCODE_VERSION"' \
     _ "$TEMP_DIR/install-functions.sh" 2>&1)"
-  assert_equal "$(tail -n1 <<<"$output")" "2.3.0" "the catalog pin is the default"
+  assert_equal "$(tail -n1 <<<"$output")" "$OPENCODE_PIN" "the catalog pin is the default"
 }
 
 test_opencode_install_dry_run_names_the_pin_and_changes_nothing() {
   run_install_opencode_case dry "" "" "" dry-run
   assert_equal "$OPENCODE_STATUS" "0" "a dry run must succeed: $OPENCODE_OUTPUT"
-  assert_contains "$OPENCODE_OUTPUT" "Would install OpenCode 2.3.0 from https://opencode.ai/v2/install" \
+  assert_contains "$OPENCODE_OUTPUT" "Would install OpenCode $OPENCODE_PIN from https://opencode.ai/v2/install" \
     "a dry run must say what it would install"
   [[ ! -e "$OPENCODE_SANDBOX/installer-args" ]] || fail "a dry run must not run the installer"
 }
@@ -2482,14 +2485,14 @@ test_opencode_data_without_a_binary_stops_before_mutation() {
 }
 
 test_opencode_2x_with_data_installs_normally_and_upgrades_to_the_pin() {
-  run_install_opencode_case v2-plain 2.3.0 db "" ""
+  run_install_opencode_case v2-plain "$OPENCODE_PIN" db "" ""
   assert_equal "$OPENCODE_STATUS" "0" "a 2.x install with data must be fine: $OPENCODE_OUTPUT"
   assert_contains "$OPENCODE_OUTPUT" "already installed" "an installed 2.x is left alone"
   [[ ! -e "$OPENCODE_SANDBOX/installer-args" ]] || fail "no reinstall without --upgrade"
 
   run_install_opencode_case v2-upgrade 2.1.0 db upgrade ""
   assert_equal "$OPENCODE_STATUS" "0" "--upgrade on 2.x must succeed: $OPENCODE_OUTPUT"
-  assert_contains "$(tr '\n' ' ' < "$OPENCODE_SANDBOX/installer-args")" "--version 2.3.0 " \
+  assert_contains "$(tr '\n' ' ' < "$OPENCODE_SANDBOX/installer-args")" "--version $OPENCODE_PIN " \
     "--upgrade must move a 2.x binary to the pinned version"
 }
 
@@ -2516,7 +2519,7 @@ test_opencode_data_guard_covers_every_channel_database_and_opencode_db() {
 
 # --upgrade must never move a migrated database back under an older binary.
 test_opencode_upgrade_never_downgrades_over_data() {
-  run_install_opencode_case newer 2.4.0 db upgrade ""
+  run_install_opencode_case newer 2.99.0 db upgrade ""
   assert_equal "$OPENCODE_STATUS" "0" "a newer 2.x must not fail the run: $OPENCODE_OUTPUT"
   assert_contains "$OPENCODE_OUTPUT" "WARNING" "a newer installed 2.x must be warned about"
   assert_contains "$OPENCODE_OUTPUT" "newer than the pin" "the warning must say why"
@@ -2525,8 +2528,8 @@ test_opencode_upgrade_never_downgrades_over_data() {
     "the newer binary must stay untouched"
 
   # With no data there is nothing to protect, and the pin applies.
-  run_install_opencode_case newer-nodata 2.4.0 "" upgrade ""
-  assert_contains "$(tr '\n' ' ' < "$OPENCODE_SANDBOX/installer-args")" "--version 2.3.0 " \
+  run_install_opencode_case newer-nodata 2.99.0 "" upgrade ""
+  assert_contains "$(tr '\n' ' ' < "$OPENCODE_SANDBOX/installer-args")" "--version $OPENCODE_PIN " \
     "without data --upgrade moves to the pin"
 }
 
@@ -2544,7 +2547,7 @@ test_opencode_pin_must_be_an_exact_2x_version() {
 test_opencode_install_verifies_the_installed_version() {
   OC_INSTALLED=2.9.0 run_install_opencode_case wrong-version "" "" "" ""
   assert_equal "$OPENCODE_STATUS" "1" "an installer that installs another version must fail"
-  assert_contains "$OPENCODE_OUTPUT" "Expected OpenCode 2.3.0" "the failure must name the pin"
+  assert_contains "$OPENCODE_OUTPUT" "Expected OpenCode $OPENCODE_PIN" "the failure must name the pin"
 }
 
 test_opencode_dry_run_still_applies_the_data_guard() {
@@ -2570,7 +2573,7 @@ test_opencode_binary_found_on_path_is_judged_like_any_other() {
   assert_contains "$OPENCODE_OUTPUT" "WARNING" "a 1.x binary on PATH must be warned about"
   [[ ! -e "$OPENCODE_SANDBOX/installer-args" ]] || fail "nothing may be installed over 1.x data"
 
-  OC_PATH_VERSION=2.3.0 run_install_opencode_case path-v2 "" db "" ""
+  OC_PATH_VERSION="$OPENCODE_PIN" run_install_opencode_case path-v2 "" db "" ""
   assert_contains "$OPENCODE_OUTPUT" "already installed" "a 2.x binary on PATH is an install"
 }
 
@@ -2582,7 +2585,7 @@ test_opencode_unreadable_version_with_data_is_not_2x() {
 }
 
 test_opencode_warns_when_another_binary_shadows_the_install() {
-  OC_PATH_VERSION=1.19.4 OC_PATH_FIRST=1 run_install_opencode_case shadow 2.3.0 "" upgrade ""
+  OC_PATH_VERSION=1.19.4 OC_PATH_FIRST=1 run_install_opencode_case shadow "$OPENCODE_PIN" "" upgrade ""
   assert_equal "$OPENCODE_STATUS" "0" "a shadowed install must still succeed: $OPENCODE_OUTPUT"
   assert_contains "$OPENCODE_OUTPUT" "shadow" "a binary ahead on PATH must be reported"
 }
@@ -2590,7 +2593,7 @@ test_opencode_warns_when_another_binary_shadows_the_install() {
 test_installed_opencode_version_comes_from_the_binary_not_path() {
   local home="$TEMP_DIR/probe-home" fake="$TEMP_DIR/probe-shadow"
   mkdir -p "$home/.opencode/bin" "$fake"
-  printf '#!/usr/bin/env bash\nprintf "2.3.0\\n"\n' > "$home/.opencode/bin/opencode"
+  printf '#!/usr/bin/env bash\nprintf "%s\\n"\n' "$OPENCODE_PIN" > "$home/.opencode/bin/opencode"
   printf '#!/usr/bin/env bash\nprintf "9.9.9\\n"\n' > "$fake/opencode"
   chmod +x "$home/.opencode/bin/opencode" "$fake/opencode"
   local output
@@ -2601,7 +2604,7 @@ test_installed_opencode_version_comes_from_the_binary_not_path() {
     INSTALLED_KARPATHY_SHA256=""
     HOME="$home" PATH="$fake:$PATH" write_installed_versions 2>&1
   )"
-  assert_contains "$output" "installed.opencode=2.3.0" "the receipt must record the install, not the shadow"
+  assert_contains "$output" "installed.opencode=$OPENCODE_PIN" "the receipt must record the install, not the shadow"
 }
 
 test_main_checks_opencode_data_before_installing_anything() {
@@ -2967,7 +2970,7 @@ EOF_FAKE_MISE
   local fake_bin="$TEMP_DIR/fake-bin-probe"
   mkdir -p "$fake_bin"
   printf '#!/usr/bin/env bash\nprintf "OpenSpec CLI v1.13.2\\n"\n' > "$fake_bin/openspec"
-  printf '#!/usr/bin/env bash\nprintf "2.3.0\\n"\n' > "$fake_bin/opencode"
+  printf '#!/usr/bin/env bash\nprintf "%s\\n"\n' "$OPENCODE_PIN" > "$fake_bin/opencode"
   chmod +x "$fake_bin/openspec" "$fake_bin/opencode"
 
   local output
@@ -3007,7 +3010,7 @@ EOF_FAKE_MISE
     || fail "pyyaml: first line, first field: $output"
   [[ "$output" == *$'\ninstalled.openspec=1.13.2\n'* ]] \
     || fail "openspec: first X.Y.Z match: $output"
-  [[ "$output" == *$'\ninstalled.opencode=2.3.0\n'* ]] \
+  [[ "$output" == *$'\ninstalled.opencode='"$OPENCODE_PIN"$'\n'* ]] \
     || fail "opencode: first X.Y.Z match: $output"
 }
 

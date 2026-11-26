@@ -370,6 +370,28 @@ on 2026-11-15. It was **not** a live service run: no persistent unit was
 upgraded and no host was cut over. Record a live cutover separately when one
 happens.
 
+**The pin moved to 2.3.2 on 2026-11-26.** The behaviours the routing tools and
+the screening runner rely on were measured again, in sandboxes, on 2.3.2:
+
+- a native `agents` row with `system`, and `agents.title.disabled: true`, which
+  removes the built-in `title` agent;
+- the `GET /api/model` shape, where an unpriced model shows `cost: []`;
+- a 1.x-format `auth.json` in a fresh data directory, imported on first start;
+- no request to the provider's model list, so undeclared models are still not
+  discovered;
+- a counting proxy in front of a gateway saw exactly one request per recorded
+  step during a screening, so the ledger equalled the provider's cost.
+
+The database gains three migrations, which replace the `schedule` table with an
+`automation` table. The session tables are unchanged.
+
+Moving between 2.x versions is one-way, like the 1.x move: back up the data
+directory first, because no 2.x release supports a downgrade. When a pin bump
+also changes the Superpowers ref and the OpenCode config is non-strict JSONC (an
+activated routing profile is), the installer refuses to rewrite it. Edit the
+plugin entry by hand to the new ref, then re-run the installer, which then
+confirms it.
+
 The discovery fix passed; selecting different .NET SDKs using **only**
 `mise.toml` remained unsupported in the existing shared setup. Backend MCP
 credentials from direnv are a separate concern: exposing the executables does

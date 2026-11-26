@@ -2603,7 +2603,11 @@ verify_git_credential_wrapper() {
   printf '#!/usr/bin/env bash\nprintf "%%s|%%s\\n" "${GCM_INTERACTIVE-unset}" "${WSLENV-unset}"\n' > "$stub"
   chmod 755 "$stub"
 
-  decision="$(GCM_EXE="$stub" setsid --wait "$GIT_CREDENTIAL_WRAPPER" get < /dev/null 2>/dev/null || true)"
+  # An exported GCM_INTERACTIVE is the documented escape hatch and would win over
+  # the decision under test, so it is removed for this run only.
+  decision="$(env -u GCM_INTERACTIVE GCM_EXE="$stub" setsid --wait "$GIT_CREDENTIAL_WRAPPER" get < /dev/null 2>/dev/null || true)"
+  [[ -n "$decision" ]] ||
+    die "the Git credential wrapper produced no output; the check needs 'setsid --wait' (util-linux 2.30 or later)"
   [[ "$decision" == never\|*GCM_INTERACTIVE* ]] ||
     die "the Git credential wrapper did not disable prompting without a terminal (got '$decision')"
   info "Git credential wrapper declines to prompt with no terminal, and exports WSLENV."

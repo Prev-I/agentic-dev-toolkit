@@ -8,7 +8,8 @@ optional HTTPS LAN edge are independent clients of that server.
 (`catalog/software-catalog.env`, `opencode=`). An installation that already
 holds 1.x data does not move by itself: read
 [Moving an existing 1.x installation to 2.x](#moving-an-existing-1x-installation-to-2x)
-first, because that migration is one-way. The decision record is
+first, because that migration is one-way; moving between 2.x versions is one-way
+too ([Moving between 2.x versions](#moving-between-2x-versions)). The decision record is
 `models/routing/opencode/docs/decisions/2026-11-15-opencode-v2-adoption-rfc.md`.
 
 Two independent halves. Part 1 is the whole story for a single-machine setup and
@@ -103,7 +104,7 @@ ExecStart=%h/.opencode/bin/opencode serve --hostname 127.0.0.1 --port 4096
 ExecStartPost=%h/.local/libexec/opencode/opencode-startup-ready
 
 # The catalog pins the version. Without this the server can upgrade itself and
-# defeat the pin. Also set `"autoupdate": false` in the OpenCode config.
+# defeat the pin. Also set `"update": "disable"` in the OpenCode config.
 Environment=OPENCODE_DISABLE_AUTOUPDATE=1
 
 Restart=always
@@ -120,7 +121,7 @@ WantedBy=default.target
 
 `--hostname 127.0.0.1` is the load-bearing argument.
 
-Set `"autoupdate": false` in the OpenCode config as well as the environment
+Set `"update": "disable"` in the OpenCode config as well as the environment
 variable above; either one alone leaves a path by which the pin can move.
 
 `Restart=always` rather than `on-failure`: a clean exit is still an absent
@@ -369,6 +370,24 @@ shared-service behaviour) was verified in isolated sandboxes with OpenCode 2.3.0
 on 2026-11-15. It was **not** a live service run: no persistent unit was
 upgraded and no host was cut over. Record a live cutover separately when one
 happens.
+
+**The pin moved to 2.3.2 on 2026-11-26.** The behaviours the routing tools and
+the screening runner rely on were measured again, in sandboxes, on 2.3.2:
+
+- a native `agents` row with `system`, and `agents.title.disabled: true`, which
+  removes the built-in `title` agent;
+- the `GET /api/model` shape, where an unpriced model shows `cost: []`;
+- a 1.x-format `auth.json` in a fresh data directory, imported on first start;
+- no request to the provider's model list, so undeclared models are still not
+  discovered;
+- a counting proxy in front of a gateway saw exactly one request per recorded
+  step during a screening, so the ledger equalled the provider's cost. That
+  holds because the screening runner disables the title agent; with it enabled,
+  a session makes an extra, unledgered request.
+
+The database gains three migrations, which replace the `schedule` table with an
+`automation` table. The session tables are unchanged. Moving between 2.x
+versions is covered by "Moving between 2.x versions", below.
 
 The discovery fix passed; selecting different .NET SDKs using **only**
 `mise.toml` remained unsupported in the existing shared setup. Backend MCP
@@ -1052,6 +1071,33 @@ The plugin's own status tool should then report the restart as supported and
 managed. If it reports a restart as scheduled but nothing happens, the managed
 flag is set and the consumer is not.
 
+### Moving between 2.x versions
+
+A pin bump within 2.x (for example 2.3.0 to 2.3.2) is one-way too: the new
+version's migrations run on its first start, and no 2.x release supports a
+downgrade. The procedure:
+
+1. Stop the service and every client, and run no `opencode` command until
+   step 4: a bare `opencode` starts a server against the data.
+2. Back up the whole data directory (the `snapshot` helper of the 1.x procedure
+   below, step 2, applies to each `opencode*.db`), and copy the current
+   `~/.opencode/bin/opencode` beside it.
+3. Run `install.sh --upgrade`. A plain re-run leaves an installed older 2.x in
+   place.
+4. Start the service and run the readiness probe
+   (`opencode-startup-ready`). The new version's migrations run on that first
+   start.
+
+Rolling back means stopping the service, restoring the data directory and
+putting the saved binary back by hand. The installer cannot do it: with data
+present it never replaces a 2.x binary with an older one.
+
+When the bump also changes the Superpowers ref, the installer's preflight stops
+the whole run before changing anything if the OpenCode config is non-strict
+JSONC (an activated routing profile is), because it will not rewrite that file.
+Replace the old ref in place (one entry per line, no trailing comment), remove
+any other Superpowers entry, then re-run; or pass `--skip-superpowers`.
+
 ### Moving an existing 1.x installation to 2.x
 
 **This is one-way.** On its first start, 2.x migrates `opencode.db` in place,
@@ -1372,7 +1418,7 @@ configuration, as it does the readiness probes; use a password without them.)
 - Remove `READY_TOOL_MARKER` from **every** drop-in, the gateway one included;
   the probe refuses to run with it set, even empty:
   `grep -rn READY_TOOL_MARKER ~/.config/systemd/user/` must print nothing.
-- Install the 2.x probe, and set `"autoupdate": false` in the OpenCode config.
+- Install the 2.x probe, and set `"update": "disable"` in the OpenCode config.
 - Install the 2.x `oca` block from [The client wrapper](#the-client-wrapper).
 - Install the new units from scratch; nothing from the held set is copied back.
 - Telegram: leave the bot unit absent until it is on `@grinev/opencode-telegram-bot`

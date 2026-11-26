@@ -170,9 +170,9 @@ write_valid_receipt() {
   local sha=""
   [[ -r "$catalog" ]] && sha="$(sha256sum -- "$catalog" 2>/dev/null | cut -d' ' -f1)"
   [[ -n "$sha" ]] || sha="$(printf '%064d' 0)"
-  # Every requested.* value is read from the catalog this receipt claims to
-  # agree with, so a catalog bump never needs an edit here.
-  # The real catalog, not $catalog: some tests pass an absent or altered copy.
+  # Every requested.* value is read from the repository's real catalog, not
+  # $catalog (some tests pass an absent or altered copy), so a catalog bump
+  # never needs an edit here.
   cv() { sed -n "s/^$1=//p" "$ROOT_DIR/catalog/software-catalog.env"; }
   cat > "$dest" <<RECEIPT
 script-version=0.1.0

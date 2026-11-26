@@ -8,7 +8,8 @@ optional HTTPS LAN edge are independent clients of that server.
 (`catalog/software-catalog.env`, `opencode=`). An installation that already
 holds 1.x data does not move by itself: read
 [Moving an existing 1.x installation to 2.x](#moving-an-existing-1x-installation-to-2x)
-first, because that migration is one-way. The decision record is
+first, because that migration is one-way; moving between 2.x versions is one-way
+too ([Moving between 2.x versions](#moving-between-2x-versions)). The decision record is
 `models/routing/opencode/docs/decisions/2026-11-15-opencode-v2-adoption-rfc.md`.
 
 Two independent halves. Part 1 is the whole story for a single-machine setup and
@@ -1076,14 +1077,20 @@ A pin bump within 2.x (for example 2.3.0 to 2.3.2) is one-way too: the new
 version's migrations run on its first start, and no 2.x release supports a
 downgrade. The procedure:
 
-1. Stop the service and every client.
+1. Stop the service and every client, and run no `opencode` command until
+   step 4: a bare `opencode` starts a server against the data.
 2. Back up the whole data directory (the `snapshot` helper of the 1.x procedure
-   below, step 2, applies to each `opencode*.db`).
+   below, step 2, applies to each `opencode*.db`), and copy the current
+   `~/.opencode/bin/opencode` beside it.
 3. Run `install.sh --upgrade`. A plain re-run leaves an installed older 2.x in
    place.
 4. Start the service and run the readiness probe
    (`opencode-startup-ready`). The new version's migrations run on that first
    start.
+
+Rolling back means stopping the service, restoring the data directory and
+putting the saved binary back by hand. The installer cannot do it: with data
+present it never replaces a 2.x binary with an older one.
 
 When the bump also changes the Superpowers ref, the installer's preflight stops
 the whole run before changing anything if the OpenCode config is non-strict

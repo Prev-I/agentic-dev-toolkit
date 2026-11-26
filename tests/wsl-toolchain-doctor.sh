@@ -170,6 +170,10 @@ write_valid_receipt() {
   local sha=""
   [[ -r "$catalog" ]] && sha="$(sha256sum -- "$catalog" 2>/dev/null | cut -d' ' -f1)"
   [[ -n "$sha" ]] || sha="$(printf '%064d' 0)"
+  # Every requested.* value is read from the catalog this receipt claims to
+  # agree with, so a catalog bump never needs an edit here.
+  # The real catalog, not $catalog: some tests pass an absent or altered copy.
+  cv() { sed -n "s/^$1=//p" "$ROOT_DIR/catalog/software-catalog.env"; }
   cat > "$dest" <<RECEIPT
 script-version=0.1.0
 installed-at=2026-09-09T14:22:07Z
@@ -177,22 +181,22 @@ source-commit=1fcbb1c9a4e2b7d0f3a18c65b2e94d7f0a1c3e58
 catalog-sha256=$sha
 skipped=
 overridden=
-requested.java-17=temurin-17
-requested.java-21=temurin-21
-requested.dotnet-10=10
-requested.dotnet-8=8
-requested.python=3.12
-requested.node=24
-requested.bun=1
-requested.maven=3.9.16
-requested.dotnet-ef=latest
-requested.uv=latest
-requested.shellcheck=latest
-requested.gitleaks=latest
-requested.pyyaml=latest
-requested.openspec=1.13.2
-requested.superpowers=v7.0.1
-requested.karpathy-ref=2c606141936f1eeef17fa3043a72095b4765b9c2
+requested.java-17=$(cv java-17)
+requested.java-21=$(cv java-21)
+requested.dotnet-10=$(cv dotnet-10)
+requested.dotnet-8=$(cv dotnet-8)
+requested.python=$(cv python)
+requested.node=$(cv node)
+requested.bun=$(cv bun)
+requested.maven=$(cv maven)
+requested.dotnet-ef=$(cv dotnet-ef)
+requested.uv=$(cv uv)
+requested.shellcheck=$(cv shellcheck)
+requested.gitleaks=$(cv gitleaks)
+requested.pyyaml=$(cv pyyaml)
+requested.openspec=$(cv openspec)
+requested.superpowers=$(cv superpowers)
+requested.karpathy-ref=$(cv karpathy-ref)
 installed.java-17=17.0.13
 installed.java-21=21.0.5
 installed.dotnet-10=10.0.100

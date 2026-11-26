@@ -1956,6 +1956,14 @@ readonly CATALOG_FILE="$REPOSITORY_ROOT/catalog/software-catalog.env"
 # The OpenCode pin, read from the catalog so a version bump never edits this suite.
 OPENCODE_PIN="$(sed -n 's/^opencode=//p' "$CATALOG_FILE")"
 readonly OPENCODE_PIN
+# The suite uses these synthetic versions as "some other 2.x"; the pin must
+# never collide with one, or those cases would test nothing.
+case "$OPENCODE_PIN" in
+  "" | 2.9.9 | 2.9.0 | 2.1.0 | 2.99.0)
+    echo "ERROR: catalog opencode pin '$OPENCODE_PIN' is empty or equals a synthetic test version" >&2
+    exit 1
+    ;;
+esac
 
 kv_fixture() {
   # kv_fixture NAME CONTENT  -> prints the fixture path

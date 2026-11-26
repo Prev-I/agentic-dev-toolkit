@@ -440,7 +440,7 @@ EOF
 }
 
 test_installer_script_version_is_0_5_0() {
-  assert_equal "$SCRIPT_VERSION" "0.5.0" "the installer version after the V2 Superpowers writer"
+  assert_equal "$SCRIPT_VERSION" "0.5.1" "the installer version after the V2 Superpowers writer"
 }
 
 load_installer_functions() {
@@ -1240,6 +1240,63 @@ test_git_credential_wrapper_leaves_prompting_alone_when_a_terminal_exists() {
   observed="$(script -qec "$GIT_CREDENTIAL_WRAPPER get" /dev/null | tr -d '\r' | head -n1)"
   assert_equal "$observed" "unset|unset" \
     "with a terminal present the wrapper must not touch interactivity"
+
+  teardown_credential_sandbox "$original_home"
+}
+
+# Runs the installer's own wrapper verification inside a pseudo-terminal, which is
+# where an operator runs `install.sh --upgrade`. The check means "without a
+# terminal", so it must not inherit the one it is run from.
+run_wrapper_verification_under_a_pty() {
+  local driver="$TEMP_DIR/wrapper-verification-driver.sh"
+  {
+    printf 'set -Eeuo pipefail\n'
+    printf 'export ADT_CATALOG_FILE=%q\n' "$ADT_CATALOG_FILE"
+    printf 'source %q\n' "$TEMP_DIR/install-functions.sh"
+    printf 'GIT_CREDENTIAL_WRAPPER=%q\n' "$GIT_CREDENTIAL_WRAPPER"
+    printf 'verify_git_credential_wrapper\n'
+  } > "$driver"
+  script -qec "bash $driver" /dev/null 2>&1 | tr -d '\r'
+  return "${PIPESTATUS[0]}"
+}
+
+test_installer_wrapper_check_passes_when_run_from_a_terminal() {
+  local original_home="$HOME"
+  setup_credential_sandbox credential-selfcheck-tty
+
+  if ! command -v script >/dev/null 2>&1; then
+    printf 'SKIP: script(1) is not available to allocate a pty\n'
+    teardown_credential_sandbox "$original_home"
+    return 0
+  fi
+
+  configure_git_credential_helper >/dev/null
+  local output status=0
+  output="$(run_wrapper_verification_under_a_pty)" || status=$?
+  assert_equal "$status" "0" "the wrapper self-check must pass from a terminal, got: $output"
+  [[ "$output" == *"declines to prompt"* ]] || fail "the self-check must report success, got: $output"
+
+  teardown_credential_sandbox "$original_home"
+}
+
+test_installer_wrapper_check_still_fails_a_wrapper_that_would_prompt() {
+  local original_home="$HOME"
+  setup_credential_sandbox credential-selfcheck-weak
+
+  if ! command -v script >/dev/null 2>&1; then
+    printf 'SKIP: script(1) is not available to allocate a pty\n'
+    teardown_credential_sandbox "$original_home"
+    return 0
+  fi
+
+  # A wrapper that forwards without ever disabling prompting.
+  # shellcheck disable=SC2016 # literal wrapper text, not an expansion
+  printf '#!/usr/bin/env bash\nexec "$GCM_EXE" "$@"\n' > "$GIT_CREDENTIAL_WRAPPER"
+  chmod 755 "$GIT_CREDENTIAL_WRAPPER"
+  local output status=0
+  output="$(run_wrapper_verification_under_a_pty)" || status=$?
+  [[ "$status" != 0 ]] || fail "a wrapper that never disables prompting must fail the self-check"
+  [[ "$output" == *"did not disable prompting"* ]] || fail "the failure must say why, got: $output"
 
   teardown_credential_sandbox "$original_home"
 }
@@ -2265,7 +2322,7 @@ test_installer_loads_catalog_beside_a_standalone_copy() {
   fi
 
   assert_equal "$status" "0" "a standalone two-file bundle must find its adjacent catalog"
-  assert_equal "$output" "0.5.0" "the standalone bundle must run the copied installer"
+  assert_equal "$output" "0.5.1" "the standalone bundle must run the copied installer"
 }
 
 test_installer_prefers_explicit_then_repository_catalog() {
@@ -2283,7 +2340,7 @@ test_installer_prefers_explicit_then_repository_catalog() {
     status=$?
   fi
   assert_equal "$status" "0" "an explicit catalog must override an adjacent catalog"
-  assert_equal "$output" "0.5.0" "an explicit valid catalog must let a standalone bundle run"
+  assert_equal "$output" "0.5.1" "an explicit valid catalog must let a standalone bundle run"
 
   cp "$INSTALLER" "$checkout/environments/linux/install.sh"
   cp "$CATALOG_FILE" "$checkout/catalog/software-catalog.env"
@@ -2295,7 +2352,7 @@ test_installer_prefers_explicit_then_repository_catalog() {
     status=$?
   fi
   assert_equal "$status" "0" "a recognized repository catalog must override an adjacent catalog"
-  assert_equal "$output" "0.5.0" "a repository-layout copy must run with its repository catalog"
+  assert_equal "$output" "0.5.1" "a repository-layout copy must run with its repository catalog"
 }
 
 test_source_commit_requires_the_exact_repository_root() {
@@ -2645,7 +2702,7 @@ test_installer_version_flag() {
   status=$?
   set -e
   assert_equal "$status" "0" "--version must exit 0"
-  assert_equal "$output" "0.5.0" "--version must print exactly the version"
+  assert_equal "$output" "0.5.1" "--version must print exactly the version"
   [[ "$output" != *"Unknown option"* ]] \
     || fail "--version must be parsed before the generic unknown-option arm"
 }
@@ -2669,7 +2726,7 @@ test_installer_version_ignores_ambiguous_opencode_config() {
   set -e
 
   assert_equal "$status" "0" "--version must not resolve the OpenCode config"
-  assert_equal "$output" "0.5.0" "--version with dual configs must print exactly the version"
+  assert_equal "$output" "0.5.1" "--version with dual configs must print exactly the version"
 }
 
 test_opencode_config_resolution_honors_skip_and_explicit_override() {
@@ -3453,6 +3510,8 @@ test_summary_does_not_claim_a_skipped_skill_was_installed
 test_karpathy_skill_accepts_an_uppercase_digest
 test_karpathy_skill_rejects_a_malformed_digest_before_downloading
 test_git_credential_wrapper_declines_to_prompt_without_a_terminal
+test_installer_wrapper_check_passes_when_run_from_a_terminal
+test_installer_wrapper_check_still_fails_a_wrapper_that_would_prompt
 test_git_credential_wrapper_leaves_prompting_alone_when_a_terminal_exists
 test_git_credential_wrapper_respects_an_explicit_interactivity_choice
 test_git_credential_wrapper_appends_to_wslenv_instead_of_replacing_it

@@ -1037,6 +1037,8 @@ test_runbook_documents_the_2x_service() {
     "the unit must run opencode serve on loopback"
   assert_contains "$unit" "Environment=OPENCODE_DISABLE_AUTOUPDATE=1" \
     "the unit must stop the server upgrading itself"
+  assert_contains "$unit" "SuccessExitStatus=143" \
+    "the unit must treat opencode serve's SIGTERM exit (143) as a clean stop"
   [[ "$text" != *"opencode web --"* ]] || fail "opencode web does not exist in 2.x"
   [[ "$text" != *"opencode attach http"* ]] || fail "opencode attach does not exist in 2.x"
   [[ "$text" != *'Environment="READY_TOOL_MARKER'* ]] || fail "READY_TOOL_MARKER is gone"

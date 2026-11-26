@@ -110,6 +110,10 @@ Environment=OPENCODE_DISABLE_AUTOUPDATE=1
 Restart=always
 RestartSec=3
 
+# `opencode serve` exits 143 on SIGTERM; without this a plain `systemctl --user stop`
+# leaves the unit `failed (Result: exit-code)`.
+SuccessExitStatus=143
+
 # Must exceed the readiness probe's own window, or systemd kills the start
 # before the probe can report which half failed.
 TimeoutStartSec=120

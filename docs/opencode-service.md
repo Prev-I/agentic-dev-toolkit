@@ -103,7 +103,7 @@ ExecStart=%h/.opencode/bin/opencode serve --hostname 127.0.0.1 --port 4096
 ExecStartPost=%h/.local/libexec/opencode/opencode-startup-ready
 
 # The catalog pins the version. Without this the server can upgrade itself and
-# defeat the pin. Also set `"autoupdate": false` in the OpenCode config.
+# defeat the pin. Also set `"update": "disable"` in the OpenCode config.
 Environment=OPENCODE_DISABLE_AUTOUPDATE=1
 
 Restart=always
@@ -120,7 +120,7 @@ WantedBy=default.target
 
 `--hostname 127.0.0.1` is the load-bearing argument.
 
-Set `"autoupdate": false` in the OpenCode config as well as the environment
+Set `"update": "disable"` in the OpenCode config as well as the environment
 variable above; either one alone leaves a path by which the pin can move.
 
 `Restart=always` rather than `on-failure`: a clean exit is still an absent
@@ -380,17 +380,13 @@ the screening runner rely on were measured again, in sandboxes, on 2.3.2:
 - no request to the provider's model list, so undeclared models are still not
   discovered;
 - a counting proxy in front of a gateway saw exactly one request per recorded
-  step during a screening, so the ledger equalled the provider's cost.
+  step during a screening, so the ledger equalled the provider's cost. That
+  holds because the screening runner disables the title agent; with it enabled,
+  a session makes an extra, unledgered request.
 
 The database gains three migrations, which replace the `schedule` table with an
-`automation` table. The session tables are unchanged.
-
-Moving between 2.x versions is one-way, like the 1.x move: back up the data
-directory first, because no 2.x release supports a downgrade. When a pin bump
-also changes the Superpowers ref and the OpenCode config is non-strict JSONC (an
-activated routing profile is), the installer refuses to rewrite it. Edit the
-plugin entry by hand to the new ref, then re-run the installer, which then
-confirms it.
+`automation` table. The session tables are unchanged. Moving between 2.x
+versions is covered by "Moving between 2.x versions", below.
 
 The discovery fix passed; selecting different .NET SDKs using **only**
 `mise.toml` remained unsupported in the existing shared setup. Backend MCP
@@ -1074,6 +1070,27 @@ The plugin's own status tool should then report the restart as supported and
 managed. If it reports a restart as scheduled but nothing happens, the managed
 flag is set and the consumer is not.
 
+### Moving between 2.x versions
+
+A pin bump within 2.x (for example 2.3.0 to 2.3.2) is one-way too: the new
+version's migrations run on its first start, and no 2.x release supports a
+downgrade. The procedure:
+
+1. Stop the service and every client.
+2. Back up the whole data directory (the `snapshot` helper of the 1.x procedure
+   below, step 2, applies to each `opencode*.db`).
+3. Run `install.sh --upgrade`. A plain re-run leaves an installed older 2.x in
+   place.
+4. Start the service and run the readiness probe
+   (`opencode-startup-ready`). The new version's migrations run on that first
+   start.
+
+When the bump also changes the Superpowers ref, the installer's preflight stops
+the whole run before changing anything if the OpenCode config is non-strict
+JSONC (an activated routing profile is), because it will not rewrite that file.
+Replace the old ref in place (one entry per line, no trailing comment), remove
+any other Superpowers entry, then re-run; or pass `--skip-superpowers`.
+
 ### Moving an existing 1.x installation to 2.x
 
 **This is one-way.** On its first start, 2.x migrates `opencode.db` in place,
@@ -1394,7 +1411,7 @@ configuration, as it does the readiness probes; use a password without them.)
 - Remove `READY_TOOL_MARKER` from **every** drop-in, the gateway one included;
   the probe refuses to run with it set, even empty:
   `grep -rn READY_TOOL_MARKER ~/.config/systemd/user/` must print nothing.
-- Install the 2.x probe, and set `"autoupdate": false` in the OpenCode config.
+- Install the 2.x probe, and set `"update": "disable"` in the OpenCode config.
 - Install the 2.x `oca` block from [The client wrapper](#the-client-wrapper).
 - Install the new units from scratch; nothing from the held set is copied back.
 - Telegram: leave the bot unit absent until it is on `@grinev/opencode-telegram-bot`

@@ -12,7 +12,7 @@ readonly KARPATHY_RAW_BASE='https://raw.githubusercontent.com/multica-ai/andrej-
 readonly KARPATHY_SKILL_PATH='skills/karpathy-guidelines/SKILL.md'
 # The installer's own version, declared with the other constants for parity
 # with the repository's other versioned scripts. Printed verbatim by --version.
-readonly SCRIPT_VERSION="0.5.1"
+readonly SCRIPT_VERSION="0.5.2"
 
 log() {
   printf '\n==> %s\n' "$*"
@@ -2337,6 +2337,19 @@ run_bounded_probe() {
   "$timeout_bin" 10s "$@"
 }
 
+# highest_dotnet_sdk MAJOR LIST_SDKS_OUTPUT
+# Prints the highest SDK version whose major is MAJOR (version-aware, not
+# lexical), preferring stable versions over prereleases: a prerelease (one
+# with a '-') is the answer only when the major has nothing else.
+highest_dotnet_sdk() {
+  local major="$1" sdks="$2" best
+  best="$(awk -v m="$major" '{ split($1, v, "."); if (v[1] == m && $1 !~ /-/) print $1 }' <<<"$sdks" | sort -V | tail -n 1)"
+  if [[ -z "$best" ]]; then
+    best="$(awk -v m="$major" '{ split($1, v, "."); if (v[1] == m) print $1 }' <<<"$sdks" | sort -V | tail -n 1)"
+  fi
+  printf '%s' "$best"
+}
+
 # write_installed_versions emits installed.* for every catalog key a probe can
 # observe, in catalog order, skip-aware and time-bounded. Called only from
 # write_receipt_body.
@@ -2383,15 +2396,16 @@ write_installed_versions() {
 
     # dotnet-10 and dotnet-8 share one probe: one `--list-sdks` invocation
     # supplies both. It runs if at least one of the two is unskipped, and
-    # emits a value only for the ones that are.
+    # emits a value only for the ones that are. mise keeps superseded SDKs and
+    # --list-sdks lists ascending, so take the highest match per major.
     if [[ -z "${skip[dotnet-10]+set}" || -z "${skip[dotnet-8]+set}" ]]; then
       if output="$(run_bounded_probe "$timeout_bin" "$MISE_BIN" exec -- dotnet --list-sdks 2>/dev/null)"; then
         if [[ -z "${skip[dotnet-10]+set}" ]]; then
-          candidate="$(awk '{ split($1, v, "."); if (v[1] == "10") { print $1; exit } }' <<<"$output")"
+          candidate="$(highest_dotnet_sdk 10 "$output")"
           emit_or_warn_installed dotnet-10 "$candidate"
         fi
         if [[ -z "${skip[dotnet-8]+set}" ]]; then
-          candidate="$(awk '{ split($1, v, "."); if (v[1] == "8") { print $1; exit } }' <<<"$output")"
+          candidate="$(highest_dotnet_sdk 8 "$output")"
           emit_or_warn_installed dotnet-8 "$candidate"
         fi
       else
@@ -2437,8 +2451,10 @@ write_installed_versions() {
     fi
 
     if [[ -z "${skip[dotnet-ef]+set}" ]]; then
-      if output="$(run_bounded_probe "$timeout_bin" "$MISE_BIN" exec -- dotnet-ef --version 2>/dev/null)"; then
-        candidate="$(awk 'NF{last=$1} END{print last}' <<<"$output")"
+      # dotnet-ef 11.x prints its version on stderr, earlier ones on stdout:
+      # capture both streams for this probe only.
+      if output="$(run_bounded_probe "$timeout_bin" "$MISE_BIN" exec -- dotnet-ef --version 2>&1)"; then
+        candidate="$(awk '$1 ~ /^[0-9]+\.[0-9]+/ {last=$1} END{print last}' <<<"$output")"
         emit_or_warn_installed dotnet-ef "$candidate"
       else
         warn "Could not record installed version for dotnet-ef."

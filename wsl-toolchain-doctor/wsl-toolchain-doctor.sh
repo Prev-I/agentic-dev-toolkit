@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-SCRIPT_VERSION="0.5.1"
+SCRIPT_VERSION="0.5.2"
 SCHEMA_VERSION=1
 WSL_CONF="${WTD_WSL_CONF:-/etc/wsl.conf}"
 MOUNTS_FILE="${WTD_MOUNTS_FILE:-/proc/self/mounts}"
@@ -1149,6 +1149,20 @@ toolkit_run_probe() {
   return "$rc"
 }
 
+# highest_dotnet_sdk MAJOR LIST_SDKS_OUTPUT
+# Prints the highest SDK version whose major is MAJOR (version-aware, not
+# lexical), preferring stable versions over prereleases: a prerelease (one
+# with a '-') is the answer only when the major has nothing else. Kept
+# identical to the installer's receipt probe so the two cannot disagree.
+highest_dotnet_sdk() {
+  local major="$1" sdks="$2" best
+  best="$(awk -v m="$major" '{ split($1, v, "."); if (v[1] == m && $1 !~ /-/) print $1 }' <<<"$sdks" | sort -V | tail -n 1)"
+  if [[ -z "$best" ]]; then
+    best="$(awk -v m="$major" '{ split($1, v, "."); if (v[1] == m) print $1 }' <<<"$sdks" | sort -V | tail -n 1)"
+  fi
+  printf '%s' "$best"
+}
+
 # toolkit_report_probe_rc KEY RC
 # Common handling for a probe's exit status: reports TOOLKIT_PROBE_TIMEOUT or
 # TOOLKIT_PROBE_UNAVAILABLE and returns 1, or returns 0 when RC is success and
@@ -1242,11 +1256,11 @@ toolkit_compare_b() {
         [[ -n "${skip[dotnet-8]+set}" ]]  || add_finding INFO TOOLKIT_PROBE_UNAVAILABLE "dotnet-8" "Could not probe dotnet-8."
       else
         if [[ -z "${skip[dotnet-10]+set}" ]]; then
-          candidate="$(awk '{ split($1, v, "."); if (v[1] == "10") { print $1; exit } }' <<<"$TOOLKIT_PROBE_OUTPUT")"
+          candidate="$(highest_dotnet_sdk 10 "$TOOLKIT_PROBE_OUTPUT")"
           toolkit_compare_probe_result dotnet-10 "$candidate" ok_count
         fi
         if [[ -z "${skip[dotnet-8]+set}" ]]; then
-          candidate="$(awk '{ split($1, v, "."); if (v[1] == "8") { print $1; exit } }' <<<"$TOOLKIT_PROBE_OUTPUT")"
+          candidate="$(highest_dotnet_sdk 8 "$TOOLKIT_PROBE_OUTPUT")"
           toolkit_compare_probe_result dotnet-8 "$candidate" ok_count
         fi
       fi
@@ -1287,7 +1301,7 @@ toolkit_compare_b() {
     if [[ -z "${skip[dotnet-ef]+set}" ]]; then
       if toolkit_run_probe "$timeout_path" "$mise_path" exec -- dotnet-ef --version; then rc=0; else rc=$?; fi
       if toolkit_report_probe_rc dotnet-ef "$rc"; then
-        candidate="$(awk 'NF{last=$1} END{print last}' <<<"$TOOLKIT_PROBE_OUTPUT")"
+        candidate="$(awk '$1 ~ /^[0-9]+\.[0-9]+/ {last=$1} END{print last}' <<<"$TOOLKIT_PROBE_OUTPUT")"
         toolkit_compare_probe_result dotnet-ef "$candidate" ok_count
       fi
     fi

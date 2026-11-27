@@ -4,7 +4,7 @@ Enforces a Linux-first development boundary inside WSL: it audits PATH hygiene,
 validates `mise`-managed tool bindings, and can conservatively remediate the
 WSL configuration and persistent PATH sources.
 
-Version **0.5.0**, JSON schema version `1`. Bash only — no Python, Java, .NET,
+Version **0.5.2**, JSON schema version `1`. Bash only — no Python, Java, .NET,
 Node.js, Go or `jq`.
 
 ## Files

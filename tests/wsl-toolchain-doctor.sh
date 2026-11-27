@@ -762,7 +762,7 @@ setup_fixture
 WTD_TEST_SCAN_PATH="$TMP_ROOT/linux/bin" run_doctor audit --json
 assert_eq "clean JSON audit exits zero" "$LAST_RC" "0"
 assert_contains "JSON audit exposes schema version" "$LAST_OUT" '"schemaVersion":1'
-assert_contains "JSON audit exposes v0.5.1 tool version" "$LAST_OUT" '"toolVersion":"0.5.1"'
+assert_contains "JSON audit exposes v0.5.2 tool version" "$LAST_OUT" '"toolVersion":"0.5.2"'
 assert_contains "JSON audit exposes action" "$LAST_OUT" '"action":"audit"'
 assert_contains "JSON audit exposes PASS status" "$LAST_OUT" '"status":"PASS"'
 assert_contains "JSON audit contains finding code" "$LAST_OUT" '"code":"WSL_INTEROP_ENABLED"'
@@ -856,8 +856,8 @@ teardown_fixture
 # v0.3.0 regression: package version and PATH hygiene/remediation
 setup_fixture
 run_doctor --version
-assert_eq "tool reports v0.5.1" "$LAST_RC" "0"
-assert_eq "version string is exactly 0.5.1" "$LAST_OUT" "0.5.1"
+assert_eq "tool reports v0.5.2" "$LAST_RC" "0"
+assert_eq "version string is exactly 0.5.2" "$LAST_OUT" "0.5.2"
 teardown_fixture
 
 setup_fixture
@@ -1751,6 +1751,28 @@ setup_fixture
 setup_toolkit_baseline
 run_doctor audit
 assert_contains "no receipt/probe advice becomes probe advice once readable" "$LAST_OUT" "TOOLKIT_INSTALLED_NOT_PROBED"
+teardown_fixture
+
+setup_fixture
+setup_toolkit_baseline
+receipt_skip_all_except "$TMP_ROOT/receipt.env" dotnet-10 dotnet-8 dotnet-ef
+cat > "$TMP_ROOT/fake-mise" <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+  "exec -- dotnet --list-sdks")
+    printf '8.0.99 [/x]\n8.0.404 [/x]\n10.0.99 [/x]\n10.0.100 [/x]\n10.0.101-rc.2.1 [/x]\n' ;;
+  "exec -- dotnet-ef --version")
+    printf 'mise WARN something\nASCII ART BANNER\n9.0.100\nmise WARN trailing\n' ;;
+  *) exit 1 ;;
+esac
+STUB
+chmod +x "$TMP_ROOT/fake-mise"
+write_passthrough_timeout_stub "$TMP_ROOT/fake-timeout"
+WTD_TEST_MISE_BIN="$TMP_ROOT/fake-mise" WTD_TEST_OPENSPEC_BIN="" \
+  WTD_TEST_TIMEOUT_BIN="$TMP_ROOT/fake-timeout" run_doctor audit --probe
+assert_not_contains "the highest stable SDK per major (numeric, not lexical) is no drift" "$LAST_OUT" "TOOLKIT_DRIFT_INSTALLED"
+assert_contains "the highest SDKs and a noisy dotnet-ef agree with the receipt" "$LAST_OUT" "TOOLKIT_INSTALLED_OK"
+assert_contains "all three dotnet probes match the receipt" "$LAST_OUT" "3 component(s) match a fresh probe."
 teardown_fixture
 
 setup_fixture

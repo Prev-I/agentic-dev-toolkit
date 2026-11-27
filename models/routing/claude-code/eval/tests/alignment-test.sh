@@ -212,7 +212,7 @@ install_bundle; printf '[]' >"$live/settings.json"; run_check
 assert_eq 2 "$rc"; [[ "$err" != *Traceback* ]] || fail "non-object settings must not produce a traceback"
 
 # Usage error.
-set +e; HOME="$home" CLAUDE_CONFIG_DIR="$live" bash "$check" --bogus >/dev/null 2>&1; rc=$?; set -e
+set +e; HOME="$home" CLAUDE_CONFIG_DIR="$live" PATH="$stubs:$PATH" bash "$check" --bogus >/dev/null 2>&1; rc=$?; set -e
 assert_eq 2 "$rc"
 
 printf 'PASS: alignment-test\n'

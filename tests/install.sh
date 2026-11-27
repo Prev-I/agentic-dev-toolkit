@@ -3013,6 +3013,12 @@ case "$cmd" in
   dotnet-ef)
     if [[ "$FAKE_DOTNET_EF_STREAM" == stderr ]]; then
       printf 'Entity Framework Core .NET Command-line Tools\n11.0.0\n' >&2
+    elif [[ "$FAKE_DOTNET_EF_STREAM" == noise-before ]]; then
+      printf 'mise WARN something\nEntity Framework Core .NET Command-line Tools\n11.0.0\n' >&2
+    elif [[ "$FAKE_DOTNET_EF_STREAM" == noise-after ]]; then
+      printf 'Entity Framework Core .NET Command-line Tools\n11.0.0\nmise WARN something\n' >&2
+    elif [[ "$FAKE_DOTNET_EF_STREAM" == noise-only ]]; then
+      printf 'mise WARN something\n' >&2
     else
       printf 'Entity Framework Core .NET Command-line Tools\n9.0.0\n'
     fi
@@ -3048,6 +3054,37 @@ EOF_FAKE_MISE
     || fail "dotnet-8 comparison must be numeric, not lexical: $output"
   [[ "$output" == *$'\ninstalled.dotnet-ef=9.0.0\n'* ]] \
     || fail "dotnet-ef stdout-only shape must still record: $output"
+
+  # Stable beats prerelease, whatever the order; a prerelease is only the
+  # answer when a major has nothing else.
+  output="$(HOME="$TEMP_DIR/dotnet-probe-home" MISE_BIN="$fake_mise" \
+    FAKE_DOTNET_EF_STREAM=stdout \
+    FAKE_DOTNET_SDKS=$'10.0.100 [/s]\n10.0.101-rc.2.25502.107 [/s]\n8.0.100-preview.1.2 [/s]' \
+    write_installed_versions 2>&1)"
+  output=$'\n'"$output"$'\n'
+  [[ "$output" == *$'\ninstalled.dotnet-10=10.0.100\n'* ]] \
+    || fail "a stable SDK must beat a newer prerelease: $output"
+  [[ "$output" == *$'\ninstalled.dotnet-8=8.0.100-preview.1.2\n'* ]] \
+    || fail "a prerelease is recorded only when it is the sole 8.x SDK: $output"
+
+  # Only version-shaped tokens count for dotnet-ef: stderr noise around the
+  # version neither hides it nor becomes it.
+  local mode
+  for mode in noise-before noise-after; do
+    output="$(HOME="$TEMP_DIR/dotnet-probe-home" MISE_BIN="$fake_mise" \
+      FAKE_DOTNET_EF_STREAM="$mode" FAKE_DOTNET_SDKS='10.0.100 [/s]' \
+      write_installed_versions 2>&1)"
+    output=$'\n'"$output"$'\n'
+    [[ "$output" == *$'\ninstalled.dotnet-ef=11.0.0\n'* ]] \
+      || fail "dotnet-ef with $mode must still record 11.0.0: $output"
+  done
+  output="$(HOME="$TEMP_DIR/dotnet-probe-home" MISE_BIN="$fake_mise" \
+    FAKE_DOTNET_EF_STREAM=noise-only FAKE_DOTNET_SDKS='10.0.100 [/s]' \
+    write_installed_versions 2>&1)"
+  [[ "$output" != *"installed.dotnet-ef="* ]] \
+    || fail "noise alone must not be recorded as a dotnet-ef version: $output"
+  [[ "$output" == *"Could not record installed version for dotnet-ef."* ]] \
+    || fail "noise alone must warn for dotnet-ef: $output"
 }
 
 test_probe_extraction_matches_the_design_table() {
@@ -3128,9 +3165,9 @@ EOF_FAKE_MISE
   [[ "$output" == *$'\ninstalled.maven=3.9.16\n'* ]] \
     || fail "maven: first line, third field, trailing (...) discarded: $output"
   [[ "$output" == *$'\ninstalled.dotnet-10=10.0.100\n'* ]] \
-    || fail "dotnet-10: first field of the line whose major is 10: $output"
+    || fail "dotnet-10: highest SDK whose major is 10: $output"
   [[ "$output" == *$'\ninstalled.dotnet-8=8.0.100\n'* ]] \
-    || fail "dotnet-8: first field of the line whose major is 8: $output"
+    || fail "dotnet-8: highest SDK whose major is 8: $output"
   [[ "$output" == *$'\ninstalled.dotnet-ef=9.0.0\n'* ]] \
     || fail "dotnet-ef: last non-empty line, first field, banner discarded: $output"
   [[ "$output" == *$'\ninstalled.uv=0.4.18\n'* ]] \

@@ -12,7 +12,7 @@ readonly KARPATHY_RAW_BASE='https://raw.githubusercontent.com/multica-ai/andrej-
 readonly KARPATHY_SKILL_PATH='skills/karpathy-guidelines/SKILL.md'
 # The installer's own version, declared with the other constants for parity
 # with the repository's other versioned scripts. Printed verbatim by --version.
-readonly SCRIPT_VERSION="0.5.0"
+readonly SCRIPT_VERSION="0.5.1"
 
 log() {
   printf '\n==> %s\n' "$*"
@@ -2584,6 +2584,35 @@ write_install_receipt() {
   mv -f "$tmp" "$receipt"
 }
 
+# Verified by behaviour rather than by existence. The failure this wrapper
+# exists to prevent is a hang, and a file that is present but not deciding
+# correctly hangs exactly as badly as no file at all. So run it with a stub
+# delegate and confirm it reports the headless decision.
+#
+# "Headless" is the wrapper's own test: /dev/tty cannot be opened. An operator
+# running the installer has a controlling terminal, so the wrapper is run in a
+# new session, which has none; `< /dev/null` alone would not remove it.
+verify_git_credential_wrapper() {
+  [[ -x "$GIT_CREDENTIAL_WRAPPER" ]] || die "the Git credential wrapper is missing at $GIT_CREDENTIAL_WRAPPER"
+
+  local stub decision
+  stub="$(mktemp)"
+  TEMP_PATHS+=("$stub")
+  # Written literally: the stub expands these when the wrapper execs it.
+  # shellcheck disable=SC2016
+  printf '#!/usr/bin/env bash\nprintf "%%s|%%s\\n" "${GCM_INTERACTIVE-unset}" "${WSLENV-unset}"\n' > "$stub"
+  chmod 755 "$stub"
+
+  # An exported GCM_INTERACTIVE is the documented escape hatch and would win over
+  # the decision under test, so it is removed for this run only.
+  decision="$(env -u GCM_INTERACTIVE GCM_EXE="$stub" setsid --wait "$GIT_CREDENTIAL_WRAPPER" get < /dev/null 2>/dev/null || true)"
+  [[ -n "$decision" ]] ||
+    die "the Git credential wrapper produced no output; the check needs 'setsid --wait' (util-linux 2.30 or later)"
+  [[ "$decision" == never\|*GCM_INTERACTIVE* ]] ||
+    die "the Git credential wrapper did not disable prompting without a terminal (got '$decision')"
+  info "Git credential wrapper declines to prompt with no terminal, and exports WSLENV."
+}
+
 verify_installation() {
   log "Verifying workstation"
 
@@ -2659,24 +2688,7 @@ verify_installation() {
   fi
 
   if (( SKIP_GIT_CREDENTIAL == 0 && DRY_RUN == 0 )) && is_wsl; then
-    # Verified by behaviour rather than by existence. The failure this wrapper
-    # exists to prevent is a hang, and a file that is present but not deciding
-    # correctly hangs exactly as badly as no file at all. So run it with a stub
-    # delegate and confirm it reports the headless decision.
-    [[ -x "$GIT_CREDENTIAL_WRAPPER" ]] || die "the Git credential wrapper is missing at $GIT_CREDENTIAL_WRAPPER"
-
-    local stub decision
-    stub="$(mktemp)"
-    TEMP_PATHS+=("$stub")
-    # Written literally: the stub expands these when the wrapper execs it.
-    # shellcheck disable=SC2016
-    printf '#!/usr/bin/env bash\nprintf "%%s|%%s\\n" "${GCM_INTERACTIVE-unset}" "${WSLENV-unset}"\n' > "$stub"
-    chmod 755 "$stub"
-
-    decision="$(GCM_EXE="$stub" "$GIT_CREDENTIAL_WRAPPER" get < /dev/null 2>/dev/null || true)"
-    [[ "$decision" == never\|*GCM_INTERACTIVE* ]] ||
-      die "the Git credential wrapper did not disable prompting without a terminal (got '$decision')"
-    info "Git credential wrapper declines to prompt with no terminal, and exports WSLENV."
+    verify_git_credential_wrapper
   fi
 
   if (( SKIP_DOCKER_WINCRED == 0 && DRY_RUN == 0 )) && is_wsl; then

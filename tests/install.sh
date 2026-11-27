@@ -3169,7 +3169,7 @@ EOF_FAKE_MISE
   [[ "$output" == *$'\ninstalled.dotnet-8=8.0.100\n'* ]] \
     || fail "dotnet-8: highest SDK whose major is 8: $output"
   [[ "$output" == *$'\ninstalled.dotnet-ef=9.0.0\n'* ]] \
-    || fail "dotnet-ef: last non-empty line, first field, banner discarded: $output"
+    || fail "dotnet-ef: last version-shaped line, first field, banner discarded: $output"
   [[ "$output" == *$'\ninstalled.uv=0.4.18\n'* ]] \
     || fail "uv: first line, second field: $output"
   [[ "$output" == *$'\ninstalled.shellcheck=0.9.0\n'* ]] \

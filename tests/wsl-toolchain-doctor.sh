@@ -1772,6 +1772,7 @@ WTD_TEST_MISE_BIN="$TMP_ROOT/fake-mise" WTD_TEST_OPENSPEC_BIN="" \
   WTD_TEST_TIMEOUT_BIN="$TMP_ROOT/fake-timeout" run_doctor audit --probe
 assert_not_contains "the highest stable SDK per major (numeric, not lexical) is no drift" "$LAST_OUT" "TOOLKIT_DRIFT_INSTALLED"
 assert_contains "the highest SDKs and a noisy dotnet-ef agree with the receipt" "$LAST_OUT" "TOOLKIT_INSTALLED_OK"
+assert_contains "all three dotnet probes match the receipt" "$LAST_OUT" "3 component(s) match a fresh probe."
 teardown_fixture
 
 setup_fixture

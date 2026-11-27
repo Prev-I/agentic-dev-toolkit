@@ -212,7 +212,9 @@ install_bundle; printf '[]' >"$live/settings.json"; run_check
 assert_eq 2 "$rc"; [[ "$err" != *Traceback* ]] || fail "non-object settings must not produce a traceback"
 
 # Usage error.
-set +e; HOME="$home" CLAUDE_CONFIG_DIR="$live" PATH="$stubs:$PATH" bash "$check" --bogus >/dev/null 2>&1; rc=$?; set -e
-assert_eq 2 "$rc"
+# On a valid installation, so exit 2 can only come from argument parsing.
+install_bundle
+set +e; HOME="$home" CLAUDE_CONFIG_DIR="$live" PATH="$stubs:$PATH" bash "$check" --bogus >/dev/null 2>"$workdir/err"; rc=$?; set -e
+assert_eq 2 "$rc"; assert_contains "$(cat "$workdir/err")" "unrecognized arguments: --bogus"
 
 printf 'PASS: alignment-test\n'

@@ -189,6 +189,8 @@ test_documentation_and_cli_contracts() {
   # the absence of the transcription claim are pinned here.
   [[ "$documentation" =~ All\ [a-z]+\ suites\ are\ the\ current\ required\ set\. && "$documentation" != *'transcribe them'* ]] \
     || fail "AGENTS must name the required suite set and not claim routing evidence transcribes it"
+  [[ "$documentation" == *'bash tests/azure-artifacts.sh'* ]] \
+    || fail "AGENTS Build and Test must list the Azure Artifacts suite"
 
   help="$(bash "$CONFIGURATOR" --help)"
   # shellcheck disable=SC2088

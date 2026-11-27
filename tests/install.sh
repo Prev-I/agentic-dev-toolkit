@@ -440,7 +440,7 @@ EOF
 }
 
 test_installer_script_version_is_pinned() {
-  assert_equal "$SCRIPT_VERSION" "0.5.1" "the installer version after the credential self-check fix"
+  assert_equal "$SCRIPT_VERSION" "0.5.2" "the installer version after the receipt version-probe fix"
 }
 
 load_installer_functions() {
@@ -2330,7 +2330,7 @@ test_installer_loads_catalog_beside_a_standalone_copy() {
   fi
 
   assert_equal "$status" "0" "a standalone two-file bundle must find its adjacent catalog"
-  assert_equal "$output" "0.5.1" "the standalone bundle must run the copied installer"
+  assert_equal "$output" "0.5.2" "the standalone bundle must run the copied installer"
 }
 
 test_installer_prefers_explicit_then_repository_catalog() {
@@ -2348,7 +2348,7 @@ test_installer_prefers_explicit_then_repository_catalog() {
     status=$?
   fi
   assert_equal "$status" "0" "an explicit catalog must override an adjacent catalog"
-  assert_equal "$output" "0.5.1" "an explicit valid catalog must let a standalone bundle run"
+  assert_equal "$output" "0.5.2" "an explicit valid catalog must let a standalone bundle run"
 
   cp "$INSTALLER" "$checkout/environments/linux/install.sh"
   cp "$CATALOG_FILE" "$checkout/catalog/software-catalog.env"
@@ -2360,7 +2360,7 @@ test_installer_prefers_explicit_then_repository_catalog() {
     status=$?
   fi
   assert_equal "$status" "0" "a recognized repository catalog must override an adjacent catalog"
-  assert_equal "$output" "0.5.1" "a repository-layout copy must run with its repository catalog"
+  assert_equal "$output" "0.5.2" "a repository-layout copy must run with its repository catalog"
 }
 
 test_source_commit_requires_the_exact_repository_root() {
@@ -2710,7 +2710,7 @@ test_installer_version_flag() {
   status=$?
   set -e
   assert_equal "$status" "0" "--version must exit 0"
-  assert_equal "$output" "0.5.1" "--version must print exactly the version"
+  assert_equal "$output" "0.5.2" "--version must print exactly the version"
   [[ "$output" != *"Unknown option"* ]] \
     || fail "--version must be parsed before the generic unknown-option arm"
 }
@@ -2734,7 +2734,7 @@ test_installer_version_ignores_ambiguous_opencode_config() {
   set -e
 
   assert_equal "$status" "0" "--version must not resolve the OpenCode config"
-  assert_equal "$output" "0.5.1" "--version with dual configs must print exactly the version"
+  assert_equal "$output" "0.5.2" "--version with dual configs must print exactly the version"
 }
 
 test_opencode_config_resolution_honors_skip_and_explicit_override() {
@@ -2988,6 +2988,66 @@ test_unresolvable_timeout_keeps_karpathy_sha256_and_drops_probe_derived_keys() {
     || fail "karpathy-sha256 is zero-invocation provenance and must survive a missing timeout: $output"
   [[ "$output" != *"installed.node="* ]] \
     || fail "no probe-derived key may be written without a resolvable timeout: $output"
+}
+
+test_receipt_dotnet_probes_pick_highest_sdk_and_read_stderr_dotnet_ef() {
+  # Two inaccuracies seen on a real host: mise keeps superseded SDKs, which
+  # `dotnet --list-sdks` lists ascending, so the first match per major was the
+  # oldest; and dotnet-ef 11.x prints its version on stderr only.
+  INSTALLED_KARPATHY_SHA256=""
+  SKIP_RUNTIMES=0; SKIP_QUALITY_TOOLS=0; SKIP_OPENSPEC=1
+  # shellcheck disable=SC2034
+  SKIP_OPENCODE=1
+  SKIP_SUPERPOWERS=1; SKIP_KARPATHY=1
+  # shellcheck disable=SC2034
+  { JAVA_17_VERSION="temurin-17"; JAVA_21_VERSION="temurin-21"; }
+
+  local fake_mise="$TEMP_DIR/fake-mise-dotnet"
+  cat > "$fake_mise" <<'EOF_FAKE_MISE'
+#!/usr/bin/env bash
+shift
+[[ "$1" == "--" ]] && shift
+cmd="$1"
+case "$cmd" in
+  dotnet) printf '%s\n' "$FAKE_DOTNET_SDKS" ;;
+  dotnet-ef)
+    if [[ "$FAKE_DOTNET_EF_STREAM" == stderr ]]; then
+      printf 'Entity Framework Core .NET Command-line Tools\n11.0.0\n' >&2
+    else
+      printf 'Entity Framework Core .NET Command-line Tools\n9.0.0\n'
+    fi
+    ;;
+  *) exit 1 ;;
+esac
+EOF_FAKE_MISE
+  chmod +x "$fake_mise"
+
+  local output
+  output="$(HOME="$TEMP_DIR/dotnet-probe-home" MISE_BIN="$fake_mise" \
+    FAKE_DOTNET_EF_STREAM=stderr \
+    FAKE_DOTNET_SDKS=$'8.0.425 [/s]\n8.0.428 [/s]\n10.0.401 [/s]\n10.0.404 [/s]' \
+    write_installed_versions 2>&1)"
+  output=$'\n'"$output"$'\n'
+  [[ "$output" == *$'\ninstalled.dotnet-8=8.0.428\n'* ]] \
+    || fail "dotnet-8 must be the highest 8.x SDK: $output"
+  [[ "$output" == *$'\ninstalled.dotnet-10=10.0.404\n'* ]] \
+    || fail "dotnet-10 must be the highest 10.x SDK: $output"
+  [[ "$output" == *$'\ninstalled.dotnet-ef=11.0.0\n'* ]] \
+    || fail "dotnet-ef must be read from stderr: $output"
+  [[ "$output" != *"dotnet-ef."* ]] \
+    || fail "no dotnet-ef warning expected: $output"
+
+  output="$(HOME="$TEMP_DIR/dotnet-probe-home" MISE_BIN="$fake_mise" \
+    FAKE_DOTNET_EF_STREAM=stdout \
+    FAKE_DOTNET_SDKS=$'10.0.99 [/s]\n10.0.100 [/s]\n8.0.9 [/s]\n8.0.10 [/s]' \
+    write_installed_versions 2>&1)"
+  output=$'\n'"$output"$'\n'
+  [[ "$output" == *$'\ninstalled.dotnet-10=10.0.100\n'* ]] \
+    || fail "dotnet-10 comparison must be numeric, not lexical: $output"
+  [[ "$output" == *$'\ninstalled.dotnet-8=8.0.10\n'* ]] \
+    || fail "dotnet-8 comparison must be numeric, not lexical: $output"
+  [[ "$output" == *$'\ninstalled.dotnet-ef=9.0.0\n'* ]] \
+    || fail "dotnet-ef stdout-only shape must still record: $output"
 }
 
 test_probe_extraction_matches_the_design_table() {
@@ -3615,6 +3675,7 @@ test_skipped_component_produces_no_probe_and_no_warning
 test_failing_probe_does_not_trip_err
 test_unresolvable_timeout_keeps_karpathy_sha256_and_drops_probe_derived_keys
 test_probe_extraction_matches_the_design_table
+test_receipt_dotnet_probes_pick_highest_sdk_and_read_stderr_dotnet_ef
 test_receipt_is_written_on_success_at_documented_path
 test_receipt_modes_are_deterministic_under_a_strict_umask
 test_receipt_is_not_written_on_dry_run

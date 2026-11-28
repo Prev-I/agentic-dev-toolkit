@@ -185,8 +185,12 @@ test_documentation_and_cli_contracts() {
   # shellcheck disable=SC2016
   [[ "$documentation" == *'## Scope'* && "$documentation" == *'`azure-artifacts/` is the opt-in organization-specific Gewiss adapter'* ]] \
     || fail "AGENTS Scope must exempt the opt-in Azure Artifacts adapter"
-  [[ "$documentation" == *'All seven suites are the current required set.'* && "$documentation" != *'transcribe them'* ]] \
-    || fail "AGENTS must not claim routing evidence transcribes all seven suites"
+  # The count word follows the suite list, which grows; only the statement and
+  # the absence of the transcription claim are pinned here.
+  [[ "$documentation" =~ All\ [a-z]+\ suites\ are\ the\ current\ required\ set\. && "$documentation" != *'transcribe them'* ]] \
+    || fail "AGENTS must name the required suite set and not claim routing evidence transcribes it"
+  [[ "$documentation" == *'bash tests/azure-artifacts.sh'* ]] \
+    || fail "AGENTS Build and Test must list the Azure Artifacts suite"
 
   help="$(bash "$CONFIGURATOR" --help)"
   # shellcheck disable=SC2088
